@@ -11,12 +11,14 @@
     "@zzirit-guard/shared": "*",
     "better-sqlite3": "13.0.3",
     "socket.io-client": "2.0.3",
+    "web-push": "3.6.7",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",
     "@types/socket.io": "2.1.13",
     "@types/socket.io-client": "1.4.36",
+    "@types/web-push": "3.6.4",
     "socket.io": "2.5.1",
     "vitest": "5.0.3"
   }
