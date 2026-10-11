@@ -105,6 +105,26 @@ describe("AuthFlow", () => {
     expect(sessions.getById(session.id)).toBeNull();
   });
 
+  it("hasPendingState는 발급된 state만 true로 보고, 조회로 지우지 않으며, 사용·만료 뒤에는 false다(B10-3)", async () => {
+    let now = 1_000_000;
+    const flow = createAuthFlow({
+      config: { chzzkClientId: "test-client", chzzkAuthorizeUrl: "https://chzzk.example/account-interlock", publicOrigin: "https://guard.example", channelId: fake.owner.channelId },
+      api, tokenManager, credentialStore, roleVerifier, sessions, rules, clock: () => now, onChannelConnected: () => undefined,
+    });
+    const issue = () => new URL(flow.authorizeUrl("connect")).searchParams.get("state") as string;
+    const used = issue();
+    expect(flow.hasPendingState("never-issued")).toBe(false);
+    expect(flow.hasPendingState(used)).toBe(true);
+    expect(flow.hasPendingState(used)).toBe(true);
+    await flow.complete(fake.grantCode(fake.owner), used);
+    expect(flow.hasPendingState(used)).toBe(false);
+    const expiring = issue();
+    now += 10 * 60 * 1000;
+    expect(flow.hasPendingState(expiring)).toBe(true);
+    now += 1;
+    expect(flow.hasPendingState(expiring)).toBe(false);
+  });
+
   it("대기 중인 state는 상한을 넘으면 가장 오래된 것 하나만 버린다(R20)", async () => {
     const states = Array.from({ length: MAX_PENDING_STATES + 1 }, () => stateFor("connect"));
     await expect(authFlow.complete(fake.grantCode(fake.owner), states[0] as string)).rejects.toBeInstanceOf(AuthError);

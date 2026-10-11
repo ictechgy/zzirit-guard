@@ -102,6 +102,7 @@ const AUTH_START_LIMIT_PER_MINUTE = 30;
  * 콜백이 1분에 치지직 토큰 교환까지 갈 수 있는 횟수(60). state 확인(쿠키 일치 + 서버 발급)을 통과한 요청만 센다.
  * 왜 따로 세나: 시작과 한 버킷을 쓰면 쿠키 없는 가짜 콜백만으로 버킷을 비워 정상 로그인을 막을 수 있다(S3).
  * 쿠키와 쿼리가 같고 서버가 발급한 state(hasPendingState)인 콜백만 센다. 쿠키·쿼리 일치만으로는 공격자가 임의 값을 양쪽에 넣을 수 있다(B9-1).
+ * 스트리머 세션이 붙은 콜백은 세지 않는다(B10). 다른 사용자가 이 한도를 비워도 스트리머의 재연결은 막히지 않아야 한다.
  * 왜 시작보다 크게 두나: 인증 화면에서 뒤로 갔다가 다시 오는 경우 등 정상 재시도를 넉넉히 받으려는 것이다.
  */
 const AUTH_CALLBACK_LIMIT_PER_MINUTE = 60;
@@ -111,7 +112,7 @@ const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMITED_MESSAGE = "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.";
 /**
  * 로그인 시작 한도를 쓰는 라우트 주소. 원본 URL이 아니라 Fastify가 맞춘 라우트 주소(request.routeOptions.url)로 비교한다.
- * 왜: "/auth/%6Cogin"·"/auth/./login"처럼 모양이 달라도 같은 라우트로 들어오는 요청이 같은 버킷을 쓰게 하려는 것이다.
+ * 왜: "/auth/%6Cogin"·"/auth/login?x"처럼 모양이 달라도 같은 라우트로 들어오는 요청이 같은 버킷을 쓰게 하려는 것이다.
  */
 const AUTH_START_ROUTES: ReadonlySet<string> = new Set(["/auth/connect", "/auth/login"]);
 
@@ -127,7 +128,7 @@ interface AuthLimiters {
 
 /**
  * 치지직 OAuth 시작·콜백. 바깥 상한 → 시작 한도(시작 두 경로) → state 확인 → 콜백 한도 순서로 거른다.
- * 유효한 세션이 있는 요청은 바깥 상한과 시작 한도를, 서버가 발급한 state의 콜백은 바깥 상한을 건너뛴다(B9-2).
+ * 유효한 세션이 있는 요청과 서버가 발급한 state의 콜백은 바깥 상한을, 스트리머 세션은 시작·콜백 한도도 건너뛴다(B9-2, B10).
  * 왜 IP별이 아니라 전역인가: Tailscale Funnel 뒤에서는 모든 요청이 127.0.0.1에서 온 것처럼 보여 IP로 나눌 수 없다.
  * 왜 exposeHeadRoute: false인가: Fastify는 GET마다 HEAD 라우트를 자동으로 만들어 같은 핸들러를 돌린다. 그러면 HEAD 콜백이
  * state를 쓰고 토큰 교환까지 해 버린다. /auth는 브라우저 이동만 받으므로 HEAD를 열지 않는다(g).
@@ -151,7 +152,7 @@ function createAuthLimiters(clock: Clock): AuthLimiters {
 
 /**
  * 바깥 상한과(시작 경로면) 시작 한도를 확인하고, 넘었으면 이유와 함께 첫 화면으로 보내 핸들러까지 가지 않게 한다.
- * 유효한 세션이 있는 요청(로그인한 스트리머의 채널 재연결 등)과 서버가 발급한 state의 콜백은 바깥 상한을 건너뛰고, 세션 요청은 시작 한도도 건너뛴다.
+ * 유효한 세션이 있는 요청과 서버가 발급한 state의 콜백은 바깥 상한을 건너뛰고, 스트리머 세션은 시작 한도도 건너뛴다(채널 재연결 보호).
  * 왜: 클라이언트를 구분할 수 없어 쓰레기 요청으로 전역 상한을 비울 수 있기 때문이다. 세션은 onRequest 세션 훅이 먼저 채운다.
  * @param deps 인증 흐름(발급된 state 조회)
  * @param limiters 인증 경로 한도
@@ -160,16 +161,29 @@ function createAuthLimiters(clock: Clock): AuthLimiters {
  * @returns 거절했으면 보낸 응답, 통과면 undefined
  */
 async function rejectOverAuthLimit(deps: HttpDeps, limiters: AuthLimiters, request: FastifyRequest, reply: FastifyReply) {
-  if (request.manager) return;
-  if (!hasIssuedCallbackState(deps, request) && !limiters.global.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+  const isGlobalExempt = Boolean(request.manager) || hasIssuedCallbackState(deps, request);
+  if (!isGlobalExempt && !limiters.global.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+  if (isOwnerSession(request)) return;
   if (AUTH_START_ROUTES.has(request.routeOptions.url ?? "") && !limiters.start.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
 }
 
 /**
- * 콜백 요청의 쿠키와 쿼리 state가 같고 서버가 발급한 대기 중 state인지 본다. 상태를 바꾸지 않는다.
+ * 스트리머(채널 소유자) 세션이 붙은 요청인지 본다.
+ * 왜 소유자만 시작·콜백 한도를 건너뛰나: 스트리머는 채널당 한 명이라 남용 경로가 늘지 않는다. 채팅 운영자 등 다른 세션까지 건너뛰게 하면
+ * 그 세션으로 state를 무제한 만들어 다른 사용자의 대기 state를 밀어내고 콜백 한도를 비워 스트리머의 재연결을 막을 수 있다(B10).
+ * 소유자의 브라우저는 치지직에서 돌아오는 최상위 GET에도 SameSite=Lax 세션 쿠키를 실어 보내므로 콜백에서도 소유자로 알아볼 수 있다.
+ */
+function isOwnerSession(request: FastifyRequest): boolean {
+  return request.manager?.role === "STREAMING_CHANNEL_OWNER";
+}
+
+/**
+ * 콜백 라우트에서, 쿠키와 쿼리 state가 같고 서버가 발급한 대기 중 state인지 본다. 상태를 바꾸지 않는다.
  * 왜: 이런 state는 로그인 시작 한도(30/분)를 거쳐서만 만들 수 있어, 바깥 상한을 건너뛰어도 남용 경로가 늘지 않는다.
+ * 왜 라우트도 보나: 안 보면 /auth/login?code=x&state=<발급된 값>에 같은 쿠키를 붙여 바깥 상한을 건너뛸 수 있다(B10-2).
  */
 function hasIssuedCallbackState(deps: HttpDeps, request: FastifyRequest): boolean {
+  if (request.routeOptions.url !== CALLBACK_PATH) return false;
   const query = callbackQuerySchema.safeParse(request.query);
   if (!query.success) return false;
   const boundState = request.cookies[OAUTH_STATE_COOKIE];
@@ -210,7 +224,7 @@ function startAuthorization(deps: HttpDeps, reply: FastifyReply, purpose: "conne
 async function completeLogin(deps: HttpDeps, callbackBucket: TokenBucket, request: FastifyRequest, reply: FastifyReply) {
   const verified = verifyCallbackState(deps, request, reply);
   if (typeof verified === "string") return redirectWithLoginError(reply, verified);
-  if (!callbackBucket.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+  if (!isOwnerSession(request) && !callbackBucket.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
   return exchangeCodeForSession(deps, request, reply, verified);
 }
 

@@ -294,6 +294,43 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
     expect(locationOf(await send("/auth/connect", "GET", "zg_session=not-a-session"))).toBe(RATE_LIMITED_LOCATION);
   });
 
+  it("스트리머가 아닌 세션은 시작 한도를 건너뛰지 못해, 대기 state를 상한까지 밀어내지 못한다(B10-1)", async () => {
+    await useControlledClock();
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    let redirectedToChzzk = 0;
+    for (let index = 0; index < 40; index += 1) {
+      const response = await send("/auth/login", "GET", `zg_session=${rawId}`);
+      if (String(response.headers.location).startsWith("https://chzzk.example/")) redirectedToChzzk += 1;
+    }
+    expect(redirectedToChzzk).toBe(30);
+    expect(locationOf(await send("/auth/login", "GET", `zg_session=${rawId}`))).toBe(RATE_LIMITED_LOCATION);
+  });
+
+  it("스트리머 세션은 시작 한도가 비어도 치지직으로 갈 수 있다(B10-1)", async () => {
+    await useControlledClock();
+    const rawId = harness.login("STREAMING_CHANNEL_OWNER");
+    for (let index = 0; index < 35; index += 1) await send("/auth/connect", "GET", `zg_session=${rawId}`);
+    expect(String((await send("/auth/connect", "GET", `zg_session=${rawId}`)).headers.location)).toMatch(/^https:\/\/chzzk\.example\//);
+  });
+
+  it("콜백 한도가 비어도 스트리머 세션의 콜백은 통과하고, 다른 세션은 막힌다(B10-1)", async () => {
+    const { complete } = await useControlledClock();
+    const ownerId = harness.login("STREAMING_CHANNEL_OWNER");
+    const managerId = harness.login("STREAMING_CHAT_MANAGER");
+    for (let index = 0; index < 60; index += 1) await validCallback();
+    expect(locationOf(await validCallback())).toBe(RATE_LIMITED_LOCATION);
+    const callbackUrl = "/auth/callback?code=c&state=test-state";
+    expect(locationOf(await send(callbackUrl, "GET", `zg_oauth_state=test-state; zg_session=${managerId}`))).toBe(RATE_LIMITED_LOCATION);
+    expect(locationOf(await send(callbackUrl, "GET", `zg_oauth_state=test-state; zg_session=${ownerId}`))).toBe(NOT_MANAGER_LOCATION);
+    expect(complete).toHaveBeenCalledTimes(61);
+  });
+
+  it("콜백이 아닌 경로에 발급된 state를 쿼리·쿠키로 맞춰 보내도 바깥 상한을 건너뛰지 못한다(B10-2)", async () => {
+    await useControlledClock();
+    for (let index = 0; index < 120; index += 1) await send("/auth/callback?code=c&state=wrong");
+    expect(locationOf(await send("/auth/login?code=x&state=test-state", "GET", "zg_oauth_state=test-state"))).toBe(RATE_LIMITED_LOCATION);
+  });
+
   it("모든 /auth 요청은 합쳐 1분에 120번까지만 받는다(값싼 바깥 상한, g)", async () => {
     const { complete } = await useControlledClock();
     for (let index = 0; index < 120; index += 1) await send("/auth/callback?code=c&state=wrong", "GET", "zg_oauth_state=s");
