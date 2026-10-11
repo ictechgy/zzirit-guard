@@ -53,13 +53,14 @@ export function normalizeForMatching(text: string): string {
  * normalizeForMatching과 같은 단계를 거치되 공백만 지우지 않는다. 연이은 공백은 한 칸으로 줄이고 앞뒤 공백은 자른다.
  * 왜: 공백을 모두 지운 문장에서는 "김치 녀석들"처럼 단어를 걸친 우연한 일치가 생긴다. 되돌릴 수 없는 자동 숨김은
  * 단어 안에 그대로 든 금칙어 강에만 쓰고, 공백을 지워야만 걸리는 것은 후보로 낮추려고 이 형태와 비교한다(F4).
+ * '|'·잡음 1을 지운 뒤 생긴 연속 공백도 한 칸으로 다시 줄인다("나쁜 | 놈" → "나쁜 놈", R2).
  * 주의: 글자마다 띄운 우회("김 치 녀")는 이 형태에서 걸리지 않으므로, 공백 없는 형태와 함께 써야 후보로라도 잡힌다.
  * @param text 채팅 원문
  * @returns 공백이 한 칸씩 남은 비교용 문자열(표시용이 아니다)
  */
 export function normalizeKeepingWhitespace(text: string): string {
   const cleaned = stripInvisibleAndFullwidth(text).toLowerCase().replace(DISALLOWED_CHARACTERS_EXCEPT_WHITESPACE, "");
-  return finishMatchingNormalization(cleaned.replace(WHITESPACE_RUN, " ").trim());
+  return finishMatchingNormalization(cleaned.replace(WHITESPACE_RUN, " ").trim()).replace(WHITESPACE_RUN, " ").trim();
 }
 
 /**

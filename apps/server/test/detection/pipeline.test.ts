@@ -136,6 +136,16 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat("김치 녀석들"))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:strong_spanning:\d+$/) });
   });
 
+  it("공백이 든 예외 단어는 공백을 남긴 비교에서도 지워져 통과한다(R2)", () => {
+    rules.add("c1", "exception", "짱깨 집", "m");
+    expect(pipeline.evaluate(chat("짱깨 집 가자"))).toMatchObject({ decision: "pass", reason: "none" });
+  });
+
+  it("글자 사이에 '|'를 끼워도 공백이 든 금칙어 강은 자동 숨김이다(R2)", () => {
+    rules.add("c1", "strong", "나쁜 놈", "m");
+    expect(pipeline.evaluate(chat("나쁜 | 놈"))).toMatchObject({ decision: "auto_hide", reason: expect.stringMatching(/^rule:strong:\d+$/) });
+  });
+
   it("예외 단어는 공백을 남긴 비교에도 적용된다(F4)", () => {
     rules.add("c1", "strong", "시발", "m");
     expect(pipeline.evaluate(chat("여기가 시발점이다")).decision).toBe("pass");

@@ -5,7 +5,7 @@ import { isTrivialMessage, type DuplicateTracker } from "./messageTraits.js";
 import { normalizeForMatching, normalizeKeepingWhitespace } from "./normalize.js";
 import { containsBlockedLink, containsPhoneNumber, looksLikeAddress } from "./patterns.js";
 import type { RuleEntry, RuleRepository, RuleSnapshot } from "./ruleRepository.js";
-import { findFirstIntactMatch, findFirstMatch, stripExceptions } from "./wordMatch.js";
+import { findFirstIntactMatch, findFirstMatch, stripExceptions, stripExceptionsKeepingWhitespace } from "./wordMatch.js";
 
 /** 메시지 1건의 판정. 1단계에서는 AI가 없어 needs_care가 나오지 않는다. */
 export interface DetectionResult {
@@ -89,7 +89,7 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
   return {
     event, normalized, snapshot, groupFloodTriggered,
     withoutExceptions: stripExceptions(normalized, snapshot.exception),
-    spacedWithoutExceptions: stripExceptions(normalizeKeepingWhitespace(event.content), snapshot.exception),
+    spacedWithoutExceptions: stripExceptionsKeepingWhitespace(normalizeKeepingWhitespace(event.content), snapshot.exception),
     personalFloodTriggered: deps.personalFlood.observe(event.senderChannelId, event.receivedAt),
   };
 }

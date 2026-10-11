@@ -18,6 +18,22 @@ export function stripExceptions(normalizedText: string, exceptions: readonly Rul
   return exceptions.reduce((text, exception) => text.split(exception.normalizedPattern).join(EXCEPTION_SEPARATOR), normalizedText);
 }
 
+/**
+ * 공백을 남긴 문장에서 예외 단어를 지운다. 공백 든 예외("짱깨 집")는 공백 형태(spacedPattern)로도 지운다.
+ * 왜: 공백 없는 형태(normalizedPattern)로만 지우면 공백을 남긴 문장에 든 예외가 그대로 남아,
+ * 금칙어 강 쪽은 spacedPattern까지 보는데 예외 쪽은 못 봐서 예외 문장이 auto_hide가 된다(R2).
+ * 긴 spacedPattern을 먼저 지우고 normalizedPattern(붙여 쓴 형태)을 지운다.
+ * @param spacedText normalizeKeepingWhitespace를 거친 문장
+ * @param exceptions 예외 단어 규칙 목록
+ * @returns 예외 단어 자리를 구분 문자로 바꾼 공백 유지 비교용 문장
+ */
+export function stripExceptionsKeepingWhitespace(spacedText: string, exceptions: readonly RuleEntry[]): string {
+  return exceptions.reduce((text, exception) => {
+    const withoutSpaced = text.split(exception.spacedPattern).join(EXCEPTION_SEPARATOR);
+    return withoutSpaced.split(exception.normalizedPattern).join(EXCEPTION_SEPARATOR);
+  }, spacedText);
+}
+
 /** 정규화한 문장에 포함된 첫 번째 규칙(목록 순서)을 찾는다. */
 export function findFirstMatch(normalizedText: string, entries: readonly RuleEntry[]): RuleEntry | null {
   return entries.find((entry) => normalizedText.includes(entry.normalizedPattern)) ?? null;
