@@ -112,15 +112,35 @@ describe("CandidatesScreen", () => {
     expect(actions.reportFalsePositive).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
   });
 
-  it("동작이 끝나기 전에는 버튼이 잠기고 같은 동작이 두 번 가지 않는다", async () => {
+  it("동작이 끝나기 전에는 그 줄의 버튼이 잠기고 같은 동작이 두 번 가지 않는다", async () => {
     const hide = vi.fn(() => new Promise<string | null>(() => undefined));
     renderScreen([verdict(1)], fakeActions({ hide }));
     const button = screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement;
-    await userEvent.click(button);
+    await userEvent.dblClick(button);
     await userEvent.click(button);
     expect(hide).toHaveBeenCalledTimes(1);
     expect(button.disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /자동 숨김: / }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("숨기기가 끝나지 않아도 자동 숨김 끄기는 바로 보낸다(안전장치, F2)", async () => {
+    const hide = vi.fn(() => new Promise<string | null>(() => undefined));
+    const actions = fakeActions({ hide });
+    renderScreen([verdict(1)], actions, { ...status, autoHideEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    const toggle = screen.getByRole("button", { name: /자동 숨김: 켜짐/ }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(false);
+    await userEvent.click(toggle);
+    expect(actions.setAutoHide).toHaveBeenCalledWith(false);
+  });
+
+  it("한 줄의 숨기기가 진행 중이어도 다른 줄의 숨기기는 보낸다(F2)", async () => {
+    const hide = vi.fn((_target: VerdictDto) => new Promise<string | null>(() => undefined));
+    renderScreen([verdict(1), verdict(2)], fakeActions({ hide }));
+    const [first, second] = screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement[];
+    await userEvent.click(first as HTMLButtonElement);
+    expect((second as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(second as HTMLButtonElement);
+    expect(hide.mock.calls.map(([target]) => target.id)).toEqual([1, 2]);
   });
 
   it("동작이 실패해도 버튼이 다시 풀린다", async () => {

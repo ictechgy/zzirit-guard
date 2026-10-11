@@ -1,11 +1,12 @@
 import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
 import { StatusBanner } from "../components/StatusBanner";
 import { countActionable, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
 
 /** 후보 화면이 부르는 동작. 성공하면 화면에 보여 줄 안내(없으면 null)를 돌려준다. MainScreen이 API로 채우고, 테스트는 가짜를 넘긴다. */
 export interface CandidateActions {
@@ -21,8 +22,11 @@ export interface CandidateActions {
   setAutoHide(enabled: boolean): Promise<string | null>;
 }
 
-/** 동작 하나를 실행하고 결과(안내 또는 오류)를 화면에 남기는 함수. */
-export type ActionRunner = (task: () => Promise<string | null>) => void;
+/**
+ * 동작 하나를 실행하고 결과(안내 또는 오류)를 화면에 남기는 함수.
+ * lockKey가 같은 동작이 진행 중이면 실행하지 않는다(두 번 보내기 방지). 열쇠가 다른 동작은 서로 막지 않는다(F2).
+ */
+export type ActionRunner = (lockKey: string, task: () => Promise<string | null>) => void;
 
 /** 후보 화면 속성. */
 export interface CandidatesScreenProps {
@@ -53,10 +57,13 @@ const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kin
 /**
  * 동작 실행기를 만든다. 성공하면 안내를, 실패하면 서버 문구를 남긴다.
  * 이미 처리된 판정(409 already_handled)이면 화면이 낡은 것이므로 목록을 다시 읽는다(R-13).
+ * @param setFeedback 결과를 화면에 남긴다
+ * @param onReload 목록을 다시 읽는다
+ * @param locks 열쇠별 잠금(같은 열쇠의 동작만 막는다)
  */
-function createRunner(setFeedback: (feedback: Feedback) => void, onReload: () => void, busy: BusyGate): ActionRunner {
-  return (task) => {
-    if (!busy.tryStart()) return;
+function createRunner(setFeedback: (feedback: Feedback) => void, onReload: () => void, locks: ActionLocks): ActionRunner {
+  return (lockKey, task) => {
+    if (!locks.tryLock(lockKey)) return;
     setFeedback(null);
     startTask(task).then(
       (message) => setFeedback(message ? { kind: "ok", message } : null),
@@ -64,7 +71,7 @@ function createRunner(setFeedback: (feedback: Feedback) => void, onReload: () =>
         setFeedback({ kind: "error", message: describeApiError(error) });
         if (error instanceof ApiError && error.code === "already_handled") onReload();
       },
-    ).finally(busy.finish);
+    ).finally(() => locks.unlock(lockKey));
   };
 }
 
@@ -80,58 +87,31 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
   }
 }
 
-/** 동작 진행 여부 관문. 같은 요청이 두 번 가지 않게 막는다. */
-interface BusyGate {
-  /** 진행 중이 아니면 진행 중으로 바꾸고 true, 이미 진행 중이면 false. */
-  tryStart(): boolean;
-  /** 진행 중 표시를 푼다(성공·실패 모두). */
-  finish(): void;
-}
-
-/**
- * 동작 진행 여부를 상태(버튼 잠금용)와 ref(연속 클릭을 같은 틱에 막는 용)로 함께 쥔다.
- * 왜 ref도 쓰나: 상태는 다음 렌더 뒤에야 바뀌어 같은 틱의 두 번째 호출을 막지 못한다.
- */
-function useBusyGate(): { isBusy: boolean; gate: BusyGate } {
-  const [isBusy, setIsBusy] = useState(false);
-  const inFlight = useRef(false);
-  const gate: BusyGate = {
-    tryStart: () => {
-      if (inFlight.current) return false;
-      inFlight.current = true;
-      setIsBusy(true);
-      return true;
-    },
-    finish: () => {
-      inFlight.current = false;
-      setIsBusy(false);
-    },
-  };
-  return { isBusy, gate };
-}
-
 /** 후보 화면(스펙 6장 ①): 상태 배너·스위치·구역별 사람 단위 묶음·자동 숨김 목록. */
 export function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<Feedback>(null);
-  const { isBusy, gate } = useBusyGate();
-  const run = createRunner(setFeedback, onReload, gate);
+  const locks = useActionLocks();
+  const run = createRunner(setFeedback, onReload, locks);
+  const { lockedKeys } = locks;
   const canHide = me.permissions.includes("hide_message");
+  const autoHideEnabled = status?.autoHideEnabled ?? null;
   return (
     <section className="screen">
       <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
       <div className="toolbar">
-        <AutoHideToggle enabled={status?.autoHideEnabled ?? null} canEnable={me.permissions.includes("enable_auto_hide")}
-          canDisable={me.permissions.includes("disable_auto_hide")} isBusy={isBusy} onChange={(enabled) => run(() => actions.setAutoHide(enabled))} />
+        <AutoHideToggle enabled={autoHideEnabled} canEnable={me.permissions.includes("enable_auto_hide")}
+          canDisable={me.permissions.includes("disable_auto_hide")} isBusy={autoHideEnabled !== null && lockedKeys.has(autoHideLockKey(!autoHideEnabled))}
+          onChange={(enabled) => run(autoHideLockKey(enabled), () => actions.setAutoHide(enabled))} />
         <button type="button" onClick={onReload}>다시 불러오기</button>
       </div>
       <FeedbackLine feedback={feedback} />
       {GROUP_SECTIONS.map(({ key, kind, title }) => (
-        <GroupSection key={key} title={title} groups={sections[key]} kind={kind} me={me} run={run} isBusy={isBusy} actions={actions} />
+        <GroupSection key={key} title={title} groups={sections[key]} kind={kind} me={me} run={run} lockedKeys={lockedKeys} actions={actions} />
       ))}
       {countActionable(sections) === 0 && <p className="empty">지금 확인할 후보가 없습니다.</p>}
-      <AutoHidePendingList verdicts={sections.autoHidePending} canHide={canHide} run={run} isBusy={isBusy} actions={actions} />
-      <AutoHiddenList verdicts={sections.autoHidden} canHide={canHide} run={run} isBusy={isBusy} actions={actions} />
-      <RestrictedAutoHideList verdicts={sections.restrictedAfterAutoHide} canHide={canHide} run={run} isBusy={isBusy} actions={actions} />
+      <AutoHidePendingList verdicts={sections.autoHidePending} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
+      <AutoHiddenList verdicts={sections.autoHidden} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
+      <RestrictedAutoHideList verdicts={sections.restrictedAfterAutoHide} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
     </section>
   );
 }
@@ -154,20 +134,20 @@ interface GroupSectionProps {
   me: MeDto;
   /** 동작 실행기. */
   run: ActionRunner;
-  /** 다른 동작이 진행 중인지(버튼 잠금). */
-  isBusy: boolean;
+  /** 진행 중인 동작의 열쇠들(그 판정·사람의 버튼만 잠근다). */
+  lockedKeys: ReadonlySet<string>;
   /** 후보 화면 동작. */
   actions: CandidateActions;
 }
 
 /** 구역 하나. 비어 있으면 그리지 않는다. */
-function GroupSection({ title, groups, kind, me, run, isBusy, actions }: GroupSectionProps) {
+function GroupSection({ title, groups, kind, me, run, lockedKeys, actions }: GroupSectionProps) {
   if (groups.length === 0) return null;
   return (
     <section className={`section section-${kind}`}>
       <h2>{title}</h2>
       {groups.map((group) => (
-        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} isBusy={isBusy} actions={actions} />
+        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} actions={actions} />
       ))}
     </section>
   );

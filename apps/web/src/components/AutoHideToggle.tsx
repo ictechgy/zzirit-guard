@@ -6,7 +6,10 @@ export interface AutoHideToggleProps {
   canEnable: boolean;
   /** 끄기 권한(disable_auto_hide)이 있는지. */
   canDisable: boolean;
-  /** 다른 동작이 진행 중인지. 진행 중에는 누를 수 없다. */
+  /**
+   * 같은 방향(지금 누르면 보낼 값)의 스위치 요청이 진행 중인지. 진행 중에는 누를 수 없다(두 번 보내기 방지).
+   * 숨기기 같은 다른 동작은 이 값에 넣지 않는다: 끄기는 안전장치라 다른 동작에 막히면 안 된다(F2).
+   */
   isBusy: boolean;
   /** 바꾸려는 값으로 부른다. */
   onChange(enabled: boolean): void;
