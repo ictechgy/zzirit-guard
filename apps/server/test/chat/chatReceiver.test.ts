@@ -77,3 +77,100 @@ describe("reconnectDelayMs", () => {
     expect([0, 1, 2, 3, 4, 5, 9].map(reconnectDelayMs)).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000]);
   });
 });
+
+/** 테스트용 가짜 소켓. 핸들러를 모아 두고 직접 이벤트를 흘려 보낸다. */
+class FakeSocket {
+  readonly handlers = new Map<string, (payload: unknown) => void>();
+  closed = false;
+  on(event: string, handler: (payload: unknown) => void): void {
+    this.handlers.set(event, handler);
+  }
+  close(): void {
+    this.closed = true;
+  }
+  emit(event: string, payload?: unknown): void {
+    this.handlers.get(event)?.(payload);
+  }
+}
+
+/** 가짜 소켓을 쓰는 수신기를 만든다. api는 가짜 치지직 서버를 향한다. */
+function createFakeSocketReceiver(overrides: Partial<Parameters<typeof createChatReceiver>[0]> = {}, beforeSession?: Promise<void>) {
+  const sockets: FakeSocket[] = [];
+  const errors: string[] = [];
+  const baseApi = createChzzkApi({ apiBase: fake.baseUrl, clientId: "test-client", clientSecret: "test-secret" });
+  const api = { ...baseApi, createSessionUrl: async (token: string) => { await beforeSession; return baseApi.createSessionUrl(token); } };
+  const store = createCredentialStore(openDatabase(":memory:"), createTokenCipher(randomBytes(32)), Date.now);
+  store.saveConnection(fake.owner, { channelId: fake.owner.channelId, ...fake.issueTokens(fake.owner), accessExpiresAt: Date.now() + 86_400_000 });
+  const logger = { ...silentLogger, error: (message: string) => { errors.push(message); } };
+  const instance = createChatReceiver({
+    api, tokenManager: createTokenManager({ store, api: baseApi, clock: Date.now }), clock: Date.now, logger,
+    connect: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    onChat: () => undefined, onConnectionChange: () => undefined, onInvalidEvent: () => undefined, onRevoked: () => undefined,
+    ...overrides,
+  });
+  return { instance, sockets, errors };
+}
+
+/** 인덱스의 소켓을 꺼낸다. 없으면 테스트 가정이 깨진 것이므로 던진다. */
+function socketAt(sockets: FakeSocket[], index: number): FakeSocket {
+  const socket = sockets[index];
+  if (!socket) throw new Error(`소켓 ${index}번이 아직 없습니다`);
+  return socket;
+}
+
+/** 구독 완료 시스템 메시지. */
+const subscribedMessage = { type: "subscribed", data: { eventType: "CHAT", channelId: "owner-channel" } };
+
+describe("ChatReceiver 견고성", () => {
+  it("핸드셰이크가 멈추면 소켓을 닫고 새 세션으로 다시 연결한다", async () => {
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 50 });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    await waitFor(() => socketAt(sockets, 0).closed);
+    await waitFor(() => sockets.length === 2, 4_000);
+    expect(fake.calls.filter((call) => call.path === "/open/v1/sessions/auth")).toHaveLength(2);
+  });
+
+  it("이전 소켓의 늦은 이벤트는 새 연결 상태를 바꾸지 않는다", async () => {
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000 });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    socketAt(sockets, 0).emit("disconnect");
+    await waitFor(() => sockets.length === 2, 4_000);
+    socketAt(sockets, 1).emit("SYSTEM", subscribedMessage);
+    expect(receiver.isConnected()).toBe(true);
+    socketAt(sockets, 0).emit("disconnect");
+    socketAt(sockets, 0).emit("SYSTEM", { type: "revoked", data: { eventType: "CHAT", channelId: "owner-channel" } });
+    expect(receiver.isConnected()).toBe(true);
+    expect(socketAt(sockets, 1).closed).toBe(false);
+  });
+
+  it("세션 생성 중 stop 후 start해도 소켓은 하나만 붙는다", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000 }, gate);
+    receiver = instance;
+    receiver.start();
+    receiver.stop();
+    receiver.start();
+    release();
+    await waitFor(() => sockets.length >= 1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("onConnectionChange가 예외를 던져도 로그만 남기고 구독 상태는 유지된다", async () => {
+    const { instance, sockets, errors } = createFakeSocketReceiver({
+      handshakeTimeoutMs: 60_000,
+      onConnectionChange: () => { throw new Error("콜백 실패"); },
+    });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
+    await waitFor(() => errors.length === 1);
+    expect(receiver.isConnected()).toBe(true);
+  });
+});

@@ -7,6 +7,7 @@ export interface Logger {
 
 /** 표준 출력에 JSON 한 줄씩 쓴다. launchd가 로그 파일로 모은다. */
 export function createConsoleLogger(): Logger {
+  /** 레벨 하나에 대응하는 기록 함수를 만든다. 레벨마다 같은 JSON 형식을 쓰려고 한 곳에서 만든다. */
   const write = (level: string) => (message: string, details?: Record<string, unknown>) =>
     console.log(JSON.stringify({ time: new Date().toISOString(), level, message, ...details }));
   return { info: write("info"), warn: write("warn"), error: write("error") };
