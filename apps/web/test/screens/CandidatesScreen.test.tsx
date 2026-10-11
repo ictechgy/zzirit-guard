@@ -1,7 +1,7 @@
 import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/api/client";
 import { formatClockTime } from "../../src/domain/timeFormat";
 import { buildSections } from "../../src/domain/candidates";
@@ -23,6 +23,34 @@ function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
 function fakeActions(overrides: Partial<CandidateActions> = {}): CandidateActions {
   const succeed = async () => null;
   return { hide: vi.fn(succeed), temporaryRestrict: vi.fn(succeed), ignore: vi.fn(succeed), reportFalsePositive: vi.fn(succeed), setAutoHide: vi.fn(succeed), ...overrides };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  Reflect.deleteProperty(window, "scrollY");
+});
+
+/**
+ * 판정이 바뀌는 화면을 그린다. update로 새 판정 목록을 넣어 실시간 이벤트를 흉내 낸다(다른 속성은 그대로).
+ * @param verdicts 처음 판정 목록
+ */
+function renderLive(verdicts: VerdictDto[]) {
+  const actions = fakeActions();
+  const onReload = vi.fn();
+  const screenFor = (next: VerdictDto[]) => <CandidatesScreen me={chatManager} status={status} sections={buildSections(next, NOW)} realtimeConnected actions={actions} onReload={onReload} />;
+  const { rerender } = render(screenFor(verdicts));
+  return { update: (next: VerdictDto[]) => rerender(screenFor(next)) };
+}
+
+/** 화면에 보이는 사람 묶음 카드의 닉네임을 위에서부터 읽는다. */
+function cardOrder(): string[] {
+  return screen.queryAllByRole("article").map((card) => card.querySelector("strong")?.textContent ?? "");
+}
+
+/** 목록 영역 안의 요소(누르기 시작하는 곳). */
+function listElement(): HTMLElement {
+  return screen.getAllByRole("article")[0] as HTMLElement;
 }
 
 /** 화면을 그린다. status를 null로 넘기면 서버 상태를 아직 모르는 경우다. */
@@ -233,5 +261,72 @@ describe("CandidatesScreen", () => {
   it("후보가 없으면 안내 문구", () => {
     renderScreen([]);
     expect(screen.getByText(/지금 확인할 후보가 없습니다/)).toBeTruthy();
+  });
+});
+
+describe("CandidatesScreen 조작 중 목록 고정(F4, 스모크 S1)", () => {
+  /** 새로 들어온 다른 사람의 판정(기존 것보다 새것이라 원래는 맨 위로 온다). */
+  const newcomer = verdict(9, { senderChannelId: "new", senderNickname: "새사람", createdAt: NOW });
+
+  it("목록을 누르고 있는 동안 새 판정이 와도 순서를 바꾸지 않고 '새 항목 N개 — 보기'를 보여 준다", () => {
+    const { update } = renderLive([verdict(1)]);
+    fireEvent.pointerDown(listElement());
+    update([verdict(1), newcomer]);
+    expect(cardOrder()).toEqual(["악플러"]);
+    expect(screen.getByRole("button", { name: "새 항목 1개 — 보기" })).toBeTruthy();
+  });
+
+  it("'보기'를 누르면 최신 순서를 보여 주고 맨 위로 올린다", async () => {
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const { update } = renderLive([verdict(1)]);
+    fireEvent.pointerDown(listElement());
+    update([verdict(1), newcomer]);
+    await userEvent.click(screen.getByRole("button", { name: "새 항목 1개 — 보기" }));
+    expect(cardOrder()).toEqual(["새사람", "악플러"]);
+    expect(screen.queryByRole("button", { name: /새 항목/ })).toBeNull();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+  });
+
+  it("얼린 화면에서 처리된 줄은 지우지 않고 '처리됨'으로 흐리게 남기며 버튼을 잠근다", () => {
+    const { update } = renderLive([verdict(1), verdict(2)]);
+    fireEvent.pointerDown(listElement());
+    update([verdict(1, { status: "hidden" }), verdict(2)]);
+    const handledRow = screen.getByText("나쁜 말 1").closest("li") as HTMLElement;
+    expect(handledRow.classList.contains("message-handled")).toBe(true);
+    expect(within(handledRow).getByText("처리됨")).toBeTruthy();
+    expect(within(handledRow).getAllByRole("button").every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    const pendingRow = screen.getByText("나쁜 말 2").closest("li") as HTMLElement;
+    expect(within(pendingRow).queryByText("처리됨")).toBeNull();
+    expect((within(pendingRow).getByRole("button", { name: /숨기기$/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("손을 뗀 뒤 1.5초가 지나면 최신 목록을 보여 준다", () => {
+    vi.useFakeTimers();
+    const { update } = renderLive([verdict(1)]);
+    fireEvent.pointerDown(listElement());
+    update([verdict(1), newcomer]);
+    fireEvent.pointerUp(document);
+    act(() => vi.advanceTimersByTime(1_499));
+    expect(cardOrder()).toEqual(["악플러"]);
+    act(() => vi.advanceTimersByTime(1));
+    expect(cardOrder()).toEqual(["새사람", "악플러"]);
+  });
+
+  it("목록을 아래로 내려 본 동안(80px 넘게)도 고정하고, 맨 위로 돌아오면 최신 목록을 보여 준다", () => {
+    const { update } = renderLive([verdict(1)]);
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 200 });
+    act(() => window.dispatchEvent(new Event("scroll")));
+    update([verdict(1), newcomer]);
+    expect(cardOrder()).toEqual(["악플러"]);
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    act(() => window.dispatchEvent(new Event("scroll")));
+    expect(cardOrder()).toEqual(["새사람", "악플러"]);
+  });
+
+  it("고정하지 않은 동안에는 새 판정을 바로 반영한다", () => {
+    const { update } = renderLive([verdict(1)]);
+    update([verdict(1), newcomer]);
+    expect(cardOrder()).toEqual(["새사람", "악플러"]);
+    expect(screen.queryByRole("button", { name: /새 항목/ })).toBeNull();
   });
 });

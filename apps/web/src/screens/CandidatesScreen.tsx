@@ -1,5 +1,5 @@
 import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
@@ -7,6 +7,7 @@ import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroup
 import { StatusBanner } from "../components/StatusBanner";
 import { countActionable, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
+import { useStableSections } from "../state/useStableSections";
 
 /** 후보 화면이 부르는 동작. 성공하면 화면에 보여 줄 안내(없으면 null)를 돌려준다. MainScreen이 API로 채우고, 테스트는 가짜를 넘긴다. */
 export interface CandidateActions {
@@ -94,6 +95,7 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  * 후보 화면(스펙 6장 ①): 상태 배너·스위치·구역별 사람 단위 묶음·자동 숨김 목록.
  * 왜 memo인가: MainScreen은 채팅 묶음(chat_batch)이 올 때마다(초당 최대 4번) 다시 그려지는데, 후보 화면의 속성은 그때 바뀌지 않는다.
  * 감싸지 않으면 판정 수천 건의 목록을 초당 4번 다시 그려 휴대폰이 멈춘다(F4). 속성은 MainScreen이 useMemo·useCallback으로 고정한다.
+ * 목록을 만지는 동안에는 구역을 고정해 줄이 손가락 밑에서 움직이지 않게 한다(useStableSections, 스모크 S1).
  */
 export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -102,6 +104,10 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   const { lockedKeys } = locks;
   const canHide = me.permissions.includes("hide_message");
   const autoHideEnabled = status?.autoHideEnabled ?? null;
+  const listRef = useRef<HTMLDivElement>(null);
+  const stable = useStableSections(sections, listRef);
+  const shown = stable.sections;
+  const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions };
   return (
     <section className="screen">
       <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
@@ -112,13 +118,16 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
         <button type="button" onClick={onReload}>다시 불러오기</button>
       </div>
       <FeedbackLine feedback={feedback} />
-      {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
-        <GroupSection key={key} title={title} groups={sections[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} actions={actions} />
-      ))}
-      {countActionable(sections) === 0 && <p className="empty">지금 확인할 후보가 없습니다.</p>}
-      <AutoHidePendingList verdicts={sections.autoHidePending} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
-      <AutoHiddenList verdicts={sections.autoHidden} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
-      <RestrictedAutoHideList verdicts={sections.restrictedAfterAutoHide} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
+      <div ref={listRef} className="candidate-list">
+        {stable.newCount > 0 && <button type="button" className="new-items" onClick={stable.showLatest}>새 항목 {stable.newCount}개 — 보기</button>}
+        {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
+          <GroupSection key={key} title={title} groups={shown[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} handledIds={stable.handledIds} actions={actions} />
+        ))}
+        {countActionable(shown) === 0 && <p className="empty">지금 확인할 후보가 없습니다.</p>}
+        <AutoHidePendingList verdicts={shown.autoHidePending} {...rowProps} />
+        <AutoHiddenList verdicts={shown.autoHidden} {...rowProps} />
+        <RestrictedAutoHideList verdicts={shown.restrictedAfterAutoHide} {...rowProps} />
+      </div>
     </section>
   );
 });
@@ -145,19 +154,21 @@ interface GroupSectionProps {
   run: ActionRunner;
   /** 진행 중인 동작의 열쇠들(그 판정·사람의 버튼만 잠근다). */
   lockedKeys: ReadonlySet<string>;
+  /** 고정한 화면에서 이미 처리된 판정 번호(흐리게 남기고 버튼을 잠근다, useStableSections). */
+  handledIds: ReadonlySet<number>;
   /** 후보 화면 동작. */
   actions: CandidateActions;
 }
 
 /** 구역 하나. 비어 있으면 그리지 않는다. */
-function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, actions }: GroupSectionProps) {
+function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handledIds, actions }: GroupSectionProps) {
   if (groups.length === 0) return null;
   const shown = limit === null ? groups : groups.slice(0, limit);
   return (
     <section className={`section section-${kind}`}>
       <h2>{title}</h2>
       {shown.map((group) => (
-        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} actions={actions} />
+        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} handledIds={handledIds} actions={actions} />
       ))}
       {groups.length > shown.length && <p className="hint">외 {groups.length - shown.length}명</p>}
     </section>
