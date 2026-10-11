@@ -16,6 +16,7 @@ import { createMinuteStats } from "../../src/records/minuteStats.js";
 import { createSettingsRepository } from "../../src/records/settingsRepository.js";
 import { createVerdictRepository } from "../../src/records/verdictRepository.js";
 import type { Clock } from "../../src/time.js";
+import { TEST_VAPID } from "./vapid.js";
 
 /** 테스트 서버의 공개 출처. */
 export const ORIGIN = "https://guard.test";
@@ -49,7 +50,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     autoHide: createAutoHideSwitch({ settings, auditLog, clock, logger: silentLogger }),
     rules: createRuleRepository(database, clock),
     stats: createMinuteStats(database, clock),
-    push: createPushNotifier({ database, clock, logger: silentLogger, vapid: { publicKey: "pk", privateKey: "sk", subject: "mailto:a@b.c" }, send: async () => ({}) }),
+    push: createPushNotifier({ database, clock, logger: silentLogger, vapid: TEST_VAPID, send: async () => ({}) }),
     broadcaster: hub,
     getChatSettings: async () => ({ chatAvailableCondition: "NONE", chatAvailableGroup: "ALL", minFollowerMinute: 0, allowSubscriberInFollowerMode: false, chatSlowModeSec: 0, chatEmojiMode: false }),
     /** login()이 만든 채널 ID("<역할>-id")에서 역할을 그대로 돌려준다. 해임을 흉내 내려면 테스트에서 덮어쓴다. */

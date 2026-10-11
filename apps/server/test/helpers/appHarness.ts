@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "../../src/config.js";
 import type { FakeChzzk } from "../fakes/fakeChzzk.js";
+import { TEST_VAPID } from "./vapid.js";
 
 /** 테스트 서버의 공개 출처. */
 export const ORIGIN = "https://guard.test";
@@ -29,7 +30,7 @@ export function buildTestConfig(fake: FakeChzzk, dataDirectory: string, channelI
     port: 0, publicOrigin: ORIGIN, channelId, chzzkClientId: "test-client", chzzkClientSecret: "test-secret",
     chzzkApiBase: fake.baseUrl, chzzkAuthorizeUrl: "https://chzzk.example/account-interlock", dataDirectory,
     databasePath: join(dataDirectory, "zzirit-guard.sqlite"), backupDirectory: join(dataDirectory, "backups"), keychainService: "unused",
-    webDistDirectory: join(dataDirectory, "no-web"), vapidPublicKey: "pk", vapidPrivateKey: "sk", vapidSubject: "mailto:a@b.c",
+    webDistDirectory: join(dataDirectory, "no-web"), vapidPublicKey: TEST_VAPID.publicKey, vapidPrivateKey: TEST_VAPID.privateKey, vapidSubject: TEST_VAPID.subject,
   };
 }
 

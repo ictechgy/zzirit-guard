@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
 import type { Logger } from "../../src/logger.js";
 import { createPushNotifier, isAllowedPushEndpoint, PUSH_TIMEOUT_MS, PushSubscriptionError, type PushSender } from "../../src/push/pushNotifier.js";
+import { TEST_VAPID } from "../helpers/vapid.js";
 
-/** VAPID 설정 예시. */
-const vapid = { publicKey: "public-key", privateKey: "private-key", subject: "mailto:owner@example.com" };
+/** VAPID 설정 예시(형식 검사를 통과하는 키 쌍). */
+const vapid = TEST_VAPID;
 
 /** 구독 예시. 키 값은 로그 누출 검사를 위해 식별 가능한 문자열을 쓴다. */
 function subscription(endpoint: string) {
@@ -18,6 +19,33 @@ function silentTestLogger(): Logger {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("VAPID 설정 검사(F9.4)", () => {
+  it.each([
+    ["공개 키", { publicKey: "too-short" }, "ZG_VAPID_PUBLIC_KEY"],
+    ["비공개 키", { privateKey: "secret-but-wrong-length" }, "ZG_VAPID_PRIVATE_KEY"],
+    ["연락처", { subject: "not-a-url" }, "ZG_VAPID_SUBJECT"],
+  ])("%s가 잘못되면 만들 때 고칠 환경 변수 이름을 담아 실패한다", (_name, override, variable) => {
+    const database = openDatabase(":memory:");
+    const create = () => createPushNotifier({ database, clock: () => 0, logger: silentTestLogger(), vapid: { ...vapid, ...override }, send: vi.fn<PushSender>() });
+    expect(create).toThrow(variable);
+  });
+
+  it("오류 문구에 비공개 키 값을 넣지 않는다", () => {
+    const database = openDatabase(":memory:");
+    const create = () => createPushNotifier({ database, clock: () => 0, logger: silentTestLogger(), vapid: { ...vapid, privateKey: "secret-but-wrong-length" }, send: vi.fn<PushSender>() });
+    const message = (() => {
+      try {
+        create();
+        return "";
+      } catch (error) {
+        return String(error);
+      }
+    })();
+    expect(message).toContain("ZG_VAPID_PRIVATE_KEY");
+    expect(message).not.toContain("secret-but-wrong-length");
+  });
 });
 
 describe("PushNotifier", () => {

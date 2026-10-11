@@ -72,6 +72,16 @@ const PUSH_TTL_SECONDS = 300;
  */
 export const PUSH_TIMEOUT_MS = 10_000;
 
+/**
+ * web-push 검사 오류 문구에서 고칠 환경 변수를 고르는 표. web-push는 연락처 → 공개 키 → 비공개 키 순서로 검사하고,
+ * 각 문구에 대상 이름(subject·public key·private key)을 넣는다(web-push 3.6 vapid-helper).
+ */
+const VAPID_ENVIRONMENT_VARIABLES: ReadonlyArray<{ pattern: RegExp; variable: string }> = [
+  { pattern: /subject/i, variable: "ZG_VAPID_SUBJECT" },
+  { pattern: /public ?key/i, variable: "ZG_VAPID_PUBLIC_KEY" },
+  { pattern: /private ?key/i, variable: "ZG_VAPID_PRIVATE_KEY" },
+];
+
 /** push_subscription 행. */
 interface SubscriptionRow {
   endpoint: string;
@@ -125,8 +135,12 @@ function hostOf(endpoint: string): string {
   }
 }
 
-/** 푸시 알림기를 만든다. */
+/**
+ * 푸시 알림기를 만든다. VAPID 키를 먼저 검사해, 잘못된 키는 첫 장애 알림 때가 아니라 서버 시작 때 드러나게 한다.
+ * @throws Error VAPID 연락처·키 형식이 틀렸을 때(고칠 환경 변수 이름을 담는다)
+ */
 export function createPushNotifier(deps: PushNotifierDeps): PushNotifier {
+  validateVapid(deps.vapid);
   const send: PushSender = deps.send ?? ((subscription, payload, options) => webpush.sendNotification(subscription, payload, options));
   return {
     publicKey: () => deps.vapid.publicKey,
@@ -134,6 +148,23 @@ export function createPushNotifier(deps: PushNotifierDeps): PushNotifier {
     unsubscribe: (endpoint) => void deps.database.prepare("DELETE FROM push_subscription WHERE endpoint = ?").run(endpoint),
     notifyAll: (message) => notifyAll(deps, send, message),
   };
+}
+
+/**
+ * VAPID 설정을 web-push의 setVapidDetails로 한 번 검사한다(F9.4).
+ * 왜: 키가 틀려도 지금까지는 첫 알림을 보낼 때에야 실패해, 장애 알림이 가장 필요한 순간에 조용히 사라졌다.
+ * 오류 문구에는 web-push의 이유와 고칠 환경 변수 이름만 담는다. web-push 문구에는 키 값이 들어가지 않는다(연락처 값만 들어갈 수 있다).
+ * @param vapid 공개 키·비공개 키·연락처(mailto:)
+ * @throws Error 형식이 틀렸을 때
+ */
+function validateVapid(vapid: PushNotifierDeps["vapid"]): void {
+  try {
+    webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
+  } catch (error) {
+    const reason = describeError(error);
+    const variable = VAPID_ENVIRONMENT_VARIABLES.find((entry) => entry.pattern.test(reason))?.variable ?? "ZG_VAPID_PUBLIC_KEY·ZG_VAPID_PRIVATE_KEY·ZG_VAPID_SUBJECT";
+    throw new Error(`웹 푸시 VAPID 설정이 올바르지 않습니다(${reason}). .env의 ${variable} 값을 고치세요. 키는 npx web-push generate-vapid-keys로 새로 만들 수 있습니다.`, { cause: error });
+  }
 }
 
 /**
