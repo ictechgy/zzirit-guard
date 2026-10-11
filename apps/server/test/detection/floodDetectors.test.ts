@@ -20,6 +20,21 @@ describe("GroupFloodDetector", () => {
     expect(sixth).toEqual({ triggered: true, earlierRefs: [] });
   });
 
+  it("markReported로 표시한 앞선 메시지는 발동 때 다시 돌려주지 않는다", () => {
+    const detector = createGroupFloodDetector();
+    const refs = [1, 2, 3, 4, 5].map((user) => ref(user));
+    refs.slice(0, 4).forEach((item, index) => detector.observe(LONG_TEXT, item, (index + 1) * 1_000));
+    detector.markReported(refs[0] as MessageRef);
+    detector.markReported(refs[2] as MessageRef);
+    const fifth = detector.observe(LONG_TEXT, refs[4] as MessageRef, 5_000);
+    expect(fifth.earlierRefs.map((item) => item.senderChannelId)).toEqual(["user-2", "user-4"]);
+  });
+
+  it("관측하지 않은 메시지를 markReported해도 아무 일도 없다", () => {
+    const detector = createGroupFloodDetector();
+    expect(() => detector.markReported(ref(9))).not.toThrow();
+  });
+
   it("같은 사람이 반복한 것은 1명으로 센다", () => {
     const detector = createGroupFloodDetector();
     for (let index = 0; index < 6; index += 1) expect(detector.observe(LONG_TEXT, ref(1), index * 100).triggered).toBe(false);

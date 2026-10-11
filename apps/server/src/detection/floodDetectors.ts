@@ -17,6 +17,12 @@ export interface GroupFloodObservation {
 /** 떼도배(여러 사람이 같은 문장 반복) 감지기. */
 export interface GroupFloodDetector {
   observe(normalized: string, ref: MessageRef, receivedAt: number): GroupFloodObservation;
+  /**
+   * observe에 넘긴 메시지를 이미 숨김 대상으로 넘긴 것으로 표시한다. 나중에 떼도배가 발동해도 earlierRefs에 다시 넣지 않는다.
+   * 왜: 자체 판정이 이미 auto_hide(링크·금칙어 강 등)인 메시지를 발동 때 또 넘기면 숨김 요청·판정 기록·폭주 한도가 두 번 쓰인다(F1).
+   * @param ref observe에 넘긴 바로 그 참조 객체. 관측하지 않았거나 창에서 빠진 참조면 아무것도 하지 않는다.
+   */
+  markReported(ref: MessageRef): void;
 }
 
 /** 개인 도배(한 사람이 짧은 시간에 여러 번) 감지기. */
@@ -46,6 +52,8 @@ interface GroupEntry {
 export function createGroupFloodDetector(options: Partial<typeof GROUP_DEFAULTS> = {}): GroupFloodDetector {
   const settings = { ...GROUP_DEFAULTS, ...options };
   const entriesByText = new Map<string, GroupEntry[]>();
+  // 참조 → 관측 항목. WeakMap이라 창에서 빠져 버려진 항목은 따로 지우지 않아도 메모리에서 사라진다.
+  const entryByRef = new WeakMap<MessageRef, GroupEntry>();
   let observations = 0;
   return {
     observe(normalized, ref, receivedAt) {
@@ -53,9 +61,15 @@ export function createGroupFloodDetector(options: Partial<typeof GROUP_DEFAULTS>
       observations += 1;
       if (observations % SWEEP_EVERY_OBSERVATIONS === 0) sweep(entriesByText, receivedAt - settings.windowMs);
       const entries = withinWindow(entriesByText.get(normalized), receivedAt - settings.windowMs);
-      entries.push({ ref, receivedAt, reported: false });
+      const entry: GroupEntry = { ref, receivedAt, reported: false };
+      entries.push(entry);
+      entryByRef.set(ref, entry);
       entriesByText.set(normalized, entries);
       return evaluateGroup(entries, settings.minDistinctUsers);
+    },
+    markReported(ref) {
+      const entry = entryByRef.get(ref);
+      if (entry) entry.reported = true;
     },
   };
 }

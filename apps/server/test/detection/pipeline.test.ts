@@ -91,6 +91,25 @@ describe("DetectionPipeline", () => {
     expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["viewer-1", "viewer-2", "viewer-3", "viewer-4"]);
   });
 
+  it("떼도배 발동 전에 이미 자동 숨김으로 판정된 메시지는 앞선 메시지로 다시 넘기지 않는다(F1)", () => {
+    const text = "무료 치킨 쿠폰 받기 bit.ly/free";
+    const results = [1, 2, 3, 4, 5].map((user) => pipeline.evaluate(chat(text, { senderChannelId: `user-${user}` })));
+    expect(results.slice(0, 4).map((result) => result.reason)).toEqual(["rule:link", "rule:link", "rule:link", "rule:link"]);
+    expect(results[4]).toMatchObject({ decision: "auto_hide", earlierFloodRefs: [] });
+  });
+
+  it("떼도배 발동 시 앞선 메시지 중 통과였던 것만 넘긴다(F1 섞인 경우)", () => {
+    const withLink = "무료 치킨 쿠폰 받기 bit.ly/free";
+    const withoutLink = "무료 치킨 쿠폰 받기 bit ly free";
+    expect(pipeline.evaluate(chat(withLink, { senderChannelId: "user-1" })).decision).toBe("auto_hide");
+    expect(pipeline.evaluate(chat(withoutLink, { senderChannelId: "user-2" })).decision).toBe("pass");
+    expect(pipeline.evaluate(chat(withLink, { senderChannelId: "user-3" })).decision).toBe("auto_hide");
+    expect(pipeline.evaluate(chat(withoutLink, { senderChannelId: "user-4" })).decision).toBe("pass");
+    const fifth = pipeline.evaluate(chat(withoutLink, { senderChannelId: "user-5" }));
+    expect(fifth.reason).toBe("rule:group_flood");
+    expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["user-2", "user-4"]);
+  });
+
   it("개인 도배는 다섯 번째부터 후보", () => {
     const decisions = [1, 2, 3, 4, 5].map((index) => pipeline.evaluate(chat(`그냥 말 ${index}`)).decision);
     expect(decisions).toEqual(["pass", "pass", "pass", "pass", "candidate"]);

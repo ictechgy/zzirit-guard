@@ -65,7 +65,20 @@ function evaluate(deps: DetectionPipelineDeps, event: ChatEvent): DetectionResul
   const outcome = decide(deps, context);
   const traits = { trivial: isTrivialMessage(normalized), duplicate: deps.duplicates.seen(normalized, event.receivedAt) };
   const earlierFloodRefs = flood.triggered ? flood.earlierRefs.filter((item) => !item.privileged) : [];
-  return applyPrivilege({ ...outcome, ref, earlierFloodRefs, ...traits });
+  const result = applyPrivilege({ ...outcome, ref, earlierFloodRefs, ...traits });
+  markAutoHiddenFloodEntry(deps.groupFlood, result);
+  return result;
+}
+
+/**
+ * 최종 판정이 auto_hide인 비권한자 메시지는 떼도배 창에서 이미 넘긴 것으로 표시한다.
+ * 왜: 이 메시지는 소비자가 이번에 숨기거나 섀도로 기록하므로, 뒤에 떼도배가 발동해 earlierFloodRefs로 다시 넘기면
+ * 숨김 요청·판정 행·폭주 한도가 두 번 쓰인다(F1). 권한자 메시지는 earlierFloodRefs에서 이미 빠지므로 표시할 필요가 없다.
+ * @param groupFlood 떼도배 감지기
+ * @param result 권한자 예외까지 적용한 최종 판정
+ */
+function markAutoHiddenFloodEntry(groupFlood: GroupFloodDetector, result: DetectionResult): void {
+  if (result.decision === "auto_hide" && !result.ref.privileged) groupFlood.markReported(result.ref);
 }
 
 /** 규칙 검사용 정보를 모은다. */
