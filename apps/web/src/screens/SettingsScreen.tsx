@@ -24,6 +24,7 @@ export function SettingsScreen({ me, onSignedOut }: SettingsScreenProps) {
       <StatsSection />
       <FalsePositiveSection />
       <RulesSection me={me} />
+      <p className="hint">영구 제한·해제는 치지직 기본 도구에서 합니다.</p>
       <LimitsSection me={me} />
       <ChatSettingsSection me={me} />
       <AuditSection me={me} />

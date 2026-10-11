@@ -1,6 +1,7 @@
 import type { MeDto } from "@zzirit-guard/shared";
 import { useState } from "react";
-import { ApiError, apiSend, describeApiError } from "../api/client";
+import { ApiError, apiSend, describeApiError, requiresSignIn } from "../api/client";
+import { useBusyTask } from "../api/useBusyTask";
 import { ApiNotice } from "../components/ApiNotice";
 import { disablePush, enablePush } from "../push/pushSubscription";
 
@@ -27,20 +28,27 @@ function releasePush(): Promise<void> {
 /** 계정·장애 알림·로그아웃·(스트리머) 채널 연결 해제. */
 export function AccountSection({ me, onSignedOut }: { me: MeDto; onSignedOut(message: string | null): void }) {
   const [message, setMessage] = useState<string | null>(null);
-  const report = (error: unknown) => setMessage(messageOf(error));
-  const enableAlerts = () => enablePush().then(() => setMessage("장애 알림을 켰습니다."), report);
-  const logout = () => releasePush().then(() => apiSend("POST", "/api/logout")).then(() => onSignedOut(null), report);
+  const busy = useBusyTask();
+  /** 한 번에 하나만 실행한다. 로그인이 이미 풀린 오류(401·no_channel)는 목적이 이뤄진 것이라 로컬 로그아웃을 마친다. */
+  const exit = (request: string, signedOutMessage: string | null) => {
+    busy.run(() => releasePush().then(() => apiSend("POST", request))).then(
+      (started) => started && onSignedOut(signedOutMessage),
+      (error: unknown) => (requiresSignIn(error) ? onSignedOut(signedOutMessage) : setMessage(messageOf(error))),
+    );
+  };
+  const enableAlerts = () => busy.run(() => enablePush()).then((started) => started && setMessage("장애 알림을 켰습니다."), (error: unknown) => setMessage(messageOf(error)));
+  const logout = () => exit("/api/logout", null);
   const disconnect = () => {
     if (!window.confirm(DISCONNECT_CONFIRMATION)) return;
-    releasePush().then(() => apiSend("POST", "/api/channel/disconnect")).then(() => onSignedOut("채널 연결을 해제했습니다."), report);
+    exit("/api/channel/disconnect", "채널 연결을 해제했습니다.");
   };
   return (
     <section>
       <h2>계정</h2>
       <p>{me.channelName} · {ROLE_LABELS[me.role]}</p>
-      <button type="button" onClick={() => void enableAlerts()}>장애 알림 받기</button>
-      <button type="button" onClick={() => void logout()}>로그아웃</button>
-      {me.permissions.includes("connect_channel") && <button type="button" className="danger" onClick={disconnect}>채널 연결 해제</button>}
+      <button type="button" disabled={busy.isBusy} onClick={() => void enableAlerts()}>장애 알림 받기</button>
+      <button type="button" disabled={busy.isBusy} onClick={logout}>로그아웃</button>
+      {me.permissions.includes("connect_channel") && <button type="button" className="danger" disabled={busy.isBusy} onClick={disconnect}>채널 연결 해제</button>}
       {message && <p role="status">{message}</p>}
       <ApiNotice />
     </section>

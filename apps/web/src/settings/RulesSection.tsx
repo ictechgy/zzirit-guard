@@ -2,6 +2,7 @@ import type { MeDto, RuleEntryDto, RuleKind } from "@zzirit-guard/shared";
 import { useState, type FormEvent } from "react";
 import { apiSend, describeApiError } from "../api/client";
 import { useApiResource } from "../api/useApiResource";
+import { useBusyTask } from "../api/useBusyTask";
 import { EDITABLE_KINDS, KIND_LABELS } from "../domain/ruleKinds";
 
 /**
@@ -15,38 +16,59 @@ export function RulesSection({ me }: { me: MeDto }) {
   const rules = useApiResource<RuleEntryDto[]>("/api/rules");
   const [error, setError] = useState<string | null>(null);
   const canEdit = me.permissions.includes("edit_rules");
-  const run = (task: () => Promise<unknown>) => {
+  const busy = useBusyTask();
+  /** 작업을 한 번에 하나만 실행한다. 성공하면 목록을 다시 읽고 true, 실패하면 오류 문구를 보여 주고 false. */
+  const run = (task: () => Promise<unknown>): Promise<boolean> => {
     setError(null);
-    task().then(rules.reload, (caught: unknown) => setError(describeApiError(caught)));
+    return busy.run(task).then(
+      (started) => {
+        if (started) rules.reload();
+        return started;
+      },
+      (caught: unknown) => {
+        setError(describeApiError(caught));
+        return false;
+      },
+    );
   };
   return (
     <section>
       <h2>규칙</h2>
       {(error ?? rules.error) && <p className="error" role="alert">{error ?? rules.error}</p>}
-      {canEdit ? <RuleForm onAdd={(kind, pattern) => run(() => apiSend("POST", "/api/rules", { kind, pattern }))} /> : <p className="hint">규칙은 채널 관리자 이상만 바꿀 수 있습니다.</p>}
+      {canEdit ? <RuleForm isBusy={busy.isBusy} onAdd={(kind, pattern) => run(() => apiSend("POST", "/api/rules", { kind, pattern }))} /> : <p className="hint">규칙은 채널 관리자 이상만 바꿀 수 있습니다.</p>}
       {EDITABLE_KINDS.map((kind) => (
-        <RuleGroup key={kind} kind={kind} rules={(rules.data ?? []).filter((rule) => rule.kind === kind)} canEdit={canEdit}
-          onRemove={(rule) => run(() => apiSend("DELETE", `/api/rules/${rule.id}`))} />
+        <RuleGroup key={kind} kind={kind} rules={(rules.data ?? []).filter((rule) => rule.kind === kind)} canEdit={canEdit} isBusy={busy.isBusy}
+          onRemove={(rule) => void run(() => apiSend("DELETE", `/api/rules/${rule.id}`))} />
       ))}
     </section>
   );
 }
 
-/** 규칙 추가 양식. 빈 입력은 보내지 않는다. */
-function RuleForm({ onAdd }: { onAdd(kind: RuleKind, pattern: string): void }) {
+/** 규칙 추가 양식 속성. */
+interface RuleFormProps {
+  /** 요청이 진행 중인지(입력·버튼을 잠근다). */
+  isBusy: boolean;
+  /** 추가를 요청한다. 성공했을 때만 true(입력을 비우는 기준). */
+  onAdd(kind: RuleKind, pattern: string): Promise<boolean>;
+}
+
+/** 규칙 추가 양식. 빈 입력은 보내지 않고 안내한다. 입력은 추가에 성공한 뒤에만 비워, 실패하면 다시 고쳐 보낼 수 있다. */
+function RuleForm({ isBusy, onAdd }: RuleFormProps) {
   const [kind, setKind] = useState<RuleKind>("weak");
   const [pattern, setPattern] = useState("");
+  const [hint, setHint] = useState<string | null>(null);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!pattern.trim()) return;
-    onAdd(kind, pattern.trim());
-    setPattern("");
+    if (!pattern.trim()) return setHint("규칙 내용을 입력하세요.");
+    setHint(null);
+    void onAdd(kind, pattern.trim()).then((isAdded) => isAdded && setPattern(""));
   };
   return (
     <form className="rule-form" onSubmit={submit}>
-      <label>종류<select value={kind} onChange={(event) => setKind(event.target.value as RuleKind)}>{EDITABLE_KINDS.map((option) => <option key={option} value={option}>{KIND_LABELS[option]}</option>)}</select></label>
-      <label>내용<input value={pattern} maxLength={MAX_PATTERN_LENGTH} onChange={(event) => setPattern(event.target.value)} /></label>
-      <button type="submit">추가</button>
+      <label>종류<select value={kind} disabled={isBusy} onChange={(event) => setKind(event.target.value as RuleKind)}>{EDITABLE_KINDS.map((option) => <option key={option} value={option}>{KIND_LABELS[option]}</option>)}</select></label>
+      <label>내용<input value={pattern} disabled={isBusy} maxLength={MAX_PATTERN_LENGTH} onChange={(event) => { setPattern(event.target.value); setHint(null); }} /></label>
+      <button type="submit" disabled={isBusy}>추가</button>
+      {hint && <p className="hint" role="status">{hint}</p>}
     </form>
   );
 }
@@ -59,12 +81,14 @@ interface RuleGroupProps {
   rules: readonly RuleEntryDto[];
   /** 삭제 버튼을 보일지. */
   canEdit: boolean;
+  /** 요청이 진행 중인지(삭제 버튼을 잠근다). */
+  isBusy: boolean;
   /** 삭제를 누르면 부른다. */
   onRemove(rule: RuleEntryDto): void;
 }
 
 /** 종류 하나의 규칙 목록. 비어 있으면 그리지 않는다. */
-function RuleGroup({ kind, rules, canEdit, onRemove }: RuleGroupProps) {
+function RuleGroup({ kind, rules, canEdit, isBusy, onRemove }: RuleGroupProps) {
   if (rules.length === 0) return null;
   return (
     <div className="rule-group">
@@ -73,7 +97,7 @@ function RuleGroup({ kind, rules, canEdit, onRemove }: RuleGroupProps) {
         {rules.map((rule) => (
           <li key={rule.id}>
             <span>{rule.pattern}</span>
-            {canEdit && <button type="button" onClick={() => onRemove(rule)} aria-label={`${rule.pattern} 삭제`}>삭제</button>}
+            {canEdit && <button type="button" disabled={isBusy} onClick={() => onRemove(rule)} aria-label={`${rule.pattern} 삭제`}>삭제</button>}
           </li>
         ))}
       </ul>

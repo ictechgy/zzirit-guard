@@ -2,6 +2,7 @@ import type { ChatSettingsDto, MeDto } from "@zzirit-guard/shared";
 import { useState } from "react";
 import { apiSend, describeApiError } from "../api/client";
 import { useApiResource } from "../api/useApiResource";
+import { useBusyTask } from "../api/useBusyTask";
 
 /**
  * 치지직이 허용하는 저속 모드 값(초). 서버 ALLOWED_SLOW_MODE_SECONDS(apps/server/src/http/routes.ts)와 같아야 한다.
@@ -13,11 +14,14 @@ const SLOW_MODE_OPTIONS: readonly number[] = [0, 3, 5, 10, 30, 60, 120, 300];
 export function ChatSettingsSection({ me }: { me: MeDto }) {
   const settings = useApiResource<ChatSettingsDto>("/api/chat-settings");
   const [message, setMessage] = useState<string | null>(null);
+  const busy = useBusyTask();
   const canEdit = me.permissions.includes("edit_chat_settings");
   const change = (seconds: number) => {
     if (!settings.data) return;
-    apiSend("PUT", "/api/chat-settings", { ...settings.data, chatSlowModeSec: seconds }).then(
-      () => {
+    setMessage(null);
+    busy.run(() => apiSend("PUT", "/api/chat-settings", { ...settings.data, chatSlowModeSec: seconds })).then(
+      (started) => {
+        if (!started) return;
         setMessage(seconds === 0 ? "저속 모드를 껐습니다." : `저속 모드를 ${seconds}초로 바꿨습니다.`);
         settings.reload();
       },
@@ -31,7 +35,7 @@ export function ChatSettingsSection({ me }: { me: MeDto }) {
       {settings.data && (
         <label className="field">
           저속 모드
-          <select value={settings.data.chatSlowModeSec} disabled={!canEdit} onChange={(event) => change(Number(event.target.value))}>
+          <select value={settings.data.chatSlowModeSec} disabled={!canEdit || busy.isBusy} onChange={(event) => change(Number(event.target.value))}>
             {SLOW_MODE_OPTIONS.map((seconds) => <option key={seconds} value={seconds}>{seconds === 0 ? "끔" : `${seconds}초`}</option>)}
           </select>
         </label>

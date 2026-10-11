@@ -34,4 +34,31 @@ describe("AccountSection", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
+
+  it("연결 해제 확인을 취소하면 아무 요청도 보내지 않는다", async () => {
+    const fetchMock = stubFetch({});
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    const owner: MeDto = { ...chatManager, permissions: [...chatManager.permissions, "connect_channel"] };
+    render(<AccountSection me={owner} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "채널 연결 해제" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("로그아웃 요청이 401이어도 로컬 로그아웃을 마친다", async () => {
+    stubFetch({ "POST /api/logout": () => json(401, { error: "unauthorized", message: "세션이 끝났습니다." }) });
+    const onSignedOut = vi.fn();
+    render(<AccountSection me={chatManager} onSignedOut={onSignedOut} />);
+    await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalledWith(null));
+  });
+
+  it("로그아웃이 진행 중이면 버튼이 잠기고 두 번 눌러도 요청은 한 번이다", async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountSection me={chatManager} onSignedOut={vi.fn()} />);
+    const button = screen.getByRole("button", { name: "로그아웃" });
+    await userEvent.dblClick(button);
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
