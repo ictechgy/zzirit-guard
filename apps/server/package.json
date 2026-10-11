@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
+    "replay": "node dist/tools/replayLoad.js",
     "test": "vitest run"
   },
   "dependencies": {
