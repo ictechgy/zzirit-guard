@@ -71,5 +71,6 @@ button:disabled { opacity: 0.4; }
 .rows dd { margin: 0; }
 .false-positive-counts { padding-left: 18px; }
 .field, .rule-form label { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
-input, select { min-height: 40px; border-radius: 8px; border: 1px solid #3a3a48; background: #101018; color: var(--text); padding: 0 8px; font-size: 15px; }
+/* 입력 글자는 16px 이상: 더 작으면 iOS Safari가 누를 때마다 화면을 확대해 홈 화면 앱이 어긋난다(F10). */
+input, select, textarea { min-height: 40px; border-radius: 8px; border: 1px solid #3a3a48; background: #101018; color: var(--text); padding: 0 8px; font-size: 16px; }
 .splash { padding: 48px; text-align: center; color: var(--muted); }

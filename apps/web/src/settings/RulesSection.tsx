@@ -19,7 +19,15 @@ export interface RulesSectionProps {
   refreshKey?: number;
 }
 
-/** 규칙 목록과 추가·삭제(스펙 6장 ③). 수정 권한(edit_rules)이 없으면 목록만 보인다. */
+/**
+ * 규칙 삭제 확인 문구. 삭제 버튼은 규칙마다 붙어 있어 잘못 누르기 쉽고, 지운 금칙어는 다시 입력하기 전까지 거르지 않는다(F10).
+ * @param pattern 지울 규칙 내용(텍스트로만 보인다)
+ */
+function confirmRemoval(pattern: string): boolean {
+  return window.confirm(`'${pattern}' 규칙을 지울까요?`);
+}
+
+/** 규칙 목록과 추가·삭제(스펙 6장 ③). 수정 권한(edit_rules)이 없으면 목록만 보인다. 삭제는 먼저 묻는다. */
 export function RulesSection({ me, refreshKey = 0 }: RulesSectionProps) {
   const rules = useApiResource<RuleEntryDto[]>("/api/rules", null, refreshKey);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +54,9 @@ export function RulesSection({ me, refreshKey = 0 }: RulesSectionProps) {
       {canEdit ? <RuleForm isBusy={busy.isBusy} onAdd={(kind, pattern) => run(() => apiSend("POST", "/api/rules", { kind, pattern }))} /> : <p className="hint">규칙은 채널 관리자 이상만 바꿀 수 있습니다.</p>}
       {EDITABLE_KINDS.map((kind) => (
         <RuleGroup key={kind} kind={kind} rules={(rules.data ?? []).filter((rule) => rule.kind === kind)} canEdit={canEdit} isBusy={busy.isBusy}
-          onRemove={(rule) => void run(() => apiSend("DELETE", `/api/rules/${rule.id}`))} />
+          onRemove={(rule) => {
+            if (confirmRemoval(rule.pattern)) void run(() => apiSend("DELETE", `/api/rules/${rule.id}`));
+          }} />
       ))}
     </section>
   );

@@ -121,6 +121,29 @@ describe("ChatSettingsSection 최신 값 병합(F5)", () => {
   });
 });
 
+describe("RulesSection 삭제 확인(F10)", () => {
+  /** 지울 규칙(중립 자리표시자, R-10). */
+  const rule: RuleEntryDto = { id: 7, kind: "weak", pattern: "금칙어예시", createdBy: "m1", createdAt: 0 };
+
+  it("삭제는 규칙 내용을 보여 주며 먼저 묻고, 취소하면 DELETE를 보내지 않는다", async () => {
+    const fetchMock = stubFetch({ "GET /api/rules": () => json(200, [rule]) });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<RulesSection me={manager} />);
+    await userEvent.click(await screen.findByRole("button", { name: "금칙어예시 삭제" }));
+    expect(confirm).toHaveBeenCalledWith("'금칙어예시' 규칙을 지울까요?");
+    expect(callsTo(fetchMock, "DELETE", "/api/rules/7")).toBe(0);
+  });
+
+  it("확인하면 DELETE를 보낸다", async () => {
+    const fetchMock = stubFetch({ "GET /api/rules": () => json(200, [rule]), "DELETE /api/rules/7": () => json(200, { ok: true }) });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<RulesSection me={manager} />);
+    await userEvent.click(await screen.findByRole("button", { name: "금칙어예시 삭제" }));
+    await waitFor(() => expect(callsTo(fetchMock, "DELETE", "/api/rules/7")).toBe(1));
+  });
+});
+
 describe("RulesSection 입력", () => {
   it("추가가 400으로 실패하면 입력한 글자가 남고 오류가 보인다", async () => {
     stubFetch({
