@@ -1,6 +1,6 @@
-import type { VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
+import type { VerdictStatus } from "@zzirit-guard/shared";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import type { CandidateSections } from "../domain/candidates";
+import { actionableVerdicts, allVerdicts, type CandidateSections } from "../domain/candidates";
 
 /**
  * 손을 뗀 뒤에도 목록을 고정해 두는 시간(1.5초).
@@ -65,16 +65,6 @@ function compareSnapshot(snapshot: CandidateSections, latest: CandidateSections)
   const shownIds = new Set(shown.map((verdict) => verdict.id));
   const newCount = actionableVerdicts(latest).filter((verdict) => !shownIds.has(verdict.id)).length;
   return { handledIds, newCount };
-}
-
-/** 처리를 기다리는 판정(도움 필요·섀도·후보·숨김 대기). 탭 배지(countActionable)와 같은 구역이다. */
-function actionableVerdicts(sections: CandidateSections): VerdictDto[] {
-  return [...sections.care, ...sections.shadow, ...sections.candidates].flatMap((group) => group.verdicts).concat(sections.autoHidePending);
-}
-
-/** 구역에 든 모든 판정. 고정 화면의 줄이 지금 어떤 상태인지 찾는 데 쓴다. */
-function allVerdicts(sections: CandidateSections): VerdictDto[] {
-  return actionableVerdicts(sections).concat(sections.autoHidden, sections.restrictedAfterAutoHide);
 }
 
 /**

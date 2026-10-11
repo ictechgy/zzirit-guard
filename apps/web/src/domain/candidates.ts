@@ -69,6 +69,25 @@ export function buildSections(verdicts: readonly VerdictDto[], now: number): Can
   };
 }
 
+/** 처리를 기다리는 판정(도움 필요·섀도·후보·숨김 대기). 탭 배지(countActionable)와 같은 구역이다. */
+export function actionableVerdicts(sections: CandidateSections): VerdictDto[] {
+  return [...sections.care, ...sections.shadow, ...sections.candidates].flatMap((group) => group.verdicts).concat(sections.autoHidePending);
+}
+
+/** 구역에 든 모든 판정. 화면의 줄이 지금 어떤 상태인지 찾는 데 쓴다. */
+export function allVerdicts(sections: CandidateSections): VerdictDto[] {
+  return actionableVerdicts(sections).concat(sections.autoHidden, sections.restrictedAfterAutoHide);
+}
+
+/**
+ * 구역에서 판정의 지금 상태를 찾는다. 구역에 없으면(처리돼 빠졌거나 10분 창을 넘겼으면) null.
+ * @param sections 최신 구역
+ * @param verdictId 판정 번호
+ */
+export function findVerdictStatus(sections: CandidateSections, verdictId: number): VerdictStatus | null {
+  return allVerdicts(sections).find((verdict) => verdict.id === verdictId)?.status ?? null;
+}
+
 /** 처리를 기다리는 항목 수: 사람 묶음(도움 필요·섀도·후보) 수 + 숨기지 못한 자동 숨김 건수. 탭 배지와 "후보 없음" 판단에 쓴다. */
 export function countActionable(sections: CandidateSections): number {
   return sections.care.length + sections.shadow.length + sections.candidates.length + sections.autoHidePending.length;

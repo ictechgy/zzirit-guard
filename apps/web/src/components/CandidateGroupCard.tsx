@@ -58,7 +58,7 @@ export function CandidateGroupCard({ group, kind, permissions, run, lockedKeys, 
       <header className="card-header">
         <strong>{group.senderNickname}</strong>
         <span className="count">{group.verdicts.length}건</span>
-        <button type="button" aria-label={`${group.senderNickname} 임시 제한`} disabled={!permissions.includes("temporary_restrict") || lockedKeys.has(restrictKey) || isGroupHandled} onClick={() => run(restrictKey, () => actions.temporaryRestrict(group))}>
+        <button type="button" aria-label={`${group.senderNickname} 임시 제한`} disabled={!permissions.includes("temporary_restrict") || lockedKeys.has(restrictKey) || isGroupHandled} onClick={() => run(restrictKey, () => actions.temporaryRestrict(group), group.verdicts[0]?.id)}>
           임시 제한
         </button>
       </header>
@@ -81,11 +81,11 @@ function MessageRow({ verdict, kind, canHide, run, isLocked, isHandled, actions 
       <span className="content">{verdict.content}</span>
       <span className="reason">{describeReason(verdict.reason)}{isHandled && <span className="handled-label">처리됨</span>}</span>
       <span className="buttons">
-        <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 숨기기`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.hide(verdict))}>숨기기</button>
+        <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 숨기기`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.hide(verdict), verdict.id)}>숨기기</button>
         {kind === "shadow" ? (
-          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.reportFalsePositive(verdict))}>오판</button>
+          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.reportFalsePositive(verdict), verdict.id)}>오판</button>
         ) : (
-          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 무시`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.ignore(verdict))}>무시</button>
+          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 무시`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.ignore(verdict), verdict.id)}>무시</button>
         )}
       </span>
     </li>

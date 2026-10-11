@@ -1,4 +1,4 @@
-import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
+import type { MeDto, ServerStatus, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
 import { memo, useCallback, useRef, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
 import { ActionToast, type ActionFeedback } from "../components/ActionToast";
@@ -6,9 +6,10 @@ import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
 import { StatusBanner } from "../components/StatusBanner";
-import { countActionable, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
 import { useStableSections } from "../state/useStableSections";
+import { useTimeoutHolds, type TimeoutHolds } from "../state/useTimeoutHolds";
 
 /** 후보 화면이 부르는 동작. 성공하면 화면에 보여 줄 안내(없으면 null)를 돌려준다. MainScreen이 API로 채우고, 테스트는 가짜를 넘긴다. */
 export interface CandidateActions {
@@ -27,8 +28,10 @@ export interface CandidateActions {
 /**
  * 동작 하나를 실행하고 결과(안내 또는 오류)를 화면에 남기는 함수.
  * lockKey가 같은 동작이 진행 중이면 실행하지 않는다(두 번 보내기 방지). 열쇠가 다른 동작은 서로 막지 않는다(F2).
+ * watchedVerdictId를 주면 시간이 초과됐을 때 그 판정의 상태가 바뀔 때까지(최대 60초) 잠금을 붙잡는다(B19-7).
+ * 자동 숨김 스위치에는 주지 않는다: 끄기(안전장치)는 늦더라도 바로 다시 누를 수 있어야 한다.
  */
-export type ActionRunner = (lockKey: string, task: () => Promise<string | null>) => void;
+export type ActionRunner = (lockKey: string, task: () => Promise<string | null>, watchedVerdictId?: number) => void;
 
 /** 후보 화면 속성. */
 export interface CandidatesScreenProps {
@@ -67,29 +70,64 @@ const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kin
  */
 const ALREADY_HANDLED_NOTICE = "이미 처리된 항목입니다. 목록을 다시 불러왔습니다.";
 
+/** 시간이 초과돼 잠금을 붙잡을 때 오류 문구 뒤에 붙이는 안내(B19-7). 다시 누르면 같은 조치가 두 번 갈 수 있다. */
+const TIMEOUT_HOLD_SUFFIX = "다시 누르지 마세요.";
+
+/** 동작 실행기가 쓰는 화면 쪽 도구. */
+interface RunnerContext {
+  /** 결과를 화면에 남긴다. */
+  setFeedback(feedback: ActionFeedback): void;
+  /** 목록을 다시 읽는다. */
+  onReload(): void;
+  /** 열쇠별 잠금(같은 열쇠의 동작만 막는다). */
+  locks: ActionLocks;
+  /** 시간 초과된 조치의 잠금 붙잡기. */
+  holds: TimeoutHolds;
+  /** 판정의 지금 상태(최신 구역 기준, 없으면 null). */
+  statusOf(verdictId: number): VerdictStatus | null;
+}
+
 /**
  * 동작 실행기를 만든다. 성공하면 안내를, 실패하면 서버 문구를 남긴다.
  * 이미 처리된 판정(409 already_handled)이면 화면이 낡은 것이므로 목록을 다시 읽고 안내(info)로 알린다(R-13·B19-6).
- * @param setFeedback 결과를 화면에 남긴다
- * @param onReload 목록을 다시 읽는다
- * @param locks 열쇠별 잠금(같은 열쇠의 동작만 막는다)
+ * 시간이 초과되면(지켜볼 판정이 있을 때) 잠금을 바로 풀지 않고 붙잡는다(B19-7).
+ * @param context 결과 표시·다시 읽기·잠금·판정 상태 조회
  */
-function createRunner(setFeedback: (feedback: ActionFeedback) => void, onReload: () => void, locks: ActionLocks): ActionRunner {
-  return (lockKey, task) => {
-    if (!locks.tryLock(lockKey)) return;
-    setFeedback(null);
+function createRunner(context: RunnerContext): ActionRunner {
+  return (lockKey, task, watchedVerdictId) => {
+    if (!context.locks.tryLock(lockKey)) return;
+    const statusAtStart = watchedVerdictId === undefined ? null : context.statusOf(watchedVerdictId);
+    context.setFeedback(null);
+    let isHeld = false;
     startTask(task).then(
-      (message) => setFeedback(message ? { kind: "ok", message } : null),
+      (message) => context.setFeedback(message ? { kind: "ok", message } : null),
       (error: unknown) => {
-        if (error instanceof ApiError && error.code === "already_handled") {
-          setFeedback({ kind: "info", message: ALREADY_HANDLED_NOTICE });
-          onReload();
-          return;
+        if (error instanceof ApiError && error.code === "timeout" && watchedVerdictId !== undefined) {
+          isHeld = true;
+          context.holds.hold(lockKey, watchedVerdictId, statusAtStart);
         }
-        setFeedback({ kind: "error", message: describeApiError(error) });
+        reportFailure(context, error, isHeld);
       },
-    ).finally(() => locks.unlock(lockKey));
+    ).finally(() => {
+      if (!isHeld) context.locks.unlock(lockKey);
+    });
   };
+}
+
+/**
+ * 실패를 화면에 남긴다. 이미 처리된 판정이면 목록을 다시 읽고 안내로, 잠금을 붙잡았으면 다시 누르지 말라고 덧붙인다.
+ * @param context 결과 표시·다시 읽기
+ * @param error 동작이 던진 오류
+ * @param isHeld 시간 초과로 잠금을 붙잡았는지
+ */
+function reportFailure(context: RunnerContext, error: unknown, isHeld: boolean): void {
+  if (error instanceof ApiError && error.code === "already_handled") {
+    context.setFeedback({ kind: "info", message: ALREADY_HANDLED_NOTICE });
+    context.onReload();
+    return;
+  }
+  const message = describeApiError(error);
+  context.setFeedback({ kind: "error", message: isHeld ? `${message} ${TIMEOUT_HOLD_SUFFIX}` : message });
 }
 
 /**
@@ -115,7 +153,8 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   // 알림 닫기. ActionToast가 4초 타이머의 의존성으로 쓰므로 렌더마다 같은 함수여야 한다(아니면 타이머가 다시 시작된다).
   const dismissFeedback = useCallback(() => setFeedback(null), []);
   const locks = useActionLocks();
-  const run = createRunner(setFeedback, onReload, locks);
+  const holds = useTimeoutHolds(sections, locks.unlock);
+  const run = createRunner({ setFeedback, onReload, locks, holds, statusOf: (verdictId) => findVerdictStatus(sections, verdictId) });
   const { lockedKeys } = locks;
   const canHide = me.permissions.includes("hide_message");
   const autoHideEnabled = status?.autoHideEnabled ?? null;

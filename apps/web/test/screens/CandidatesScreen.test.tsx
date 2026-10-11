@@ -6,6 +6,7 @@ import { ApiError } from "../../src/api/client";
 import { formatClockTime } from "../../src/domain/timeFormat";
 import { buildSections } from "../../src/domain/candidates";
 import { CandidatesScreen, type CandidateActions } from "../../src/screens/CandidatesScreen";
+import { TIMEOUT_LOCK_MS } from "../../src/state/useTimeoutHolds";
 
 /** 채팅 운영자. */
 const chatManager: MeDto = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER", permissions: ["disable_auto_hide", "hide_message", "temporary_restrict"] };
@@ -376,5 +377,54 @@ describe("CandidatesScreen 작업 결과 알림(F9, 스모크 S3)", () => {
     expect(alert.closest(".toast")).not.toBeNull();
     fireEvent.click(within(alert).getByRole("button", { name: "작업 결과 닫기" }));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", () => {
+  /** 시간 초과 오류(client.ts가 AbortSignal.timeout으로 만든다). */
+  const timeoutError = () => new ApiError(0, "timeout", "응답이 늦습니다. 결과는 잠시 뒤 목록에 반영됩니다.");
+
+  it("숨기기가 시간 초과되면 '다시 누르지 마세요'를 알리고, 60초가 지날 때까지 같은 줄을 다시 보내지 않는다", async () => {
+    vi.useFakeTimers();
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw timeoutError(); });
+    renderScreen([verdict(1)], fakeActions({ hide }));
+    const hideButton = () => screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement;
+    fireEvent.click(hideButton());
+    await act(async () => undefined);
+    expect(screen.getByRole("alert").textContent).toMatch(/응답이 늦습니다.*다시 누르지 마세요/);
+    fireEvent.click(hideButton());
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(hideButton());
+    expect(hide).toHaveBeenCalledTimes(1);
+    expect(hideButton().disabled).toBe(true);
+    act(() => vi.advanceTimersByTime(1));
+    expect(hideButton().disabled).toBe(false);
+    fireEvent.click(hideButton());
+    await act(async () => undefined);
+    expect(hide).toHaveBeenCalledTimes(2);
+  });
+
+  it("시간 초과된 임시 제한은 그 판정의 상태가 바뀌면(서버가 처리했으면) 60초를 기다리지 않고 풀린다", async () => {
+    vi.useFakeTimers();
+    const temporaryRestrict = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
+    const actions = fakeActions({ temporaryRestrict });
+    const screenFor = (verdicts: VerdictDto[]) => <CandidatesScreen me={chatManager} status={status} sections={buildSections(verdicts, NOW)} realtimeConnected actions={actions} onReload={vi.fn()} {...noNotice} />;
+    const { rerender } = render(screenFor([verdict(1), verdict(2)]));
+    const restrictButton = () => screen.getByRole("button", { name: "악플러 임시 제한" }) as HTMLButtonElement;
+    fireEvent.click(restrictButton());
+    await act(async () => undefined);
+    expect(restrictButton().disabled).toBe(true);
+    rerender(screenFor([verdict(1), verdict(2)]));
+    expect(restrictButton().disabled).toBe(true);
+    rerender(screenFor([verdict(1, { status: "restricted" }), verdict(2)]));
+    expect(restrictButton().disabled).toBe(false);
+  });
+
+  it("자동 숨김 끄기는 시간 초과돼도 붙잡지 않는다(안전장치는 바로 다시 누를 수 있어야 한다)", async () => {
+    const setAutoHide = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
+    renderScreen([], fakeActions({ setAutoHide }), { ...status, autoHideEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: /자동 숨김: 켜짐/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: /자동 숨김: 켜짐/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByRole("alert").textContent).not.toMatch(/다시 누르지 마세요/);
   });
 });

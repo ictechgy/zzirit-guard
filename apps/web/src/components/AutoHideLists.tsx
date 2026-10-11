@@ -66,7 +66,7 @@ function VerdictRow({ list, verdict, buttons }: VerdictRowProps) {
       <span className="buttons">
         {buttons.map((kind) => (
           <button key={kind} type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} ${ROW_BUTTON_LABELS[kind].accessibleSuffix}`}
-            disabled={isDisabled} onClick={() => list.run(lockKey, () => perform(kind))}>{ROW_BUTTON_LABELS[kind].text}</button>
+            disabled={isDisabled} onClick={() => list.run(lockKey, () => perform(kind), verdict.id)}>{ROW_BUTTON_LABELS[kind].text}</button>
         ))}
       </span>
     </li>
