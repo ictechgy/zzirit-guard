@@ -239,6 +239,26 @@ describe("RealtimeConnection 재시작·옛 이벤트 차단", () => {
     expect(issueTicket).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    [JSON.stringify({ type: "verdict_status", verdictId: 1, status: "hidden" })],
+    [JSON.stringify({ type: "session_ended", reason: "옛 세션" })],
+  ])("다시 시작한 뒤 닫히는 중인 옛 소켓의 메시지는 무시한다", async (raw) => {
+    const { realtime, sockets, events, connection } = setup();
+    realtime.start();
+    await flushPromises();
+    const staleOnMessage = sockets[0]?.onmessage;
+    realtime.stop();
+    realtime.start();
+    await flushPromises();
+    expect(sockets).toHaveLength(2);
+    staleOnMessage?.({ data: raw });
+    expect(events).toEqual([]);
+    expect(connection.states).toEqual([false]);
+    expect(connection.ended).toEqual([]);
+    sockets[1]?.onmessage?.({ data: STATUS_MESSAGE });
+    expect(connection.states).toEqual([false, true]);
+  });
+
   it("멈춘 뒤 도착한 티켓 오류는 아무것도 예약하거나 알리지 않는다", async () => {
     const ticket = deferredTicket();
     const { realtime, scheduled, connection } = setup(ticket.issueTicket);

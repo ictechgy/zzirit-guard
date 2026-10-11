@@ -7,6 +7,8 @@ export interface SocketLike {
   onmessage: ((event: { data: unknown }) => void) | null;
   /** 연결이 닫혔을 때(닫기 코드 포함). */
   onclose: ((event: { code: number }) => void) | null;
+  /** 연결 오류가 났을 때(선택). stop()이 옛 소켓에서 떼어 낼 수 있게 둔다. */
+  onerror?: (() => void) | null;
   /** 연결을 닫는다. */
   close(): void;
 }
@@ -133,6 +135,9 @@ export class RealtimeConnection {
     this.socket = null;
     if (!socket) return;
     socket.close();
+    socket.onmessage = null;
+    socket.onclose = null;
+    socket.onerror = null;
     this.options.onConnectionChange(false);
   }
 
@@ -156,6 +161,7 @@ export class RealtimeConnection {
     this.socket = socket;
     let received = false;
     socket.onmessage = (event) => {
+      if (this.socket !== socket) return;
       if (!received) this.markConnected();
       received = true;
       this.handleMessage(event.data);
