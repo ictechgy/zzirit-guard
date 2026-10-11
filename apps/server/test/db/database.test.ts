@@ -3,6 +3,11 @@ import { openDatabase } from "../../src/db/database.js";
 import { runMigrations } from "../../src/db/migrations.js";
 
 describe("openDatabase", () => {
+  it("지운 행이 파일에 남지 않게 secure_delete를 켠다(F5)", () => {
+    const database = openDatabase(":memory:");
+    expect(database.pragma("secure_delete", { simple: true })).toBe(1);
+  });
+
   it("스펙 11장의 테이블을 모두 만든다", () => {
     const database = openDatabase(":memory:");
     const tables = database

@@ -45,6 +45,23 @@ describe("runRetention", () => {
     expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ audits: 1, stats: 1 });
   });
 
+  it("정리 뒤 WAL을 비워, 지운 원문이 WAL 파일에 남지 않게 한다(F5)", () => {
+    const path = join(makeTemporaryDirectory(), "zzirit-guard.sqlite");
+    let now = 0;
+    const database = openDatabase(path);
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now);
+    const sessions = createSessionStore(database, () => now);
+    verdicts.insert({ channelId: "c1", chatChannelId: "x", messageTime: 0, senderChannelId: "s", senderNickname: "n", content: "지워야 할 원문", decision: "candidate", reason: "r" });
+    now = 31 * DAY;
+    expect(statSync(`${path}-wal`).size).toBeGreaterThan(0);
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 1 });
+    expect(statSync(`${path}-wal`).size).toBe(0);
+    database.close();
+  });
+
   it("채널 설정의 보관 기간(7일)을 따른다", () => {
     let now = 100 * DAY;
     const database = openDatabase(":memory:");
@@ -128,6 +145,17 @@ describe("runBackup", () => {
     } as unknown as Parameters<typeof runBackup>[0];
     await expect(runBackup(partialWritingDatabase, directory, () => Date.UTC(2026, 9, 11))).rejects.toThrow("디스크 가득 참");
     expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it("이전 실행이 죽어 남은 부분 파일(.partial)을 시작할 때 지운다(F5)", async () => {
+    const directory = makeTemporaryDirectory();
+    const stale = join(directory, "zzirit-guard-20261010-000000.sqlite.partial");
+    writeFileSync(stale, "원문이 든 미완성 백업");
+    writeFileSync(join(directory, "other.partial"), "");
+    const database = openDatabase(":memory:");
+    await runBackup(database, directory, () => Date.UTC(2026, 9, 11));
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(join(directory, "other.partial"))).toBe(true);
   });
 
   it("방금 만든 백업은 보존 개수 정리에서 지우지 않는다(미래 시각 백업이 있어도)", async () => {

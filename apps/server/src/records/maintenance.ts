@@ -33,6 +33,8 @@ const DEFAULT_BACKUP_KEEP = 7;
 const BACKUP_PATTERN = /^zzirit-guard-\d{8}-\d{6}\.sqlite$/;
 /** 백업 작성 중 임시 파일 접미사. BACKUP_PATTERN에 맞지 않아 정리 대상이 되지 않는다. */
 const PARTIAL_SUFFIX = ".partial";
+/** 이전 실행이 죽어 남은 임시 백업 파일 이름. 이 형식만 지워, 같은 디렉터리의 다른 파일은 건드리지 않는다. */
+const STALE_PARTIAL_PATTERN = /^zzirit-guard-\d{8}-\d{6}\.sqlite\.partial$/;
 /**
  * 백업 디렉터리 권한(소유자만 접근). 백업에는 암호화된 토큰과 원문이 들어 있어
  * 같은 기기의 다른 사용자가 읽지 못하게 한다.
@@ -44,18 +46,22 @@ const BACKUP_FILE_MODE = 0o600;
 /**
  * 보관 기한이 지난 기록을 지운다(매일 실행).
  * 판정 원문은 content 기간, 감사 기록과 분당 통계는 audit 기간을 따른다.
+ * 지운 뒤 WAL을 체크포인트하고 0바이트로 줄인다. 왜: WAL 모드에서는 지우기 전 페이지(원문 포함)가 WAL 파일에 남아 있어,
+ * secure_delete만으로는 파기가 끝나지 않는다(F5). 읽는 쪽이 있어 다 비우지 못하면 다음 날 실행에서 다시 시도된다.
  * @returns 종류별로 지운 행 수
  */
 export function runRetention(deps: RetentionDeps): RetentionResult {
   const now = deps.clock();
   const days = readRetentionDays(deps.database);
   const auditCutoff = now - days.audit * DAY_MS;
-  return {
+  const result: RetentionResult = {
     verdicts: deps.verdicts.deleteOlderThan(now - days.content * DAY_MS),
     audits: deps.auditLog.deleteOlderThan(auditCutoff),
     stats: deps.database.prepare("DELETE FROM minute_stat WHERE minute < ?").run(auditCutoff).changes,
     sessions: deps.sessions.deleteExpired(),
   };
+  deps.database.pragma("wal_checkpoint(TRUNCATE)");
+  return result;
 }
 
 /**
@@ -83,6 +89,7 @@ function readRetentionDays(database: Database): { content: number; audit: number
  */
 export async function runBackup(database: Database, backupDirectory: string, clock: Clock, keep = DEFAULT_BACKUP_KEEP): Promise<string> {
   prepareBackupDirectory(backupDirectory);
+  removeStalePartials(backupDirectory);
   const finalPath = join(backupDirectory, `zzirit-guard-${formatTimestamp(clock())}.sqlite`);
   await writeBackupFile(database, finalPath);
   pruneBackups(backupDirectory, Math.max(1, keep), finalPath);
@@ -113,6 +120,17 @@ async function writeBackupFile(database: Database, finalPath: string): Promise<v
 function prepareBackupDirectory(backupDirectory: string): void {
   mkdirSync(backupDirectory, { recursive: true, mode: BACKUP_DIRECTORY_MODE });
   chmodSync(backupDirectory, BACKUP_DIRECTORY_MODE);
+}
+
+/**
+ * 이전 실행이 백업 도중 죽어 남긴 임시 파일을 지운다.
+ * 왜: 임시 파일에도 원문이 들어 있는데 BACKUP_PATTERN에 맞지 않아 보존 개수 정리에 걸리지 않으므로, 그대로 두면 보관 기한 없이 남는다(F5).
+ * @param backupDirectory 백업 디렉터리
+ */
+function removeStalePartials(backupDirectory: string): void {
+  readdirSync(backupDirectory)
+    .filter((name) => STALE_PARTIAL_PATTERN.test(name))
+    .forEach((name) => rmSync(join(backupDirectory, name), { force: true }));
 }
 
 /** UTC 기준 YYYYMMDD-HHmmss. */
