@@ -51,9 +51,9 @@ export function apiSend<T>(method: MutatingMethod, path: string, body: unknown =
   return request<T>(method, path, body);
 }
 
-/** 화면에 보여 줄 오류 문구를 고른다. */
+/** 화면에 보여 줄 오류 문구를 고른다. "새로고침" 대신 홈 화면 앱에서도 할 수 있는 방법(다시 불러오기·앱 다시 열기)을 안내한다(F10). */
 export function describeApiError(error: unknown): string {
-  return error instanceof ApiError ? error.message : "알 수 없는 오류가 발생했습니다. 앱을 새로고침하세요.";
+  return error instanceof ApiError ? error.message : "알 수 없는 오류가 발생했습니다. 다시 불러오기를 누르거나 앱을 다시 여세요.";
 }
 
 /**
@@ -114,7 +114,7 @@ function parseBody(status: number, text: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new ApiError(status, "bad_response", "서버 응답 형식이 올바르지 않습니다. 앱을 새로고침하세요.", { cause: error });
+    throw new ApiError(status, "bad_response", "서버 응답 형식이 올바르지 않습니다. 다시 불러오기를 누르거나 앱을 다시 여세요.", { cause: error });
   }
 }
 

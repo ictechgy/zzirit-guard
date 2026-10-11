@@ -1,4 +1,4 @@
-import type { ChatLine, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
+import type { ChatLine, RealtimeEvent, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
 import { describe, expect, it } from "vitest";
 import { VERDICT_KEEP_MS } from "../../src/domain/candidates";
 import { initialServerState, MAX_CHAT_LINES, serverReducer, type ServerAction, type ServerState } from "../../src/state/serverReducer";
@@ -100,6 +100,12 @@ describe("serverReducer", () => {
       { type: "event", event: { type: "verdict", verdict: verdict(2, { createdAt: VERDICT_KEEP_MS + 1 }) } },
     ]);
     expect(state.verdicts.map((item) => item.id)).toEqual([2]);
+  });
+
+  it("모르는 실시간 이벤트 종류는 상태를 그대로 둔다(서버가 먼저 새 종류를 보내도 화면이 깨지지 않게, F10)", () => {
+    const before = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [verdict(1)] }]);
+    const after = serverReducer(before, { type: "event", event: { type: "future_event", payload: 1 } as unknown as RealtimeEvent });
+    expect(after).toBe(before);
   });
 
   it("실시간 연결이 거듭 거절되면 표시하고, 다시 연결되면 지운다(R-6)", () => {

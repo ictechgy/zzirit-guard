@@ -39,6 +39,8 @@ describe("인증과 요청 출처", () => {
     const rawId = harness.login("STREAMING_CHANNEL_OWNER");
     const noMarker = await harness.app.inject({ method: "POST", url: "/api/auto-hide", headers: { cookie: `zg_session=${rawId}` }, payload: { enabled: true } });
     expect(noMarker.statusCode).toBe(403);
+    // 홈 화면 앱에는 새로고침이 없어, 할 수 있는 방법(앱을 다시 열기)을 안내한다(F10).
+    expect(noMarker.json().message).toBe("요청 출처를 확인할 수 없습니다. 앱을 닫았다가 다시 연 뒤 시도하세요.");
     const foreign = await harness.app.inject({ method: "POST", url: "/api/auto-hide", headers: { ...mutatingHeaders(rawId), origin: "https://evil.example" }, payload: { enabled: true } });
     expect(foreign.statusCode).toBe(403);
   });

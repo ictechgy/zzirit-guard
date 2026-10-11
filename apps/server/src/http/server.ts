@@ -71,7 +71,8 @@ async function rejectCrossSite(publicOrigin: string, request: FastifyRequest, re
   if (SAFE_METHODS.has(request.method)) return;
   const origin = request.headers.origin;
   if (request.headers[REQUEST_MARKER_HEADER] === "1" && (origin === undefined || origin === publicOrigin)) return;
-  return reply.code(403).send(errorBody("cross_site", "요청 출처를 확인할 수 없습니다. 앱을 새로고침한 뒤 다시 시도하세요."));
+  // 왜 "새로고침"이 아닌가: iOS 홈 화면 앱에는 새로고침이 없다(F10).
+  return reply.code(403).send(errorBody("cross_site", "요청 출처를 확인할 수 없습니다. 앱을 닫았다가 다시 연 뒤 시도하세요."));
 }
 
 /** 보안 헤더: CSP(스크립트는 같은 출처만, 인라인 스크립트 금지), MIME 추측 금지, 리퍼러 숨김. */

@@ -55,13 +55,13 @@ describe("api client", () => {
   it("JSON이 아닌 응답은 형식 오류이고, 해석 오류를 cause로 남긴다", async () => {
     stubFetch({ "GET /api/me": () => new Response("<html>", { status: 200 }) });
     const error = await apiGet("/api/me").catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ code: "bad_response" });
+    expect(error).toMatchObject({ code: "bad_response", message: "서버 응답 형식이 올바르지 않습니다. 다시 불러오기를 누르거나 앱을 다시 여세요." });
     expect((error as ApiError).cause).toBeInstanceOf(SyntaxError);
   });
 
   it("오류 문구를 고른다", () => {
     expect(describeApiError(new ApiError(409, "write_locked", "다시 연결하세요"))).toBe("다시 연결하세요");
-    expect(describeApiError(new Error("x"))).toMatch(/새로고침/);
+    expect(describeApiError(new Error("x"))).toBe("알 수 없는 오류가 발생했습니다. 다시 불러오기를 누르거나 앱을 다시 여세요.");
   });
 
   it("세션이 끝났거나(401) 채널 연결이 사라진(409 no_channel) 오류만 로그인이 필요하다고 본다(R-12)", () => {

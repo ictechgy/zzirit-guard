@@ -96,6 +96,9 @@ function applyEvent(state: ServerState, event: RealtimeEvent): ServerState {
       return { ...state, status: event.status };
     case "session_ended":
       return { ...state, sessionEndedReason: event.reason };
+    default:
+      // 모르는 종류(서버가 먼저 새 이벤트를 보낸 경우)는 무시한다: undefined를 돌려주면 상태 전체가 사라져 화면이 깨진다(F10).
+      return state;
   }
 }
 

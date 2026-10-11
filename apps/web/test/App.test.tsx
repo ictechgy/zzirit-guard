@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { json, stubFetch } from "./helpers/stubFetch";
@@ -69,6 +70,26 @@ describe("App", () => {
     rerender(<App />);
     expect(screen.getByText(NOT_MANAGER_TEXT)).toBeTruthy();
     expect(window.location.search).not.toContain("loginError");
+  });
+
+  it("서버가 응답하지 않으면(503) 로그인 화면 대신 '서버에 연결하지 못했습니다'와 '다시 시도'를 보여 주고, 누르면 다시 확인한다(F10)", async () => {
+    let calls = 0;
+    const fetchMock = stubFetch({
+      "GET /api/me": () => (++calls === 1 ? json(503, { error: "unavailable", message: "잠시 뒤 다시 시도하세요." }) : json(401, { error: "unauthorized", message: "로그인이 필요합니다." })),
+    });
+    render(<App />);
+    expect(await screen.findByText("서버에 연결하지 못했습니다")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "매니저 로그인" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByRole("link", { name: "매니저 로그인" })).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/me")).toHaveLength(2);
+  });
+
+  it("네트워크 오류로 내 정보를 못 읽어도 다시 시도 화면을 보여 준다(F10)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    render(<App />);
+    expect(await screen.findByText("서버에 연결하지 못했습니다")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeTruthy();
   });
 
   it("로그인했으면 탭과 후보 화면을 보여 준다", async () => {
