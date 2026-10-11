@@ -65,14 +65,15 @@ export function runRetention(deps: RetentionDeps): RetentionResult {
 }
 
 /**
- * 채널 설정의 보관 기간을 읽는다. 채널 설정이 없으면 스펙 기본값을 쓴다.
- * MVP는 채널 1곳이라 첫 행만 읽는다.
+ * 설정 행들 중 가장 짧은 보관 기간을 읽는다. 설정 행이 없으면 스펙 기본값을 쓴다.
+ * 왜 MIN인가: 채널을 바꿔도 이전 채널의 설정 행이 남는데 삭제는 채널과 무관하게 전역으로 이뤄진다.
+ * 첫 행이나 임의의 행을 쓰면 이전 채널의 더 긴 기간이 적용될 수 있어, 개인정보 보호를 위해 가장 엄격한 설정이 이기게 한다.
  */
 function readRetentionDays(database: Database): { content: number; audit: number } {
-  const row = database.prepare("SELECT retention_days_content AS content, retention_days_audit AS audit FROM setting LIMIT 1").get() as
-    | { content: number; audit: number }
-    | undefined;
-  return row ?? DEFAULT_RETENTION;
+  const row = database
+    .prepare("SELECT MIN(retention_days_content) AS content, MIN(retention_days_audit) AS audit FROM setting")
+    .get() as { content: number | null; audit: number | null };
+  return { content: row.content ?? DEFAULT_RETENTION.content, audit: row.audit ?? DEFAULT_RETENTION.audit };
 }
 
 /**

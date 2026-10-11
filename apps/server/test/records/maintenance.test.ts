@@ -77,6 +77,21 @@ describe("runRetention", () => {
     expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 1 });
   });
 
+  it("설정 행이 여러 개면 가장 짧은 보관 기간을 따른다(R3)", () => {
+    let now = 0;
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('old', '옛 채널', 0), ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id, retention_days_content, retention_days_audit) VALUES ('old', 365, 365)").run();
+    database.prepare("INSERT INTO setting (channel_id, retention_days_content, retention_days_audit) VALUES ('c1', 30, 30)").run();
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now);
+    const sessions = createSessionStore(database, () => now);
+    verdicts.insert({ channelId: "c1", chatChannelId: "x", messageTime: 0, senderChannelId: "s", senderNickname: "n", content: "c", decision: "candidate", reason: "r" });
+    auditLog.record({ channelId: "c1", actorType: "rule", actorChannelId: null, action: "hide", targetSenderChannelId: "s", verdictId: null, result: "ok", error: null });
+    now = 40 * DAY;
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 1, audits: 1 });
+  });
+
   it("보관 기한과 정확히 같은 시각의 행은 남기고, 1ms 이전 행은 지운다", () => {
     const now = 400 * DAY;
     const database = openDatabase(":memory:");
