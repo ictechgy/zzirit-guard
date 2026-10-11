@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { RuleEntry } from "../../src/detection/ruleRepository.js";
-import { findFirstMatch, stripExceptions } from "../../src/detection/wordMatch.js";
+import { findFirstIntactMatch, findFirstMatch, stripExceptions } from "../../src/detection/wordMatch.js";
 
-/** 테스트용 규칙 항목. */
-function entry(id: number, normalizedPattern: string): RuleEntry {
-  return { id, kind: "weak", pattern: normalizedPattern, normalizedPattern, createdBy: "test", createdAt: 0 };
+/** 테스트용 규칙 항목. spacedPattern을 생략하면 공백 없는 규칙으로 본다. */
+function entry(id: number, normalizedPattern: string, spacedPattern = normalizedPattern): RuleEntry {
+  return { id, kind: "weak", pattern: spacedPattern, normalizedPattern, spacedPattern, createdBy: "test", createdAt: 0 };
 }
 
 describe("wordMatch", () => {
@@ -16,5 +16,17 @@ describe("wordMatch", () => {
 
   it("목록 순서대로 첫 일치를 돌려준다", () => {
     expect(findFirstMatch("ㅂㅅ같이", [entry(3, "병신"), entry(4, "ㅂㅅ")])?.id).toBe(4);
+  });
+
+  it("findFirstIntactMatch는 공백을 넘는 일치를 찾지 않는다(F4)", () => {
+    expect(findFirstIntactMatch("김치 녀석들", [entry(5, "김치녀")])).toBeNull();
+    expect(findFirstIntactMatch("김치녀 같은", [entry(5, "김치녀")])?.id).toBe(5);
+  });
+
+  it("findFirstIntactMatch는 공백이 든 규칙을 공백 그대로도, 붙여 쓴 것도 찾는다(F4)", () => {
+    const rule = entry(6, "나쁜놈", "나쁜 놈");
+    expect(findFirstIntactMatch("이 나쁜 놈아", [rule])?.id).toBe(6);
+    expect(findFirstIntactMatch("이 나쁜놈아", [rule])?.id).toBe(6);
+    expect(findFirstIntactMatch("나 쁜 놈", [rule])).toBeNull();
   });
 });

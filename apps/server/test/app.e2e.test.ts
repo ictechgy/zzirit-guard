@@ -53,7 +53,7 @@ describe("종단 간: 연결 → 섀도 → 자동 숨김 → 매니저 권한",
     const owner = await signIn("/auth/connect", fake.owner);
     await waitFor(() => fake.subscribedSessionCount() === 1);
 
-    fake.emitChat(chatPayload("viewer-1", "홍어들은 다 이래"));
+    fake.emitChat(chatPayload("viewer-1", "느금마 진짜 웃기네"));
     await waitForAsync(async () => (await candidates(owner)).length === 1);
     expect((await candidates(owner))[0]).toMatchObject({ decision: "shadow", senderChannelId: "viewer-1" });
     expect(fake.calls.some((call) => call.path === "/open/v1/chats/blind-message")).toBe(false);

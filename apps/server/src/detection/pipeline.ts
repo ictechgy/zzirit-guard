@@ -2,10 +2,10 @@ import { isPrivilegedRole, type ChatEvent } from "../chat/chatEvent.js";
 import type { AuditLog } from "../records/auditLog.js";
 import type { GroupFloodDetector, MessageRef, PersonalFloodDetector } from "./floodDetectors.js";
 import { isTrivialMessage, type DuplicateTracker } from "./messageTraits.js";
-import { normalizeForMatching } from "./normalize.js";
+import { normalizeForMatching, normalizeKeepingWhitespace } from "./normalize.js";
 import { containsBlockedLink, containsPhoneNumber, looksLikeAddress } from "./patterns.js";
-import type { RuleRepository, RuleSnapshot } from "./ruleRepository.js";
-import { findFirstMatch, stripExceptions } from "./wordMatch.js";
+import type { RuleEntry, RuleRepository, RuleSnapshot } from "./ruleRepository.js";
+import { findFirstIntactMatch, findFirstMatch, stripExceptions } from "./wordMatch.js";
 
 /** 메시지 1건의 판정. 1단계에서는 AI가 없어 needs_care가 나오지 않는다. */
 export interface DetectionResult {
@@ -46,6 +46,8 @@ interface RuleContext {
   event: ChatEvent;
   normalized: string;
   withoutExceptions: string;
+  /** 공백을 남겨 정규화하고 예외 단어를 지운 문장. 금칙어 강이 단어 안에 그대로 있는지 볼 때 쓴다(F4). */
+  spacedWithoutExceptions: string;
   snapshot: RuleSnapshot;
   groupFloodTriggered: boolean;
   personalFloodTriggered: boolean;
@@ -87,6 +89,7 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
   return {
     event, normalized, snapshot, groupFloodTriggered,
     withoutExceptions: stripExceptions(normalized, snapshot.exception),
+    spacedWithoutExceptions: stripExceptions(normalizeKeepingWhitespace(event.content), snapshot.exception),
     personalFloodTriggered: deps.personalFlood.observe(event.senderChannelId, event.receivedAt),
   };
 }
@@ -94,17 +97,21 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
 /**
  * 스펙 5.2 순서: 금칙어 강 → 떼도배 → 광고 → 전화번호 → 허용어 → 금칙어 약 → 개인 도배 → 협박 → 주소 → 요주의 사용자.
  * 허용어는 금칙어 강·떼도배·광고·전화번호보다 뒤라서 그것들을 무력화하지 못한다.
+ * 금칙어 강은 공백을 남긴 문장에서 단어 안에 그대로 있을 때만 auto_hide다. 공백을 지워야만 걸리는 일치(단어를 걸친 우연한 일치,
+ * 글자마다 띄운 우회)는 되돌릴 수 없는 숨김 대신 후보(rule:strong_spanning)로 낮춘다(F4). 이 후보 검사는 떼도배·광고·전화번호의
+ * auto_hide를 가리지 않도록 그 뒤에, 금칙어 강의 일종이라 허용어보다는 앞에 둔다.
  */
 function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: DetectionResult["decision"]; reason: string } {
   const checks: Array<(context: RuleContext) => RuleOutcome> = [
-    (c) => matchRule(c.withoutExceptions, c.snapshot.strong, "auto_hide", "strong"),
+    (c) => matchRule(findFirstIntactMatch(c.spacedWithoutExceptions, c.snapshot.strong), "auto_hide", "strong"),
     (c) => (c.groupFloodTriggered ? { decision: "auto_hide", reason: "rule:group_flood" } : null),
     (c) => (containsBlockedLink(c.event.content, c.snapshot.allowDomains) ? { decision: "auto_hide", reason: "rule:link" } : null),
     (c) => (containsPhoneNumber(c.event.content) ? { decision: "auto_hide", reason: "rule:phone" } : null),
+    (c) => matchRule(findFirstMatch(c.withoutExceptions, c.snapshot.strong), "candidate", "strong_spanning"),
     (c) => (c.snapshot.allow.has(c.normalized) ? { decision: "pass", reason: "rule:allow" } : null),
-    (c) => matchRule(c.withoutExceptions, c.snapshot.weak, "candidate", "weak"),
+    (c) => matchRule(findFirstMatch(c.withoutExceptions, c.snapshot.weak), "candidate", "weak"),
     (c) => (c.personalFloodTriggered ? { decision: "candidate", reason: "rule:personal_flood" } : null),
-    (c) => matchRule(c.withoutExceptions, c.snapshot.threat, "candidate", "threat"),
+    (c) => matchRule(findFirstMatch(c.withoutExceptions, c.snapshot.threat), "candidate", "threat"),
     (c) => (looksLikeAddress(c.event.content) ? { decision: "candidate", reason: "rule:address" } : null),
     (c) => (isWatched(deps, c.event) ? { decision: "candidate", reason: "rule:watch_user" } : null),
   ];
@@ -115,9 +122,13 @@ function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: 
   return { decision: "pass", reason: "none" };
 }
 
-/** 단어 규칙 일치를 판정으로 바꾼다. reason에 규칙 번호를 남겨 오판 신고 때 어떤 규칙인지 알 수 있게 한다. */
-function matchRule(text: string, entries: RuleSnapshot["strong"], decision: DetectionResult["decision"], kind: string): RuleOutcome {
-  const matched = findFirstMatch(text, entries);
+/**
+ * 단어 규칙 일치를 판정으로 바꾼다. reason에 규칙 번호를 남겨 오판 신고 때 어떤 규칙인지 알 수 있게 한다.
+ * @param matched 찾은 규칙(없으면 null → 다음 규칙으로)
+ * @param decision 일치했을 때의 판정
+ * @param kind reason에 넣을 규칙 종류(strong·strong_spanning·weak·threat)
+ */
+function matchRule(matched: RuleEntry | null, decision: DetectionResult["decision"], kind: string): RuleOutcome {
   return matched ? { decision, reason: `rule:${kind}:${matched.id}` } : null;
 }
 

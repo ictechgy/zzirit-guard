@@ -80,10 +80,10 @@ describe("DecisionHandler", () => {
   });
 
   it("스위치가 꺼져 있으면 숨기지 않고 섀도로 기록한다", () => {
-    handler.handle(chat("홍어"), result("auto_hide", "홍어"));
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
     expect(verdicts.listRecent("c1", 0)[0]).toMatchObject({ decision: "shadow" });
     expect(submit).not.toHaveBeenCalled();
-    expect(chatLines).toEqual(["shadow:홍어"]);
+    expect(chatLines).toEqual(["shadow:느금마"]);
     expect(flushedStats()).toMatchObject({ shadow: 1, auto_hidden: 0 });
   });
 
@@ -114,7 +114,7 @@ describe("DecisionHandler", () => {
 
   it("숨김 요청에는 스위치 상태를 다시 확인하는 shouldRun을 붙인다", () => {
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
-    handler.handle(chat("홍어"), result("auto_hide", "홍어"));
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
     const options = submit.mock.calls[0]?.[3] as { shouldRun: () => boolean };
     expect(options.shouldRun()).toBe(true);
     autoHide.setEnabled("c1", false, { type: "manager", channelId: "m1" }, "manual");
@@ -152,11 +152,11 @@ describe("DecisionHandler", () => {
       broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
     });
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
-    failingHandler.handle(chat("홍어"), result("auto_hide", "홍어 내용"));
+    failingHandler.handle(chat("느금마"), result("auto_hide", "느금마 내용"));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(rejecting).toHaveBeenCalledTimes(1);
     const verdictId = verdicts.listRecent("c1", 0)[0]?.id;
     expect(logger.error).toHaveBeenCalledWith("자동 숨김 요청 처리 중 예외", { verdictId, error: "Error: 실행기 실패" });
-    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("홍어 내용");
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("느금마 내용");
   });
 });

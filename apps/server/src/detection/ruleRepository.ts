@@ -2,7 +2,7 @@ import type { RuleEntryDto, RuleKind } from "@zzirit-guard/shared";
 import type { Database } from "../db/database.js";
 import type { Clock } from "../time.js";
 import { DEFAULT_RULES } from "./defaultRules.js";
-import { normalizeForMatching } from "./normalize.js";
+import { normalizeForMatching, normalizeKeepingWhitespace } from "./normalize.js";
 
 /** 사용자 입력 규칙이 잘못된 경우. 메시지를 그대로 매니저에게 보여 준다. */
 export class RuleValidationError extends Error {
@@ -11,7 +11,10 @@ export class RuleValidationError extends Error {
 
 /** 비교용 패턴을 함께 가진 규칙. */
 export interface RuleEntry extends RuleEntryDto {
+  /** 공백까지 지운 비교용 패턴(normalizeForMatching). */
   normalizedPattern: string;
+  /** 공백을 한 칸씩 남긴 비교용 패턴(normalizeKeepingWhitespace). 금칙어 강의 단어 안 일치를 볼 때 쓴다(F4). */
+  spacedPattern: string;
 }
 
 /** 판정 파이프라인이 메시지마다 읽는 규칙 묶음. 바뀔 때만 다시 만든다. */
@@ -123,7 +126,12 @@ function toDto(row: RuleRow): RuleEntryDto {
 
 /** 행 목록을 종류별 스냅숏으로 묶는다. */
 function buildSnapshot(rows: readonly RuleRow[]): RuleSnapshot {
-  const entries = rows.map((row) => ({ ...toDto(row), normalizedPattern: normalizePattern(row.kind, row.pattern) }));
+  const entries = rows.map((row) => {
+    const normalizedPattern = normalizePattern(row.kind, row.pattern);
+    // 도메인 규칙은 공백 개념이 없어 같은 값을 쓴다.
+    const spacedPattern = row.kind === "allow_domain" ? normalizedPattern : normalizeKeepingWhitespace(row.pattern);
+    return { ...toDto(row), normalizedPattern, spacedPattern };
+  });
   const ofKind = (kind: RuleKind) => entries.filter((entry) => entry.kind === kind);
   return {
     strong: ofKind("strong"),

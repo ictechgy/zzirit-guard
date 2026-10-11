@@ -35,7 +35,11 @@ function chat(content: string, overrides: Partial<ChatEvent> = {}): ChatEvent {
 
 describe("DetectionPipeline", () => {
   it.each([
-    ["홍어들은 다 이래", "auto_hide", /^rule:strong:\d+$/],
+    ["느금마 진짜 웃기네", "auto_hide", /^rule:strong:\d+$/],
+    ["김치녀", "auto_hide", /^rule:strong:\d+$/],
+    ["오늘 저녁은 홍어삼합", "candidate", /^rule:weak:\d+$/],
+    ["김치 녀석들 맛있다", "candidate", /^rule:strong_spanning:\d+$/],
+    ["김 치 녀", "candidate", /^rule:strong_spanning:\d+$/],
     ["무료 치킨 쿠폰 받기 👉 bit.ly/free-chk", "auto_hide", /^rule:link$/],
     ["010-1234-5678 이 번호로 연락해봐", "auto_hide", /^rule:phone$/],
     ["씨@발 방송 꺼라", "candidate", /^rule:weak:\d+$/],
@@ -55,12 +59,12 @@ describe("DetectionPipeline", () => {
   });
 
   it("허용어여도 금칙어 강보다 앞서지 않는다", () => {
-    rules.add("c1", "allow", "홍어", "m");
-    expect(pipeline.evaluate(chat("홍어")).decision).toBe("auto_hide");
+    rules.add("c1", "allow", "느금마", "m");
+    expect(pipeline.evaluate(chat("느금마")).decision).toBe("auto_hide");
   });
 
   it("스트리머·매니저 메시지는 자동 숨김 대신 후보", () => {
-    const result = pipeline.evaluate(chat("홍어들은 다 이래", { userRoleCode: "streaming_chat_manager" }));
+    const result = pipeline.evaluate(chat("느금마 진짜 웃기네", { userRoleCode: "streaming_chat_manager" }));
     expect(result.decision).toBe("candidate");
     expect(result.reason).toMatch(/:privileged$/);
   });
@@ -108,6 +112,27 @@ describe("DetectionPipeline", () => {
     const fifth = pipeline.evaluate(chat(withoutLink, { senderChannelId: "user-5" }));
     expect(fifth.reason).toBe("rule:group_flood");
     expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["user-2", "user-4"]);
+  });
+
+  it("공백이 든 금칙어 강은 공백 그대로나 붙여 쓴 것은 자동 숨김, 글자마다 띄운 것은 후보(F4)", () => {
+    rules.add("c1", "strong", "나쁜 놈", "m");
+    expect(pipeline.evaluate(chat("이 나쁜 놈아", { senderChannelId: "viewer-a" }))).toMatchObject({ decision: "auto_hide", reason: expect.stringMatching(/^rule:strong:\d+$/) });
+    expect(pipeline.evaluate(chat("이 나쁜놈아", { senderChannelId: "viewer-b" }))).toMatchObject({ decision: "auto_hide", reason: expect.stringMatching(/^rule:strong:\d+$/) });
+    expect(pipeline.evaluate(chat("나 쁜 놈", { senderChannelId: "viewer-c" }))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:strong_spanning:\d+$/) });
+  });
+
+  it("단어를 걸친 금칙어 강 후보는 링크 같은 자동 숨김 규칙을 가리지 않는다(F4)", () => {
+    expect(pipeline.evaluate(chat("김치 녀석들 맛있다 bit.ly/free"))).toMatchObject({ decision: "auto_hide", reason: "rule:link" });
+  });
+
+  it("허용어여도 단어를 걸친 금칙어 강 후보보다 앞서지 않는다(F4)", () => {
+    rules.add("c1", "allow", "김치 녀석들", "m");
+    expect(pipeline.evaluate(chat("김치 녀석들"))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:strong_spanning:\d+$/) });
+  });
+
+  it("예외 단어는 공백을 남긴 비교에도 적용된다(F4)", () => {
+    rules.add("c1", "strong", "시발", "m");
+    expect(pipeline.evaluate(chat("여기가 시발점이다")).decision).toBe("pass");
   });
 
   it("개인 도배는 다섯 번째부터 후보", () => {

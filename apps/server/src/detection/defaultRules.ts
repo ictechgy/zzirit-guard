@@ -13,7 +13,6 @@ export const DEFAULT_RULES: ReadonlyArray<{ kind: RuleKind; pattern: string }> =
   { kind: "strong", pattern: "느금마" },
   { kind: "strong", pattern: "한남충" },
   { kind: "strong", pattern: "김치녀" },
-  { kind: "strong", pattern: "홍어" },
   { kind: "strong", pattern: "틀딱" },
   { kind: "strong", pattern: "짱깨" },
   { kind: "weak", pattern: "씨발" },
@@ -22,6 +21,8 @@ export const DEFAULT_RULES: ReadonlyArray<{ kind: RuleKind; pattern: string }> =
   { kind: "weak", pattern: "병신" },
   { kind: "weak", pattern: "ㅂㅅ" },
   { kind: "weak", pattern: "개새끼" },
+  // 홍어는 음식 이름(홍어삼합)으로도 흔히 써서, 되돌릴 수 없는 자동 숨김 대신 사람이 판단하는 후보로 둔다(F4).
+  { kind: "weak", pattern: "홍어" },
   { kind: "exception", pattern: "시발점" },
   { kind: "exception", pattern: "시발택시" },
   { kind: "threat", pattern: "찾아간다" },

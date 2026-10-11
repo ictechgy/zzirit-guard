@@ -8,6 +8,10 @@ const INVISIBLE_CHARACTERS = /[\u00AD\u115F\u1160\u200B-\u200F\u2060-\u2064\u316
 const FULLWIDTH_ASCII = /[！-～]/g;
 /** 남길 문자: 한글(음절·자모), 영문 소문자, 숫자, 그리고 모음 대용으로 쓰는 '|'. */
 const DISALLOWED_CHARACTERS = /[^\p{Script=Hangul}a-z0-9|]/gu;
+/** normalizeKeepingWhitespace용: DISALLOWED_CHARACTERS와 같되 공백 문자(\s)도 남긴다. 단어 경계를 보존하려는 것이다. */
+const DISALLOWED_CHARACTERS_EXCEPT_WHITESPACE = /[^\p{Script=Hangul}a-z0-9|\s]/gu;
+/** 연이은 공백 문자(줄바꿈·전각 공백 포함). 한 칸으로 줄여 공백 개수에 따라 일치가 갈리지 않게 한다. */
+const WHITESPACE_RUN = /\s+/g;
 /** 자음 자모 바로 뒤의 1·l·|은 모음 'ㅣ'로 쓰인 것이다(예: ㅅ1발). */
 const VOWEL_LOOKALIKE_AFTER_CONSONANT = /(?<=[ㄱ-ㅎ])[1l|]/g;
 /** 두 음절 사이에 끼운 1·l·|은 채워 넣은 잡음이다(예: 병1신). */
@@ -42,7 +46,28 @@ export function stripInvisibleAndFullwidth(text: string): string {
  * 순서: NFC → 제로폭 제거 → 전각→반각 → 소문자 → 허용 문자만 → 모음 대용 1 → 잡음 1 제거 → 자모 조합 → 반복 축약.
  */
 export function normalizeForMatching(text: string): string {
-  const cleaned = stripInvisibleAndFullwidth(text).toLowerCase().replace(DISALLOWED_CHARACTERS, "");
+  return finishMatchingNormalization(stripInvisibleAndFullwidth(text).toLowerCase().replace(DISALLOWED_CHARACTERS, ""));
+}
+
+/**
+ * normalizeForMatching과 같은 단계를 거치되 공백만 지우지 않는다. 연이은 공백은 한 칸으로 줄이고 앞뒤 공백은 자른다.
+ * 왜: 공백을 모두 지운 문장에서는 "김치 녀석들"처럼 단어를 걸친 우연한 일치가 생긴다. 되돌릴 수 없는 자동 숨김은
+ * 단어 안에 그대로 든 금칙어 강에만 쓰고, 공백을 지워야만 걸리는 것은 후보로 낮추려고 이 형태와 비교한다(F4).
+ * 주의: 글자마다 띄운 우회("김 치 녀")는 이 형태에서 걸리지 않으므로, 공백 없는 형태와 함께 써야 후보로라도 잡힌다.
+ * @param text 채팅 원문
+ * @returns 공백이 한 칸씩 남은 비교용 문자열(표시용이 아니다)
+ */
+export function normalizeKeepingWhitespace(text: string): string {
+  const cleaned = stripInvisibleAndFullwidth(text).toLowerCase().replace(DISALLOWED_CHARACTERS_EXCEPT_WHITESPACE, "");
+  return finishMatchingNormalization(cleaned.replace(WHITESPACE_RUN, " ").trim());
+}
+
+/**
+ * 허용 문자만 남긴 뒤의 공통 단계: 모음 대용 1 → 잡음 1 제거 → '|' 제거 → 자모 조합 → 반복 축약.
+ * 두 정규화가 같은 단계를 쓰게 해, 공백 처리 말고는 결과가 갈리지 않게 한다.
+ * @param cleaned 허용 문자만 남긴 소문자 문자열
+ */
+function finishMatchingNormalization(cleaned: string): string {
   const withVowels = cleaned.replace(VOWEL_LOOKALIKE_AFTER_CONSONANT, "ㅣ").replace(FILLER_BETWEEN_SYLLABLES, "").replace(/\|/g, "");
   return composeJamo(withVowels).replace(REPEATED_CHARACTERS, "$1$1");
 }

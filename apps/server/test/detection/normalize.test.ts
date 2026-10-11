@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeForMatching, stripInvisibleAndFullwidth } from "../../src/detection/normalize.js";
+import { normalizeForMatching, normalizeKeepingWhitespace, stripInvisibleAndFullwidth } from "../../src/detection/normalize.js";
 
 describe("normalizeForMatching", () => {
   it.each([
@@ -28,5 +28,23 @@ describe("stripInvisibleAndFullwidth", () => {
     ["전각 숫자와 하이픈을 반각으로", "０１０－１２３４", "010-1234"],
   ])("%s", (_name, input, expected) => {
     expect(stripInvisibleAndFullwidth(input)).toBe(expected);
+  });
+});
+
+describe("normalizeKeepingWhitespace", () => {
+  it.each([
+    ["공백은 남기고 특수문자는 지운다", "씨@발 방송 꺼라", "씨발 방송 꺼라"],
+    ["연이은 공백·줄바꿈·전각 공백은 한 칸으로 줄이고 앞뒤 공백은 자른다", "  김치\n\t 녀석들\u3000맛있다 ", "김치 녀석들 맛있다"],
+    ["특수문자만 사이에 끼운 것은 붙인다", "김.치.녀", "김치녀"],
+    ["글자마다 띄운 것은 띄운 채로 둔다", "김 치 녀", "김 치 녀"],
+    ["나머지 단계는 normalizeForMatching과 같다", "ㅅ1발 ＳＩＢＡＬ 시이이이발", "시발 sibal 시이이발"],
+  ])("%s", (_name, input, expected) => {
+    expect(normalizeKeepingWhitespace(input)).toBe(expected);
+  });
+
+  it("공백을 지우면 normalizeForMatching과 같은 결과가 된다(공백이 단어 안 처리를 바꾸지 않는 입력)", () => {
+    for (const input of ["씨@발 방송 꺼라", "김치 녀석들 맛있다", "병1신 같은", "ＳＩＢＡＬ 진짜"]) {
+      expect(normalizeKeepingWhitespace(input).replace(/ /g, "")).toBe(normalizeForMatching(input));
+    }
   });
 });
