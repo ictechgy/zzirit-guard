@@ -1,0 +1,96 @@
+{
+  "run_label": "qwen3guard-0.6b-bf16",
+  "load_seconds": 0.5,
+  "memory_after_load_gb": 1.19,
+  "peak_memory_gb": 1.95,
+  "latency_chat": {
+    "count": 72,
+    "median_ms": 117.0,
+    "p90_ms": 151.0,
+    "p95_ms": 151.3,
+    "max_ms": 152.5,
+    "serial_messages_per_second": 7.9,
+    "mean_prompt_tokens": 309.1
+  },
+  "latency_khaters": {
+    "count": 400,
+    "median_ms": 151.1,
+    "p90_ms": 163.5,
+    "p95_ms": 167.2,
+    "max_ms": 186.5,
+    "serial_messages_per_second": 6.8,
+    "mean_prompt_tokens": 340.6
+  },
+  "quality": {
+    "unsafe_only": {
+      "chat": {
+        "precision": 1.0,
+        "recall": 0.068,
+        "f1": 0.128,
+        "false_positive": 0,
+        "false_negative": 41,
+        "flag_rate_by_group": {
+          "normal": "0/15",
+          "slang": "0/10",
+          "insult": "0/10",
+          "hate": "1/8",
+          "sexual": "0/6",
+          "threat_pii": "0/6",
+          "self_harm": "2/3",
+          "spam": "0/5",
+          "obfuscated": "0/6",
+          "misinfo": "0/1",
+          "injection": "0/2"
+        }
+      },
+      "khaters": {
+        "precision": 0.843,
+        "recall": 0.357,
+        "f1": 0.501,
+        "false_positive": 20,
+        "false_negative": 193,
+        "flag_rate_by_group": {
+          "L1_hate": "44/100",
+          "L2_hate": "39/100",
+          "normal": "20/100",
+          "offensive": "24/100"
+        }
+      }
+    },
+    "unsafe_or_controversial": {
+      "chat": {
+        "precision": 0.92,
+        "recall": 0.523,
+        "f1": 0.667,
+        "false_positive": 2,
+        "false_negative": 21,
+        "flag_rate_by_group": {
+          "normal": "0/15",
+          "slang": "2/10",
+          "insult": "6/10",
+          "hate": "6/8",
+          "sexual": "3/6",
+          "threat_pii": "3/6",
+          "self_harm": "2/3",
+          "spam": "2/5",
+          "obfuscated": "2/6",
+          "misinfo": "1/1",
+          "injection": "1/2"
+        }
+      },
+      "khaters": {
+        "precision": 0.809,
+        "recall": 0.89,
+        "f1": 0.848,
+        "false_positive": 63,
+        "false_negative": 33,
+        "flag_rate_by_group": {
+          "L1_hate": "93/100",
+          "L2_hate": "92/100",
+          "normal": "63/100",
+          "offensive": "82/100"
+        }
+      }
+    }
+  }
+}

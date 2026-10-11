@@ -1,0 +1,188 @@
+{
+  "run_label": "kcelectra-e1",
+  "khaters_test_full": {
+    "auc": 0.9054,
+    "precision": 0.878,
+    "recall": 0.923,
+    "f1": 0.9,
+    "false_positive": 938
+  },
+  "pipeline_chat": [
+    {
+      "threshold": "kanana 단독",
+      "forward_rate": 1.0,
+      "precision": 0.971,
+      "recall": 0.773,
+      "f1": 0.861,
+      "false_positive": 1
+    },
+    {
+      "threshold": 0.05,
+      "forward_rate": 0.739,
+      "allow_forward_rate": 0.48,
+      "kanana_catch_kept": 0.943,
+      "precision": 0.97,
+      "recall": 0.727,
+      "f1": 0.831,
+      "false_positive": 1
+    },
+    {
+      "threshold": 0.1,
+      "forward_rate": 0.638,
+      "allow_forward_rate": 0.44,
+      "kanana_catch_kept": 0.857,
+      "precision": 0.967,
+      "recall": 0.659,
+      "f1": 0.784,
+      "false_positive": 1
+    },
+    {
+      "threshold": 0.2,
+      "forward_rate": 0.58,
+      "allow_forward_rate": 0.36,
+      "kanana_catch_kept": 0.829,
+      "precision": 0.966,
+      "recall": 0.636,
+      "f1": 0.767,
+      "false_positive": 1
+    },
+    {
+      "threshold": 0.3,
+      "forward_rate": 0.565,
+      "allow_forward_rate": 0.32,
+      "kanana_catch_kept": 0.829,
+      "precision": 0.966,
+      "recall": 0.636,
+      "f1": 0.767,
+      "false_positive": 1
+    },
+    {
+      "threshold": 0.5,
+      "forward_rate": 0.507,
+      "allow_forward_rate": 0.32,
+      "kanana_catch_kept": 0.743,
+      "precision": 0.962,
+      "recall": 0.568,
+      "f1": 0.714,
+      "false_positive": 1
+    },
+    {
+      "threshold": 0.7,
+      "forward_rate": 0.464,
+      "allow_forward_rate": 0.24,
+      "kanana_catch_kept": 0.714,
+      "precision": 0.96,
+      "recall": 0.545,
+      "f1": 0.696,
+      "false_positive": 1
+    }
+  ],
+  "pipeline_khaters400": [
+    {
+      "threshold": "kanana 단독",
+      "forward_rate": 1.0,
+      "precision": 0.888,
+      "recall": 0.767,
+      "f1": 0.823,
+      "false_positive": 29
+    },
+    {
+      "threshold": 0.05,
+      "forward_rate": 0.925,
+      "allow_forward_rate": 0.71,
+      "kanana_catch_kept": 0.996,
+      "precision": 0.888,
+      "recall": 0.763,
+      "f1": 0.821,
+      "false_positive": 29
+    },
+    {
+      "threshold": 0.1,
+      "forward_rate": 0.895,
+      "allow_forward_rate": 0.62,
+      "kanana_catch_kept": 0.981,
+      "precision": 0.902,
+      "recall": 0.763,
+      "f1": 0.827,
+      "false_positive": 25
+    },
+    {
+      "threshold": 0.2,
+      "forward_rate": 0.858,
+      "allow_forward_rate": 0.51,
+      "kanana_catch_kept": 0.965,
+      "precision": 0.908,
+      "recall": 0.757,
+      "f1": 0.825,
+      "false_positive": 23
+    },
+    {
+      "threshold": 0.3,
+      "forward_rate": 0.82,
+      "allow_forward_rate": 0.42,
+      "kanana_catch_kept": 0.958,
+      "precision": 0.911,
+      "recall": 0.753,
+      "f1": 0.825,
+      "false_positive": 22
+    },
+    {
+      "threshold": 0.5,
+      "forward_rate": 0.78,
+      "allow_forward_rate": 0.36,
+      "kanana_catch_kept": 0.931,
+      "precision": 0.913,
+      "recall": 0.733,
+      "f1": 0.813,
+      "false_positive": 21
+    },
+    {
+      "threshold": 0.7,
+      "forward_rate": 0.735,
+      "allow_forward_rate": 0.25,
+      "kanana_catch_kept": 0.9,
+      "precision": 0.927,
+      "recall": 0.72,
+      "f1": 0.811,
+      "false_positive": 17
+    }
+  ],
+  "throughput": [
+    {
+      "device": "mps",
+      "batch_size": 1,
+      "messages_per_second": 155.0,
+      "median_batch_ms": 6.31
+    },
+    {
+      "device": "mps",
+      "batch_size": 16,
+      "messages_per_second": 947.1,
+      "median_batch_ms": 14.22
+    },
+    {
+      "device": "mps",
+      "batch_size": 64,
+      "messages_per_second": 885.0,
+      "median_batch_ms": 73.3
+    },
+    {
+      "device": "cpu",
+      "batch_size": 1,
+      "messages_per_second": 89.2,
+      "median_batch_ms": 11.19
+    },
+    {
+      "device": "cpu",
+      "batch_size": 16,
+      "messages_per_second": 547.1,
+      "median_batch_ms": 22.17
+    },
+    {
+      "device": "cpu",
+      "batch_size": 64,
+      "messages_per_second": 503.1,
+      "median_batch_ms": 129.1
+    }
+  ]
+}
