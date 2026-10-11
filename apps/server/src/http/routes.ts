@@ -58,6 +58,14 @@ const MAX_PUSH_ENDPOINT_LENGTH = 2048;
 /** 푸시 구독 키(p256dh·auth)의 최대 길이. 실제 값은 100자 안쪽이라 여유를 두고 제한한다(R26). */
 const MAX_PUSH_KEY_LENGTH = 256;
 
+/**
+ * 이 상태의 판정은 다시 숨기지 않는다. 왜: 이미 숨겼거나 활동을 제한한 메시지에 숨김을 또 보내면 치지직 호출·감사 기록만 늘고,
+ * 두 매니저가 동시에 누른 경우 같은 조치가 두 번 기록된다(F9.2). 무시·오판으로 표시한 판정은 매니저가 생각을 바꿀 수 있어 다시 숨길 수 있다.
+ */
+const HIDE_BLOCKING_STATUSES: ReadonlySet<VerdictStatus> = new Set(["hidden", "restricted"]);
+/** 이미 처리된 판정에 다시 조치하려 할 때의 안내 문구. */
+const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. 화면을 새로고침해 현재 상태를 확인하세요.";
+
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
 /** 경로의 보낸 사람 채널 ID. 길이를 제한해 과대 입력을 막는다. */
@@ -158,6 +166,7 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
     "/api/verdicts/:id/hide",
     guarded(services, "hide_message", async ({ request, reply, manager, channelId }) => {
       const verdict = findVerdict(services, request.params, channelId);
+      if (HIDE_BLOCKING_STATUSES.has(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
       const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
       return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
     }),
@@ -313,9 +322,14 @@ function resolveVerdictId(services: RouteServices, verdictId: number | null | un
   return verdict.id;
 }
 
-/** 무시·오판으로 표시하고 기록·방송한다. 오판은 해당 규칙을 검토할 근거가 된다. */
+/**
+ * 무시·오판으로 표시하고 기록·방송한다. 오판은 해당 규칙을 검토할 근거가 된다.
+ * 무시는 대기 중(pending)인 판정에만 허락한다. 숨김·제한이 끝난 판정을 무시로 덮으면 실제 조치 기록이 화면에서 사라지기 때문이다.
+ * 오판 신고는 어떤 상태에서도 받는다. 매니저가 잘못된 자동 숨김(hidden)을 알리는 유일한 통로이기 때문이다(F9.2).
+ */
 function markVerdict(services: RouteServices, { request, manager, channelId }: GuardedContext, status: Extract<VerdictStatus, "ignored" | "false_positive">) {
   const verdict = findVerdict(services, request.params, channelId);
+  if (status === "ignored" && verdict.status !== "pending") throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
   services.verdicts.updateStatus(verdict.id, status);
   services.auditLog.record({
     channelId, actorType: "manager", actorChannelId: manager.managerChannelId, action: status,

@@ -85,6 +85,48 @@ describe("판정 조치", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it.each(["hidden", "restricted"] as const)("이미 %s인 판정은 다시 숨기지 않고 409 already_handled(F9.2)", async (status) => {
+    const verdict = insertCandidate();
+    harness.verdicts.updateStatus(verdict.id, status);
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.submit).not.toHaveBeenCalled();
+  });
+
+  it.each(["ignored", "false_positive"] as const)("%s인 판정은 다시 숨길 수 있다(F9.2)", async (status) => {
+    const verdict = insertCandidate();
+    harness.verdicts.updateStatus(verdict.id, status);
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("대기 중인 판정만 무시할 수 있다(F9.2)", async () => {
+    const verdict = insertCandidate();
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    expect((await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/ignore`, headers: mutatingHeaders(rawId) })).statusCode).toBe(200);
+    expect(harness.verdicts.get(verdict.id)?.status).toBe("ignored");
+    for (const status of ["ignored", "hidden", "restricted", "false_positive"] as const) {
+      harness.verdicts.updateStatus(verdict.id, status);
+      const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/ignore`, headers: mutatingHeaders(rawId) });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: "already_handled" });
+      expect(harness.verdicts.get(verdict.id)?.status).toBe(status);
+    }
+  });
+
+  it("오판 신고는 자동 숨김된 판정을 포함해 어떤 상태에서도 받는다(F9.2)", async () => {
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    for (const status of ["pending", "hidden", "ignored", "restricted", "false_positive"] as const) {
+      const verdict = insertCandidate();
+      harness.verdicts.updateStatus(verdict.id, status);
+      const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/false-positive`, headers: mutatingHeaders(rawId) });
+      expect(response.statusCode).toBe(200);
+      expect(harness.verdicts.get(verdict.id)?.status).toBe("false_positive");
+    }
+  });
+
   it("오판 신고는 상태를 바꾸고 감사 기록을 남긴다", async () => {
     const verdict = insertCandidate();
     await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/false-positive`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
