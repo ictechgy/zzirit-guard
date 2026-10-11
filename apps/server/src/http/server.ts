@@ -13,6 +13,7 @@ import { SESSION_TTL_MS, type ManagerSession, type SessionStore } from "../manag
 import type { RealtimeHub, SocketSink } from "../realtime/hub.js";
 import { OAUTH_STATE_COOKIE, REQUEST_MARKER_HEADER, SESSION_COOKIE } from "./constants.js";
 import { errorBody, sendError } from "./errors.js";
+import { createTokenBucket, type TokenBucket } from "./rateLimiter.js";
 import { registerApiRoutes, type RouteServices } from "./routes.js";
 
 declare module "fastify" {
@@ -84,11 +85,39 @@ async function applySecurityHeaders(reply: FastifyReply, publicOrigin: string, p
   return payload;
 }
 
-/** 치지직 OAuth 시작·콜백. */
+/**
+ * /auth/* 전체가 1분에 받을 요청 수(30). 로그인 시작·콜백은 사람이 가끔 누르는 것이라 넉넉하다.
+ * 왜: 콜백은 인증 없이 치지직 토큰 발급 API를 부르게 하므로, 한도가 없으면 누구나 서버를 시켜 치지직을 무한히 호출할 수 있다(F6).
+ */
+const AUTH_RATE_LIMIT_PER_MINUTE = 30;
+/** 한도를 다시 채우는 기준 시간(1분). 이 시간 동안 AUTH_RATE_LIMIT_PER_MINUTE개가 연속으로 채워진다. */
+const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
+/** 한도를 넘었을 때의 안내 문구. */
+const RATE_LIMITED_MESSAGE = "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.";
+
+/**
+ * 치지직 OAuth 시작·콜백. 세 경로가 전역 요청 한도 하나를 함께 쓴다.
+ * 왜 IP별이 아니라 전역인가: Tailscale Funnel 뒤에서는 모든 요청이 127.0.0.1에서 온 것처럼 보여 IP로 나눌 수 없다.
+ */
 function registerAuthRoutes(app: FastifyInstance, deps: HttpDeps): void {
-  app.get("/auth/connect", async (_request, reply) => startAuthorization(deps, reply, "connect"));
-  app.get("/auth/login", async (_request, reply) => startAuthorization(deps, reply, "login"));
-  app.get(CALLBACK_PATH, async (request, reply) => completeLogin(deps, request, reply));
+  const bucket = createTokenBucket({
+    capacity: AUTH_RATE_LIMIT_PER_MINUTE, refillPerMs: AUTH_RATE_LIMIT_PER_MINUTE / AUTH_RATE_LIMIT_WINDOW_MS, clock: deps.services.clock,
+  });
+  const onRequest = async (_request: FastifyRequest, reply: FastifyReply) => rejectOverLimit(bucket, reply);
+  app.get("/auth/connect", { onRequest }, async (_request, reply) => startAuthorization(deps, reply, "connect"));
+  app.get("/auth/login", { onRequest }, async (_request, reply) => startAuthorization(deps, reply, "login"));
+  app.get(CALLBACK_PATH, { onRequest }, async (request, reply) => completeLogin(deps, request, reply));
+}
+
+/**
+ * 버킷이 비었으면 429와 이유를 보내 핸들러까지 가지 않게 한다. 세 경로 모두 같은 JSON 응답을 쓴다.
+ * @param bucket 인증 경로 전역 버킷
+ * @param reply 응답
+ * @returns 거절했으면 보낸 응답, 통과면 undefined
+ */
+async function rejectOverLimit(bucket: TokenBucket, reply: FastifyReply) {
+  if (bucket.tryTake()) return;
+  return reply.code(429).send(errorBody("rate_limited", RATE_LIMITED_MESSAGE));
 }
 
 /** state 쿠키 수명(10분). 인증 페이지에서 머무는 시간보다 넉넉하다. */

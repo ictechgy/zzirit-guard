@@ -15,6 +15,7 @@ import { createAuditLog } from "../../src/records/auditLog.js";
 import { createMinuteStats } from "../../src/records/minuteStats.js";
 import { createSettingsRepository } from "../../src/records/settingsRepository.js";
 import { createVerdictRepository } from "../../src/records/verdictRepository.js";
+import type { Clock } from "../../src/time.js";
 
 /** 테스트 서버의 공개 출처. */
 export const ORIGIN = "https://guard.test";
@@ -24,12 +25,16 @@ export function mutatingHeaders(rawId: string): Record<string, string> {
   return { cookie: `zg_session=${rawId}`, origin: ORIGIN, "x-zzirit-request": "1" };
 }
 
-/** 실제 저장소와 가짜 실행기로 HTTP 서버를 띄운다. */
-export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {}) {
+/**
+ * 실제 저장소와 가짜 실행기로 HTTP 서버를 띄운다.
+ * @param authFlowOverrides 인증 흐름 일부를 바꿔 끼울 때
+ * @param options clock을 넘기면 시간이 흐르는 상황(요청 한도 회복 등)을 흉내 낼 수 있다. 생략하면 고정 시각이다.
+ */
+export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {}, options: { clock?: Clock } = {}) {
   const database = openDatabase(":memory:");
   database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
   database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
-  const clock = () => 1_000_000;
+  const clock = options.clock ?? (() => 1_000_000);
   const verdicts = createVerdictRepository(database, clock);
   const auditLog = createAuditLog(database, clock);
   const settings = createSettingsRepository(database);

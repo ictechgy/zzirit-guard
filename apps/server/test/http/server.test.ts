@@ -128,6 +128,32 @@ describe("로그인 콜백", () => {
   });
 });
 
+describe("인증 경로 요청 한도(F6)", () => {
+  it("/auth/connect·login·callback을 합쳐 1분에 30번까지 받고, 31번째는 429이며, 시간이 지나면 다시 받는다", async () => {
+    await harness.close();
+    let now = 1_000_000;
+    harness = await createHttpHarness({}, { clock: () => now });
+    const paths = ["/auth/connect", "/auth/login", "/auth/callback"];
+    for (let index = 0; index < 30; index += 1) {
+      expect((await harness.app.inject({ method: "GET", url: paths[index % paths.length] as string })).statusCode).toBe(302);
+    }
+    const limited = await harness.app.inject({ method: "GET", url: "/auth/login" });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toEqual({ error: "rate_limited", message: "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요." });
+    expect((await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: "zg_oauth_state=s" } })).statusCode).toBe(429);
+    now += 2_000;
+    expect((await harness.app.inject({ method: "GET", url: "/auth/connect" })).statusCode).toBe(302);
+    expect((await harness.app.inject({ method: "GET", url: "/auth/connect" })).statusCode).toBe(429);
+  });
+
+  it("인증 경로가 아닌 요청은 한도에 영향을 주지도 받지도 않는다", async () => {
+    for (let index = 0; index < 31; index += 1) await harness.app.inject({ method: "GET", url: "/auth/login" });
+    expect((await harness.app.inject({ method: "GET", url: "/auth/login" })).statusCode).toBe(429);
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    expect((await harness.app.inject({ method: "GET", url: "/api/me", headers: { cookie: `zg_session=${rawId}` } })).statusCode).toBe(200);
+  });
+});
+
 describe("WebSocket", () => {
   it("티켓으로 연결해 방송을 받는다", async () => {
     const rawId = harness.login("STREAMING_CHAT_MANAGER");
