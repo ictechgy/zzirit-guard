@@ -15,6 +15,8 @@ describe("normalizeForMatching", () => {
     ["음절과 숫자 사이의 숫자는 그대로", "구독자 1000명", "구독자1000명"],
     ["이모티콘만 있으면 빈 문자열", "😀😀", ""],
     ["숫자 반복은 줄이지 않는다", "1000", "1000"],
+    ["한글 채움 문자를 지운다", "씨\u3164발", "씨발"],
+    ["반각 채움 문자도 지운다", "시\uFFA0발", "시발"],
   ])("%s", (_name, input, expected) => {
     expect(normalizeForMatching(input)).toBe(expected);
   });

@@ -1,5 +1,9 @@
-/** 글자 사이에 끼워 필터를 피하는 데 쓰는 제로폭·서식 문자(U+00AD, U+200B~U+200F, U+2060~U+2064, U+FEFF). */
-const INVISIBLE_CHARACTERS = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+/**
+ * 글자 사이에 끼워 필터를 피하는 데 쓰는 보이지 않는 문자를 지운다.
+ * 제로폭·서식 문자(U+00AD, U+200B~U+200F, U+2060~U+2064, U+FEFF)와 한글 채움 문자(U+115F, U+1160, U+3164)·반각 채움 문자(U+FFA0)를 포함한다.
+ * 한글 채움 문자는 Script=Hangul이라 아래 DISALLOWED_CHARACTERS에서 남으므로 여기서 먼저 지워야 한다.
+ */
+const INVISIBLE_CHARACTERS = /[\u00AD\u115F\u1160\u200B-\u200F\u2060-\u2064\u3164\uFEFF\uFFA0]/g;
 /** 전각 ASCII 영역(！~～). 반각으로 바꾼다. */
 const FULLWIDTH_ASCII = /[！-～]/g;
 /** 남길 문자: 한글(음절·자모), 영문 소문자, 숫자, 그리고 모음 대용으로 쓰는 '|'. */
