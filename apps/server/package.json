@@ -1,0 +1,16 @@
+{
+  "name": "@zzirit-guard/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zzirit-guard/shared": "*"
+  },
+  "devDependencies": {
+    "vitest": "5.0.3"
+  }
+}
