@@ -147,10 +147,15 @@ function applyPrivilege(result: DetectionResult): DetectionResult {
   return { ...result, decision: "candidate", reason: `${result.reason}:privileged` };
 }
 
-/** 채팅 이벤트에서 숨기기·표시에 필요한 값만 뽑는다. */
+/**
+ * 채팅 이벤트에서 숨기기·표시에 필요한 값만 뽑는다.
+ * 권한자 여부는 역할 코드와 함께 "보낸 사람이 채널 주인인가"로도 본다. 왜: 역할 코드가 빠지면 common_user로 채워지므로,
+ * 그것만 믿으면 스트리머 본인 메시지가 자동 숨김될 수 있다(Global Constraints, F9.5).
+ */
 function toMessageRef(event: ChatEvent): MessageRef {
   return {
     chatChannelId: event.chatChannelId, messageTime: event.messageTime, senderChannelId: event.senderChannelId,
-    nickname: event.nickname, content: event.content, privileged: isPrivilegedRole(event.userRoleCode),
+    nickname: event.nickname, content: event.content,
+    privileged: isPrivilegedRole(event.userRoleCode) || event.senderChannelId === event.channelId,
   };
 }

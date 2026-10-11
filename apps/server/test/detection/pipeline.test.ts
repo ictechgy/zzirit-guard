@@ -69,6 +69,12 @@ describe("DetectionPipeline", () => {
     expect(result.reason).toMatch(/:privileged$/);
   });
 
+  it.each(["common_user", ""])("역할 코드가 '%s'여도 보낸 사람이 채널 주인(스트리머 본인)이면 자동 숨김하지 않는다(F9.5)", (userRoleCode) => {
+    const result = pipeline.evaluate(chat("느금마 진짜 웃기네", { senderChannelId: "c1", userRoleCode }));
+    expect(result).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/:privileged$/) });
+    expect(result.ref.privileged).toBe(true);
+  });
+
   it("떼도배는 다섯 번째에 앞선 메시지까지 넘긴다(권한자 메시지는 빼고)", () => {
     const text = "구독하면 선물 드려요 진짜로";
     for (let user = 1; user <= 3; user += 1) pipeline.evaluate(chat(text, { senderChannelId: `user-${user}` }));
