@@ -1,4 +1,4 @@
-import type { ChatSettingsDto, ManagerRole, MeDto, Permission, ServerStatus, SettingsDto, VerdictStatus } from "@zzirit-guard/shared";
+import type { ChatSettingsDto, FalsePositiveReviewDto, ManagerRole, MeDto, Permission, ServerStatus, SettingsDto, VerdictStatus } from "@zzirit-guard/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
@@ -103,6 +103,8 @@ const pushSubscriptionSchema = z.object({
 const pushDeleteSchema = z.object({ endpoint: z.string().min(1).max(MAX_PUSH_ENDPOINT_LENGTH) });
 /** 감사 기록 조회 쿼리(커서와 페이지 크기). */
 const auditQuerySchema = z.object({ beforeId: z.coerce.number().int().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+/** 오판 검토 목록 쿼리. 최근 목록의 길이를 감사 기록과 같은 범위(1~200, 기본 50)로 제한한다. */
+const falsePositiveQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
 /** 통계 조회 쿼리(최근 N분, 최대 24시간). */
 const statsQuerySchema = z.object({ sinceMinutes: z.coerce.number().int().min(1).max(1440).default(60) });
 
@@ -173,6 +175,16 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
   );
   app.post("/api/verdicts/:id/ignore", guarded(services, "hide_message", (context) => markVerdict(services, context, "ignored")));
   app.post("/api/verdicts/:id/false-positive", guarded(services, "hide_message", (context) => markVerdict(services, context, "false_positive")));
+  app.get("/api/false-positives", guarded(services, null, (context) => listFalsePositiveReview(services, context)));
+}
+
+/**
+ * 오판 검토 목록(스펙 5.5): 최근 오판 신고 판정과 이유별 건수. 이유에 규칙 번호가 있어 어떤 규칙을 고칠지 보인다.
+ * 읽기 전용이라 다른 조회 라우트(/api/candidates·/api/rules)처럼 로그인한 매니저면 누구나 본다.
+ */
+function listFalsePositiveReview(services: RouteServices, { request, channelId }: GuardedContext): FalsePositiveReviewDto {
+  const { limit } = falsePositiveQuerySchema.parse(request.query);
+  return { recent: services.verdicts.listFalsePositives(channelId, limit), byReason: services.verdicts.countFalsePositivesByReason(channelId) };
 }
 
 /** 사용자 단위 제재. */

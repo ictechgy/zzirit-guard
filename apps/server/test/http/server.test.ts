@@ -1,3 +1,4 @@
+import type { FalsePositiveReviewDto } from "@zzirit-guard/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { toSocketSink } from "../../src/http/server.js";
@@ -457,3 +458,38 @@ describe("toSocketSink", () => {
   });
 });
 
+describe("오판 검토 목록(스펙 5.5, R-16)", () => {
+  /** 이유를 정해 판정을 넣고 오판으로 표시한다. */
+  function reportFalsePositive(reason: string) {
+    const verdict = harness.verdicts.insert({
+      channelId: "c1", chatChannelId: "chat-1", messageTime: 5, senderChannelId: "viewer", senderNickname: "시청자",
+      content: "정상 문장", decision: "candidate", reason,
+    });
+    harness.verdicts.updateStatus(verdict.id, "false_positive");
+    return verdict.id;
+  }
+
+  it("로그인한 매니저라면 역할과 관계없이 최근 오판과 이유별 건수를 본다", async () => {
+    reportFalsePositive("rule:strong:3");
+    const second = reportFalsePositive("rule:weak:7");
+    const third = reportFalsePositive("rule:strong:3");
+    const response = await harness.app.inject({ method: "GET", url: "/api/false-positives?limit=2", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as FalsePositiveReviewDto;
+    expect(body.recent.map((verdict) => verdict.id)).toEqual([third, second]);
+    expect(body.recent[0]).toMatchObject({ reason: "rule:strong:3", status: "false_positive" });
+    expect(body.byReason).toEqual([{ reason: "rule:strong:3", count: 2 }, { reason: "rule:weak:7", count: 1 }]);
+  });
+
+  it("limit을 생략하면 50개까지, 범위를 벗어나면 400", async () => {
+    const cookie = `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}`;
+    expect((await harness.app.inject({ method: "GET", url: "/api/false-positives", headers: { cookie } })).statusCode).toBe(200);
+    for (const limit of ["0", "201", "abc"]) {
+      expect((await harness.app.inject({ method: "GET", url: `/api/false-positives?limit=${limit}`, headers: { cookie } })).statusCode).toBe(400);
+    }
+  });
+
+  it("로그인하지 않으면 401", async () => {
+    expect((await harness.app.inject({ method: "GET", url: "/api/false-positives" })).statusCode).toBe(401);
+  });
+});

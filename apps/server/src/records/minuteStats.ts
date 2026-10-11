@@ -1,3 +1,4 @@
+import type { MinuteStatDto } from "@zzirit-guard/shared";
 import type { Database } from "../db/database.js";
 import { floorToMinute, type Clock } from "../time.js";
 
@@ -13,7 +14,8 @@ export type StatField = (typeof STAT_FIELDS)[number];
 export interface MinuteStats {
   increment(channelId: string, field: StatField, amount?: number): void;
   flush(): void;
-  recent(channelId: string, sinceMs: number): Array<{ minute: number } & Record<StatField, number>>;
+  /** sinceMs 이후의 분당 통계를 분 순서로 읽는다. 행 형태는 shared의 MinuteStatDto와 같다(웹이 같은 타입을 쓴다). */
+  recent(channelId: string, sinceMs: number): MinuteStatDto[];
 }
 
 /** 메모리에 모은 한 분의 값. */
@@ -69,8 +71,6 @@ export function createMinuteStats(database: Database, clock: Clock): MinuteStats
       }
     },
     recent: (channelId, sinceMs) =>
-      database.prepare(`SELECT minute, ${STAT_FIELDS.join(", ")} FROM minute_stat WHERE channel_id = ? AND minute >= ? ORDER BY minute`).all(channelId, sinceMs) as Array<
-        { minute: number } & Record<StatField, number>
-      >,
+      database.prepare(`SELECT minute, ${STAT_FIELDS.join(", ")} FROM minute_stat WHERE channel_id = ? AND minute >= ? ORDER BY minute`).all(channelId, sinceMs) as MinuteStatDto[],
   };
 }

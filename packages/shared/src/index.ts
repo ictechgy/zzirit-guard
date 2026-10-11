@@ -105,6 +105,48 @@ export interface ChatSettingsDto {
   chatEmojiMode: boolean;
 }
 
+/** 분당 통계 한 행(GET /api/stats). 서버 minute_stat 열 이름(snake_case)을 그대로 쓴다. */
+export interface MinuteStatDto {
+  /** 그 분이 시작한 시각(ms). */
+  minute: number;
+  /** 받은 채팅 수. */
+  received: number;
+  /** 가벼운 반응(ㅋㅋ 등)이라 AI 단계를 건너뛴 수. */
+  skipped: number;
+  /** 10분 안에 같은 정규화 문장이 이미 있었던 수. */
+  deduplicated: number;
+  /** 1차 분류기로 보낸 수(2단계). */
+  stage1_forwarded: number;
+  /** 2차 분류기가 판정한 수(2단계). */
+  stage2_done: number;
+  /** 2차 대기열에서 버린 수(2단계). */
+  stage2_dropped: number;
+  /** 후보로 올린 수. */
+  candidates: number;
+  /** 자동 숨김을 보낸 수. */
+  auto_hidden: number;
+  /** 스위치가 꺼져 섀도로 기록한 수. */
+  shadow: number;
+  /** 형식이 틀려 버린 채팅 이벤트 수. */
+  invalid_events: number;
+}
+
+/** 오판 검토 목록의 이유별 건수 한 줄. */
+export interface FalsePositiveReasonCountDto {
+  /** 판정 이유(예: rule:strong:12). 규칙 번호가 들어 있어 어떤 규칙을 고칠지 알 수 있다. */
+  reason: string;
+  /** 보관 기간 안에서 이 이유로 오판 신고된 판정 수. */
+  count: number;
+}
+
+/** 오판 검토 목록(GET /api/false-positives, 스펙 5.5 "오판을 누르면 그 규칙이 검토 목록에 올라간다"). */
+export interface FalsePositiveReviewDto {
+  /** 최근 오판 신고 판정(판정이 만들어진 순서로 최신부터, limit개까지). */
+  recent: VerdictDto[];
+  /** 이유별 오판 건수(많은 순, 같으면 이유 순). */
+  byReason: FalsePositiveReasonCountDto[];
+}
+
 /** WebSocket으로 서버가 보내는 메시지. */
 export type RealtimeEvent =
   | { type: "verdict"; verdict: VerdictDto }

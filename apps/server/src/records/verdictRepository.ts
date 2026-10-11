@@ -1,4 +1,4 @@
-import type { Decision, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
+import type { Decision, FalsePositiveReasonCountDto, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
 import type { Database } from "../db/database.js";
 import type { Clock } from "../time.js";
 
@@ -22,6 +22,13 @@ export interface VerdictRepository {
   updateStatus(id: number, status: VerdictStatus): void;
   get(id: number): (VerdictDto & { channelId: string }) | null;
   listRecent(channelId: string, sinceMs: number): VerdictDto[];
+  /**
+   * 오판으로 신고된 판정을 최신순(만들어진 시각, 같으면 id)으로 limit개 읽는다. 오판 검토 목록(스펙 5.5)에 쓴다.
+   * 신고한 시각은 감사 기록(action false_positive)에 있다. 판정 표에는 없어 만들어진 순서로 정렬한다.
+   */
+  listFalsePositives(channelId: string, limit: number): VerdictDto[];
+  /** 오판으로 신고된 판정을 이유(규칙 번호)별로 센다. 많은 순, 같으면 이유 순. 고칠 규칙을 고르는 데 쓴다. */
+  countFalsePositivesByReason(channelId: string): FalsePositiveReasonCountDto[];
   deleteOlderThan(cutoffMs: number): number;
 }
 
@@ -51,6 +58,14 @@ export function createVerdictRepository(database: Database, clock: Clock): Verdi
     },
     listRecent: (channelId, sinceMs) =>
       (database.prepare("SELECT * FROM verdict WHERE channel_id = ? AND created_at >= ? ORDER BY id").all(channelId, sinceMs) as VerdictRow[]).map(toDto),
+    listFalsePositives: (channelId, limit) =>
+      (database
+        .prepare("SELECT * FROM verdict WHERE channel_id = ? AND status = 'false_positive' ORDER BY created_at DESC, id DESC LIMIT ?")
+        .all(channelId, limit) as VerdictRow[]).map(toDto),
+    countFalsePositivesByReason: (channelId) =>
+      database
+        .prepare("SELECT reason, COUNT(*) AS count FROM verdict WHERE channel_id = ? AND status = 'false_positive' GROUP BY reason ORDER BY count DESC, reason")
+        .all(channelId) as FalsePositiveReasonCountDto[],
     deleteOlderThan: (cutoffMs) => database.prepare("DELETE FROM verdict WHERE created_at < ?").run(cutoffMs).changes,
   };
 }
