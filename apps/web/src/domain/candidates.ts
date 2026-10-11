@@ -38,7 +38,7 @@ export interface CandidateSections {
    * 왜 따로 두나: "자동 숨김됨"에 섞으면 숨겨지지 않은 메시지가 숨겨진 것처럼 보이고 숨길 버튼도 없어 조용히 사라진다(R-4).
    */
   autoHidePending: VerdictDto[];
-  /** 실제로 숨겨진 자동 숨김(status hidden, 최신순). 잘못 숨겼으면 오판으로 신고한다. */
+  /** 실제로 숨겨진 자동 숨김(status hidden, 또는 사람 단위 제한 restricted — 서버가 둘 다 숨김 불가로 다룬다, 최신순). 잘못 숨겼으면 오판으로 신고한다. */
   autoHidden: VerdictDto[];
 }
 
@@ -51,7 +51,7 @@ export function buildSections(verdicts: readonly VerdictDto[], now: number): Can
     shadow: groupBySender(pick("shadow", "pending")),
     candidates: groupBySender(pick("candidate", "pending")),
     autoHidePending: pick("auto_hide", "pending").sort(newestFirst),
-    autoHidden: pick("auto_hide", "hidden").sort(newestFirst),
+    autoHidden: [...pick("auto_hide", "hidden"), ...pick("auto_hide", "restricted")].sort(newestFirst),
   };
 }
 

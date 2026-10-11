@@ -45,6 +45,14 @@ describe("buildSections", () => {
   });
 });
 
+describe("buildSections: 제한된 자동 숨김", () => {
+  it("사람이 임시 제한한 자동 숨김(restricted)은 서버가 숨김 불가로 다루므로 숨겨진 쪽에 둔다", () => {
+    const sections = buildSections([verdict(1, { decision: "auto_hide", status: "restricted" }), verdict(2, { decision: "auto_hide", status: "ignored" })], NOW);
+    expect(sections.autoHidden.map((item) => item.id)).toEqual([1]);
+    expect(sections.autoHidePending).toEqual([]);
+  });
+});
+
 describe("판정 목록 갱신", () => {
   it("새 판정 이벤트는 없던 id만 더한다(이미 있으면 같거나 더 새 상태다)", () => {
     const list = addVerdictIfAbsent([verdict(1, { status: "hidden" })], verdict(2));
