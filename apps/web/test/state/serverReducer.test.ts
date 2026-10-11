@@ -37,6 +37,27 @@ describe("serverReducer", () => {
     expect(state.chatLines[0]?.content).toBe("c100");
   });
 
+  it("채팅 줄 순번은 배치가 달라도 증가하며 겹치지 않는다", () => {
+    const state = reduce([
+      { type: "event", event: { type: "chat_batch", lines: [line(1), line(2)] } },
+      { type: "event", event: { type: "chat_batch", lines: [line(3)] } },
+    ]);
+    expect(state.chatLines.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+    expect(state.nextChatSeq).toBe(3);
+  });
+
+  it("300개 상한으로 앞이 잘려도 남은 순번은 겹치지 않고 이어진다", () => {
+    let state = initialServerState;
+    for (let batch = 0; batch < 4; batch += 1) {
+      const lines = Array.from({ length: 100 }, (_unused, index) => line(batch * 100 + index));
+      state = serverReducer(state, { type: "event", event: { type: "chat_batch", lines } });
+    }
+    const seqs = state.chatLines.map((entry) => entry.seq);
+    expect(new Set(seqs).size).toBe(MAX_CHAT_LINES);
+    expect(seqs[0]).toBe(100);
+    expect(seqs.every((seq, index) => index === 0 || seq === seqs[index - 1]! + 1)).toBe(true);
+  });
+
   it("세션 종료·연결 상태·불러오기 실패를 기록한다", () => {
     expect(reduce([{ type: "event", event: { type: "session_ended", reason: "권한 해제" } }]).sessionEndedReason).toBe("권한 해제");
     expect(reduce([{ type: "connection", connected: true }]).realtimeConnected).toBe(true);

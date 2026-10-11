@@ -4,14 +4,23 @@ import { addVerdictIfAbsent, applyVerdictStatus, mergeVerdicts, pruneVerdicts } 
 /** 실시간 채팅 화면에 남길 최대 줄 수. 초당 수십 건이어도 휴대폰이 버티게 한다. */
 export const MAX_CHAT_LINES = 300;
 
+/**
+ * 화면에 남는 채팅 줄: 서버 줄 + 클라이언트 순번(seq).
+ * 왜: 초당 수십 건이 들어오면 줄 위치(index)가 매번 바뀌어 React 키가 흔들리고 300행이 모두 다시 마운트된다.
+ * 순번은 줄이 처음 들어올 때 한 번 정해져 바뀌지 않으므로, 키로 쓰면 기존 행이 그대로 유지된다. 같은 messageTime이 여러 개여도 순번은 겹치지 않는다.
+ */
+export type ChatLineEntry = ChatLine & { seq: number };
+
 /** 화면이 쓰는 서버 상태. */
 export interface ServerState {
   /** 서버 상태(상태 배너·스위치). 아직 모르면 null. */
   status: ServerStatus | null;
   /** 최근 판정. 창과 여유(VERDICT_KEEP_MS)를 넘긴 것은 지운다. */
   verdicts: VerdictDto[];
-  /** 실시간 채팅 줄(최근 MAX_CHAT_LINES개). */
-  chatLines: ChatLine[];
+  /** 실시간 채팅 줄(최근 MAX_CHAT_LINES개). 각 줄에는 순번(seq)이 붙어 있다. */
+  chatLines: ChatLineEntry[];
+  /** 다음 채팅 줄에 붙일 순번. 줄이 잘려 나가도 줄어들지 않는다(순번 재사용 방지). */
+  nextChatSeq: number;
   /** 실시간 연결이 열려 서버 메시지를 받고 있는지. */
   realtimeConnected: boolean;
   /** 실시간 연결이 거듭 거절돼(4003) 다시 연결을 멈췄는지(R-6). */
@@ -38,7 +47,7 @@ export type ServerAction =
 
 /** 처음 상태. */
 export const initialServerState: ServerState = {
-  status: null, verdicts: [], chatLines: [], realtimeConnected: false, realtimeRejected: false, sessionEndedReason: null, loadError: null, replayLog: null,
+  status: null, verdicts: [], chatLines: [], nextChatSeq: 0, realtimeConnected: false, realtimeRejected: false, sessionEndedReason: null, loadError: null, replayLog: null,
 };
 
 /** 조회 중에 기록해 두었다가 다시 적용할 이벤트 종류. 채팅 줄·세션 종료는 다시 적용할 필요가 없다. */
@@ -82,10 +91,16 @@ function applyEvent(state: ServerState, event: RealtimeEvent): ServerState {
     case "verdict_status":
       return { ...state, verdicts: applyVerdictStatus(state.verdicts, event.verdictId, event.status) };
     case "chat_batch":
-      return { ...state, chatLines: [...state.chatLines, ...event.lines].slice(-MAX_CHAT_LINES) };
+      return appendChatLines(state, event.lines);
     case "status":
       return { ...state, status: event.status };
     case "session_ended":
       return { ...state, sessionEndedReason: event.reason };
   }
+}
+
+/** 받은 배치 줄마다 순번을 차례로 붙여 덧붙이고, 최근 MAX_CHAT_LINES개만 남긴다. */
+function appendChatLines(state: ServerState, lines: readonly ChatLine[]): ServerState {
+  const entries: ChatLineEntry[] = lines.map((line, offset) => ({ ...line, seq: state.nextChatSeq + offset }));
+  return { ...state, chatLines: [...state.chatLines, ...entries].slice(-MAX_CHAT_LINES), nextChatSeq: state.nextChatSeq + lines.length };
 }

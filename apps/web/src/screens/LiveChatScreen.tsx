@@ -1,5 +1,6 @@
-import type { ChatLine, Decision } from "@zzirit-guard/shared";
+import type { Decision } from "@zzirit-guard/shared";
 import { useState } from "react";
+import type { ChatLineEntry } from "../state/serverReducer";
 
 /** 판정 표시 이름. 통과는 표시하지 않는다. */
 const DECISION_LABELS: Record<Decision, string | null> = {
@@ -9,7 +10,7 @@ const DECISION_LABELS: Record<Decision, string | null> = {
 /** 실시간 채팅 화면 속성. */
 export interface LiveChatScreenProps {
   /** 최근 채팅 줄(오래된 것부터, 최대 MAX_CHAT_LINES개). */
-  lines: readonly ChatLine[];
+  lines: readonly ChatLineEntry[];
 }
 
 /** 실시간 채팅 화면(스펙 6장 ②): 위험 메시지 강조, 위험한 것만 보기. 최신 줄이 위로 온다. */
@@ -24,8 +25,8 @@ export function LiveChatScreen({ lines }: LiveChatScreenProps) {
       </label>
       {visible.length === 0 && <p className="empty">표시할 채팅이 없습니다.</p>}
       <ol className="chat-lines">
-        {visible.map((line, index) => (
-          <li key={`${line.messageTime}-${index}`} className={`chat-line chat-${line.decision}`}>
+        {visible.map((line) => (
+          <li key={line.seq} className={`chat-line chat-${line.decision}`}>
             <span className="nickname">{line.senderNickname}</span>
             <span className="content">{line.content}</span>
             {DECISION_LABELS[line.decision] && <span className="tag">{DECISION_LABELS[line.decision]}</span>}
