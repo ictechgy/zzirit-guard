@@ -17,13 +17,14 @@ async function flushPromises(): Promise<void> {
 const STATUS_MESSAGE = JSON.stringify({ type: "status", status: { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 } });
 
 /** 테스트용 연결과 기록. */
-function setup(issueTicket: () => Promise<string> = async () => "ticket-1") {
+function setup(issueTicket: () => Promise<string> = async () => "ticket-1", random: () => number = () => 0.5) {
   const sockets: Array<SocketLike & { closed: boolean }> = [];
   const urls: string[] = [];
   const scheduled: number[] = [];
   const events: RealtimeEvent[] = [];
   const connection: { states: boolean[]; ended: string[]; rejected: number } = { states: [], ended: [], rejected: 0 };
   let pending: (() => void) | null = null;
+  let cancelCount = 0;
   const realtime = new RealtimeConnection({
     issueTicket,
     openSocket: (url) => {
@@ -35,7 +36,12 @@ function setup(issueTicket: () => Promise<string> = async () => "ticket-1") {
     schedule: (callback, ms) => {
       scheduled.push(ms);
       pending = callback;
+      return () => {
+        cancelCount += 1;
+        if (pending === callback) pending = null;
+      };
     },
+    random,
     onEvent: (event) => events.push(event),
     onConnectionChange: (connected) => connection.states.push(connected),
     onSessionEnded: (reason) => connection.ended.push(reason),
@@ -50,7 +56,11 @@ function setup(issueTicket: () => Promise<string> = async () => "ticket-1") {
   };
   /** 마지막 소켓을 메시지 없이 code로 닫는다(열렸다가 서버가 바로 닫은 경우). */
   const closeWithoutMessage = (code: number) => sockets.at(-1)?.onclose?.({ code });
-  return { realtime, sockets, urls, scheduled, events, connection, runPending, closeWithoutMessage };
+  /** 예약돼 있는 재연결 콜백(취소됐으면 null). */
+  const takePending = () => pending;
+  /** 취소 함수가 불린 횟수. */
+  const cancelCalls = () => cancelCount;
+  return { realtime, sockets, urls, scheduled, events, connection, runPending, closeWithoutMessage, takePending, cancelCalls };
 }
 
 describe("RealtimeConnection", () => {
@@ -84,6 +94,8 @@ describe("RealtimeConnection", () => {
     sockets[0]?.onmessage?.({ data: JSON.stringify({ type: "session_ended", reason: "권한 해제" }) });
     sockets[0]?.onclose?.({ code: 4001 });
     expect(connection.ended).toEqual(["권한 해제"]);
+    expect(connection.states).toEqual([true, false]);
+    expect(sockets[0]?.closed).toBe(true);
     expect(scheduled).toEqual([]);
   });
 
@@ -99,7 +111,7 @@ describe("RealtimeConnection", () => {
   it.each([
     [new ApiError(401, "unauthorized", "로그인이 필요합니다.")],
     [new ApiError(409, "no_channel", "연결된 채널이 없습니다. 스트리머가 먼저 채널을 연결하세요.")],
-  ])("티켓 발급이 %s이면 다시 연결하지 않고 서버 문구로 알린다(R-12)", async (error) => {
+  ])("티켓 발급이 $status $code이면 다시 연결하지 않고 서버 문구로 알린다(R-12)", async (error) => {
     const { realtime, connection, scheduled } = setup(async () => {
       throw error;
     });
@@ -155,6 +167,134 @@ describe("RealtimeConnection", () => {
     sockets[1]?.onmessage?.({ data: STATUS_MESSAGE });
     sockets[1]?.onclose?.({ code: 1006 });
     expect(scheduled).toEqual([1000, 1000]);
+  });
+});
+
+/** 직접 풀 수 있는 티켓 발급 지연. */
+function deferredTicket() {
+  const resolvers: Array<(ticket: string) => void> = [];
+  const rejecters: Array<(error: unknown) => void> = [];
+  const issueTicket = vi.fn(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        resolvers.push(resolve);
+        rejecters.push(reject);
+      }),
+  );
+  return { issueTicket, resolve: (index: number) => resolvers[index]?.(`t${index}`), reject: (index: number, error: unknown) => rejecters[index]?.(error) };
+}
+
+describe("RealtimeConnection 재시작·옛 이벤트 차단", () => {
+  it("티켓을 기다리는 중 멈추면 소켓을 열지 않는다", async () => {
+    const ticket = deferredTicket();
+    const { realtime, sockets } = setup(ticket.issueTicket);
+    realtime.start();
+    realtime.stop();
+    ticket.resolve(0);
+    await flushPromises();
+    expect(sockets).toHaveLength(0);
+  });
+
+  it("티켓을 기다리는 중 멈췄다 다시 시작해도 소켓은 하나만 열린다", async () => {
+    const ticket = deferredTicket();
+    const { realtime, sockets } = setup(ticket.issueTicket);
+    realtime.start();
+    realtime.stop();
+    realtime.start();
+    ticket.resolve(0);
+    ticket.resolve(1);
+    await flushPromises();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("다시 시작한 뒤 옛 소켓의 늦은 close는 재연결도 false 알림도 만들지 않는다", async () => {
+    const { realtime, sockets, scheduled, connection } = setup();
+    realtime.start();
+    await flushPromises();
+    sockets[0]?.onmessage?.({ data: STATUS_MESSAGE });
+    realtime.stop();
+    realtime.start();
+    await flushPromises();
+    const statesBefore = [...connection.states];
+    sockets[0]?.onclose?.({ code: 1006 });
+    expect(scheduled).toEqual([]);
+    expect(connection.states).toEqual(statesBefore);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("멈추기 전에 예약된 타이머는 멈추고 다시 시작한 뒤에도 연결을 만들지 않고, 멈출 때 취소된다", async () => {
+    const issueTicket = vi.fn(async () => "ticket");
+    const { realtime, sockets, takePending, cancelCalls } = setup(issueTicket);
+    realtime.start();
+    await flushPromises();
+    sockets[0]?.onclose?.({ code: 1006 });
+    const stale = takePending();
+    realtime.stop();
+    expect(cancelCalls()).toBe(1);
+    realtime.start();
+    await flushPromises();
+    expect(issueTicket).toHaveBeenCalledTimes(2);
+    stale?.();
+    await flushPromises();
+    expect(issueTicket).toHaveBeenCalledTimes(2);
+  });
+
+  it("멈춘 뒤 도착한 티켓 오류는 아무것도 예약하거나 알리지 않는다", async () => {
+    const ticket = deferredTicket();
+    const { realtime, scheduled, connection } = setup(ticket.issueTicket);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    realtime.start();
+    realtime.stop();
+    ticket.reject(0, new Error("network"));
+    await flushPromises();
+    expect(scheduled).toEqual([]);
+    expect(connection.ended).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it.each([["null"], ["[1]"], ["42"], ['"text"'], ['{"type":1}'], ["{}"]])("객체가 아니거나 type 문자열이 없는 메시지 %s는 버리고 경고한다", async (raw) => {
+    const { realtime, sockets, events } = setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    realtime.start();
+    await flushPromises();
+    sockets[0]?.onmessage?.({ data: raw });
+    expect(events).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("백오프에 ±20% 지터가 붙고 최댓값을 넘지 않는다", async () => {
+    const low = setup(async () => "t", () => 0);
+    low.realtime.start();
+    await flushPromises();
+    low.closeWithoutMessage(1006);
+    const high = setup(async () => "t", () => 1);
+    high.realtime.start();
+    await flushPromises();
+    high.closeWithoutMessage(1006);
+    expect(low.scheduled).toEqual([800]);
+    expect(high.scheduled).toEqual([1200]);
+    const capped = setup(async () => "t", () => 1);
+    capped.realtime.start();
+    await flushPromises();
+    for (let index = 0; index < 8; index += 1) {
+      capped.closeWithoutMessage(1006);
+      await capped.runPending();
+    }
+    expect(Math.max(...capped.scheduled)).toBeLessThanOrEqual(30000);
+  });
+
+  it("메시지를 받으면 4003 거절 횟수도 처음부터 센다", async () => {
+    const { realtime, sockets, connection, runPending, closeWithoutMessage } = setup();
+    realtime.start();
+    await flushPromises();
+    closeWithoutMessage(4003);
+    await runPending();
+    closeWithoutMessage(4003);
+    await runPending();
+    sockets[2]?.onmessage?.({ data: STATUS_MESSAGE });
+    closeWithoutMessage(4003);
+    expect(connection.rejected).toBe(0);
   });
 });
 
