@@ -125,6 +125,7 @@ PWA를 React로 하는 이유는, 채팅 텍스트를 기본으로 이스케이�
 | 광고 링크 | URL, 오픈채팅(open.kakao.com), 텔레그램(t.me·"텔레"+아이디), 도박 키워드+연락처. 채널 허용 도메인은 제외 | `auto_hide` |
 | 전화번호 | 휴대전화 번호 패턴(010·011 등 + 7~8자리) | `auto_hide` |
 | 금칙어 약 | 채널 목록과 일치 | `candidate` |
+| 예외 단어 | 금칙어를 품은 정상 단어(예: 시발점). 금칙어 강·약·협박을 비교하기 전에 지운다 | (판정 없음) |
 | 개인 도배 | 한 사람이 10초 안에 5건 이상 | `candidate` |
 | 협박 표현 | 협박 표현 목록(예: 찾아간다, 집 앞, 칼 들고, 알아냈다) | `candidate` |
 | 주소·실명 | 주소 패턴(○○동·아파트·호수) | `candidate` |
@@ -193,11 +194,13 @@ POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
 
 ## 7. 권한
 
+**채널 연결**: 연결은 운영자가 설정한 스트리머 채널(`ZG_CHANNEL_ID`)만 허용한다. 공개 주소라서, 설정하지 않으면 스트리머보다 먼저 아무나 자기 채널을 연결해 서버를 가로챌 수 있기 때문이다.
+
 **매니저 로그인 절차**
 1. 매니저가 자기 치지직 계정으로 OAuth 로그인한다.
 2. 서버가 `GET /open/v1/users/me`로 `channelId`를 확인한다.
 3. 스트리머 토큰으로 받은 관리자 목록(`streaming-roles`, 5분 캐시)에 그 `channelId`가 있는지 확인한다.
-4. 통과하면 세션을 발급한다. **매니저 토큰은 확인 직후 버리고 저장하지 않는다.**
+4. 통과하면 세션을 발급한다. **매니저 토큰은 확인 직후 버리고 저장하지 않는다.** 치지직 토큰 폐기(revoke) API도 부르지 않는다. 폐기하면 같은 앱·같은 사용자의 토큰이 모두 지워져, 스트리머 본인이 로그인한 경우 보관 중인 스트리머 토큰까지 사라진다.
 5. 역할은 WebSocket을 연결할 때와 5분마다 다시 확인한다. 목록에서 빠지면 세션을 끊는다.
 
 | 기능 | 스트리머 | 채널 관리자 | 채팅 운영자 |
@@ -251,10 +254,10 @@ POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
 | `channel` | channel_id, channel_name, connected_at | 연결 해제 시 삭제 |
 | `credential` | channel_id, access_token_enc, refresh_token_enc, access_expires_at, refreshed_at | 연결 해제 시 삭제 |
 | `setting` | channel_id, auto_hide_enabled, stage1_threshold(0.05), candidate_threshold(0.5), sure_threshold(0.99), breaker_per_minute(60), retention_days_content(30), retention_days_audit(180) | 상시 |
-| `rule_entry` | id, channel_id, kind(strong·weak·allow·allow_domain·threat·keyword_route), pattern, created_by, created_at | 상시 |
+| `rule_entry` | id, channel_id, kind(strong·weak·exception·allow·allow_domain·threat·keyword_route), pattern, created_by, created_at | 상시 |
 | `verdict` | id, channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason(rule_id 또는 model), unsafe_probability, category, status(pending·hidden·ignored·restricted·false_positive), created_at | 30일 |
 | `audit_log` | id, channel_id, actor_type(manager·rule·system), actor_channel_id, action, target_sender_channel_id, verdict_id, result, error, created_at | 180일(원문 없음) |
-| `minute_stat` | channel_id, minute, received, skipped, deduplicated, stage1_forwarded, stage2_done, stage2_dropped, candidates, auto_hidden, shadow | 180일 |
+| `minute_stat` | channel_id, minute, received, skipped, deduplicated, stage1_forwarded, stage2_done, stage2_dropped, candidates, auto_hidden, shadow, invalid_events | 180일 |
 | `manager_session` | id, manager_channel_id, role, expires_at, last_role_check_at | 만료 시 삭제 |
 | `push_subscription` | id, manager_channel_id, endpoint, keys | 해지 시 삭제 |
 
