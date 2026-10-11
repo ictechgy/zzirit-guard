@@ -1,0 +1,94 @@
+import { randomBytes } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import { ChzzkApiError, type TokenSet } from "../../src/chzzk/apiClient.js";
+import { createCredentialStore, type CredentialStore } from "../../src/connection/credentialStore.js";
+import { createTokenManager, WriteLockedError } from "../../src/connection/tokenManager.js";
+import { openDatabase } from "../../src/db/database.js";
+import { createTokenCipher } from "../../src/security/tokenCipher.js";
+import { createFakeApi } from "../fakes/fakeApi.js";
+
+/** 2시간(ms). 선제 갱신 기준. */
+const TWO_HOURS = 2 * 60 * 60 * 1000;
+/** 테스트 기준 시각. */
+const NOW = 10_000_000;
+
+/** 만료까지 남은 시간을 정해 연결된 저장소를 만든다. */
+function connectedStore(expiresInMs: number): CredentialStore {
+  const store = createCredentialStore(openDatabase(":memory:"), createTokenCipher(randomBytes(32)), () => NOW);
+  store.saveConnection(
+    { channelId: "owner-channel", channelName: "스트리머" },
+    { channelId: "owner-channel", accessToken: "old-access", refreshToken: "old-refresh", accessExpiresAt: NOW + expiresInMs },
+  );
+  return store;
+}
+
+/** 새 토큰 쌍. */
+const freshTokens: TokenSet = { accessToken: "new-access", refreshToken: "new-refresh", expiresInSeconds: 86_400 };
+
+describe("TokenManager", () => {
+  it("만료가 멀면 갱신하지 않는다", async () => {
+    const refreshToken = vi.fn();
+    const manager = createTokenManager({ store: connectedStore(TWO_HOURS * 3), api: createFakeApi({ refreshToken }), clock: () => NOW });
+    expect(await manager.getAccessToken()).toBe("old-access");
+    expect(refreshToken).not.toHaveBeenCalled();
+  });
+
+  it("만료 2시간 전이면 갱신하고, 저장한 새 토큰을 쓴다", async () => {
+    const store = connectedStore(TWO_HOURS - 1);
+    const manager = createTokenManager({ store, api: createFakeApi({ refreshToken: async () => freshTokens }), clock: () => NOW });
+    expect(await manager.getAccessToken()).toBe("new-access");
+    expect(store.loadCredential()).toMatchObject({ refreshToken: "new-refresh", accessExpiresAt: NOW + 86_400_000 });
+  });
+
+  it("동시에 불러도 갱신은 한 번만 한다(refresh token은 일회용)", async () => {
+    const refreshToken = vi.fn(async () => freshTokens);
+    const manager = createTokenManager({ store: connectedStore(0), api: createFakeApi({ refreshToken }), clock: () => NOW });
+    const tokens = await Promise.all([manager.getAccessToken(), manager.getAccessToken(), manager.getAccessToken()]);
+    expect(tokens).toEqual(["new-access", "new-access", "new-access"]);
+    expect(refreshToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("갱신이 401이면 쓰기를 잠그고 알린다", async () => {
+    const listener = vi.fn();
+    const api = createFakeApi({ refreshToken: async () => { throw new ChzzkApiError(401, "INVALID_TOKEN", "/auth/v1/token"); } });
+    const manager = createTokenManager({ store: connectedStore(0), api, clock: () => NOW });
+    manager.onLockChange(listener);
+    await expect(manager.getAccessToken()).rejects.toBeInstanceOf(WriteLockedError);
+    expect(manager.isWriteLocked()).toBe(true);
+    expect(listener).toHaveBeenCalledWith(true);
+  });
+
+  it("새 토큰 저장에 실패하면 쓰기를 잠근다(옛 refresh token은 이미 무효)", async () => {
+    const store = connectedStore(0);
+    store.saveCredential = () => { throw new Error("disk full"); };
+    const manager = createTokenManager({ store, api: createFakeApi({ refreshToken: async () => freshTokens }), clock: () => NOW });
+    await expect(manager.getAccessToken()).rejects.toThrow(/저장하지 못해.*disk full/);
+    expect(manager.isWriteLocked()).toBe(true);
+  });
+
+  it("네트워크 오류여도 아직 유효한 토큰은 계속 쓴다", async () => {
+    const api = createFakeApi({ refreshToken: async () => { throw new TypeError("fetch failed"); } });
+    const manager = createTokenManager({ store: connectedStore(TWO_HOURS - 1), api, clock: () => NOW });
+    expect(await manager.getAccessToken()).toBe("old-access");
+    expect(manager.isWriteLocked()).toBe(false);
+  });
+
+  it("새 연결을 받으면 잠금을 푼다", async () => {
+    const api = createFakeApi({ refreshToken: async () => { throw new ChzzkApiError(401, "INVALID_TOKEN", "/auth/v1/token"); } });
+    const store = connectedStore(0);
+    const manager = createTokenManager({ store, api, clock: () => NOW });
+    await manager.getAccessToken().catch(() => undefined);
+    manager.adoptCredential(
+      { channelId: "owner-channel", channelName: "스트리머" },
+      { channelId: "owner-channel", accessToken: "relinked", refreshToken: "r2", accessExpiresAt: NOW + TWO_HOURS * 10 },
+    );
+    expect(manager.isWriteLocked()).toBe(false);
+    expect(await manager.getAccessToken()).toBe("relinked");
+  });
+
+  it("연결이 없으면 원인을 알려 준다", async () => {
+    const store = createCredentialStore(openDatabase(":memory:"), createTokenCipher(randomBytes(32)), () => NOW);
+    const manager = createTokenManager({ store, api: createFakeApi({}), clock: () => NOW });
+    await expect(manager.getAccessToken()).rejects.toThrow(/스트리머가 먼저 연결/);
+  });
+});
