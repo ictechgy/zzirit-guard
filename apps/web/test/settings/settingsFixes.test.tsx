@@ -162,7 +162,7 @@ describe("SettingsScreen", () => {
   it("영구 제한·해제 안내를 보여 준다", () => {
     stubFetch({});
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    render(<SettingsScreen me={manager} onSignedOut={vi.fn()} />);
+    render(<SettingsScreen me={manager} onSignedOut={vi.fn()} refreshKey={0} onRefresh={vi.fn()} />);
     expect(screen.getByText("영구 제한·해제는 치지직 기본 도구에서 합니다.")).toBeTruthy();
   });
 });

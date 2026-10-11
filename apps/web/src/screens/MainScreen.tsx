@@ -1,5 +1,5 @@
 import type { MeDto } from "@zzirit-guard/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, apiSend, requiresSignIn } from "../api/client";
 import { TabBar, type Tab } from "../components/TabBar";
 import { buildSections, countActionable } from "../domain/candidates";
@@ -57,8 +57,14 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
   const [tab, setTab] = useState<Tab>("candidates");
   // 왜 처음 방문 때 마운트하나: 설정 화면은 마운트되자마자 감사 기록·규칙·통계와 치지직 API를 직접 부르는 /api/chat-settings를 읽고 15초 상태 갱신을 시작한다. 설정을 열지 않는 매니저에게는 필요 없는 호출이다.
   const [hasVisitedSettings, setHasVisitedSettings] = useState(false);
+  // 설정 탭을 열 때마다 올려, 통계·오판 검토·감사 기록·규칙·한도를 다시 읽게 한다(F6). 처음 마운트한 뒤로는 숨기기만 해서 그대로 두면 값이 멈춘다.
+  const [settingsRefreshKey, setSettingsRefreshKey] = useState(0);
+  const refreshSettings = useCallback(() => setSettingsRefreshKey((key) => key + 1), []);
   const changeTab = (next: Tab) => {
-    if (next === "settings") setHasVisitedSettings(true);
+    if (next === "settings" && tab !== "settings") {
+      setHasVisitedSettings(true);
+      refreshSettings();
+    }
     setTab(next);
   };
   const { state, reload, reconnect } = useServerState();
@@ -82,7 +88,7 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
       </div>
       {hasVisitedSettings && (
         <div hidden={tab !== "settings"}>
-          <SettingsScreen me={me} onSignedOut={onSignedOut} />
+          <SettingsScreen me={me} onSignedOut={onSignedOut} refreshKey={settingsRefreshKey} onRefresh={refreshSettings} />
         </div>
       )}
       <TabBar active={tab} onChange={changeTab} pendingCount={countActionable(sections)} />

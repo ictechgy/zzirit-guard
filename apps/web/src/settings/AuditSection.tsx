@@ -31,10 +31,18 @@ function describeDetail(name: string, detail: string): string {
   return name === "rule_add" ? describeRuleKind(detail) : (SWITCH_REASON_LABELS.get(detail) ?? detail);
 }
 
+/** 감사 기록 속성. */
+export interface AuditSectionProps {
+  /** 로그인한 매니저(view_audit 권한으로 조회 여부를 정한다). */
+  me: MeDto;
+  /** 바뀌면 서버에서 다시 읽는다(설정 탭을 다시 열거나 '새로 고침', F6). 생략하면 처음 한 번만 읽는다. */
+  refreshKey?: number;
+}
+
 /** 감사 기록(스펙 6장 ③). 채널 관리자 이상(view_audit)만 본다. */
-export function AuditSection({ me }: { me: MeDto }) {
+export function AuditSection({ me, refreshKey = 0 }: AuditSectionProps) {
   const canView = me.permissions.includes("view_audit");
-  const entries = useApiResource<AuditEntryDto[]>(canView ? "/api/audit?limit=50" : null);
+  const entries = useApiResource<AuditEntryDto[]>(canView ? "/api/audit?limit=50" : null, null, refreshKey);
   if (!canView) return <section><h2>감사 기록</h2><p className="hint">감사 기록은 채널 관리자 이상만 볼 수 있습니다.</p></section>;
   return (
     <section>

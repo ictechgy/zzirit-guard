@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MainScreen } from "../../src/screens/MainScreen";
@@ -56,16 +56,25 @@ describe("MainScreen", () => {
     expect(paths.filter((path) => /chat-settings|audit|rules|settings|stats|false-positives/.test(path))).toEqual([]);
   });
 
-  it("설정 탭을 한 번 연 뒤에는 다른 탭으로 가도 마운트를 유지해 다시 읽지 않는다", async () => {
+  it("설정 탭을 다시 열거나 '새로 고침'을 누르면 통계·오판·감사·규칙·설정만 다시 읽고, 치지직을 부르는 채팅 설정은 다시 읽지 않는다(F6)", async () => {
     const fetchMock = stubFetch({});
     hookState.current = { ...initialServerState };
-    render(<MainScreen me={me} onSignedOut={() => undefined} />);
+    const manager = { ...me, role: "STREAMING_CHANNEL_MANAGER" as const, permissions: ["view_audit" as const] };
+    render(<MainScreen me={manager} onSignedOut={() => undefined} />);
+    const count = (path: string) => fetchMock.mock.calls.filter(([url]) => String(url) === path).length;
+    const refreshed = ["/api/stats?sinceMinutes=60", "/api/false-positives?limit=20", "/api/audit?limit=50", "/api/settings"];
     await userEvent.click(screen.getByRole("button", { name: "기록·설정" }));
-    const callsAfterFirstVisit = fetchMock.mock.calls.length;
-    expect(callsAfterFirstVisit).toBeGreaterThan(0);
+    await waitFor(() => expect(refreshed.map(count)).toEqual([1, 1, 1, 1]));
+    const rulesAfterFirstVisit = count("/api/rules");
+    expect(count("/api/chat-settings")).toBe(1);
     await userEvent.click(screen.getByRole("button", { name: /^후보/ }));
     await userEvent.click(screen.getByRole("button", { name: "기록·설정" }));
-    expect(fetchMock.mock.calls).toHaveLength(callsAfterFirstVisit);
+    await waitFor(() => expect(refreshed.map(count)).toEqual([2, 2, 2, 2]));
+    expect(count("/api/rules")).toBe(rulesAfterFirstVisit * 2);
+    await userEvent.click(screen.getByRole("button", { name: "새로 고침" }));
+    await waitFor(() => expect(refreshed.map(count)).toEqual([3, 3, 3, 3]));
+    expect(count("/api/rules")).toBe(rulesAfterFirstVisit * 3);
+    expect(count("/api/chat-settings")).toBe(1);
     expect(document.querySelector(".settings")).not.toBeNull();
   });
 });

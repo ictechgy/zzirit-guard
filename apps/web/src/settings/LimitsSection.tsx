@@ -20,9 +20,20 @@ function findInvalidField(draft: SettingsDto): string | null {
   return field ? `${field.label}은(는) ${field.min}에서 ${field.max} 사이의 정수여야 합니다.` : null;
 }
 
-/** 한도·보관 기간 설정(스펙 5.5·9장). 수정 권한(edit_rules)이 없으면 값만 보인다. */
-export function LimitsSection({ me }: { me: MeDto }) {
-  const settings = useApiResource<SettingsDto>("/api/settings");
+/** 한도·보관 기간 속성. */
+export interface LimitsSectionProps {
+  /** 로그인한 매니저(edit_rules 권한으로 수정 여부를 정한다). */
+  me: MeDto;
+  /** 바뀌면 서버에서 다시 읽는다(설정 탭을 다시 열거나 '새로 고침', F6). 생략하면 처음 한 번만 읽는다. */
+  refreshKey?: number;
+}
+
+/**
+ * 한도·보관 기간 설정(스펙 5.5·9장). 수정 권한(edit_rules)이 없으면 값만 보인다.
+ * 다시 읽으면 저장하지 않은 입력은 서버 값으로 바뀐다(탭을 떠났다 돌아온 경우라 최신 값이 낫다).
+ */
+export function LimitsSection({ me, refreshKey = 0 }: LimitsSectionProps) {
+  const settings = useApiResource<SettingsDto>("/api/settings", null, refreshKey);
   const [draft, setDraft] = useState<SettingsDto | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const busy = useBusyTask();

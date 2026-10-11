@@ -11,9 +11,17 @@ import { EDITABLE_KINDS, KIND_LABELS } from "../domain/ruleKinds";
  */
 const MAX_PATTERN_LENGTH = 50;
 
+/** 규칙 구역 속성. */
+export interface RulesSectionProps {
+  /** 로그인한 매니저(edit_rules 권한으로 추가·삭제를 보인다). */
+  me: MeDto;
+  /** 바뀌면 서버에서 다시 읽는다(설정 탭을 다시 열거나 '새로 고침', F6). 생략하면 처음 한 번만 읽는다. */
+  refreshKey?: number;
+}
+
 /** 규칙 목록과 추가·삭제(스펙 6장 ③). 수정 권한(edit_rules)이 없으면 목록만 보인다. */
-export function RulesSection({ me }: { me: MeDto }) {
-  const rules = useApiResource<RuleEntryDto[]>("/api/rules");
+export function RulesSection({ me, refreshKey = 0 }: RulesSectionProps) {
+  const rules = useApiResource<RuleEntryDto[]>("/api/rules", null, refreshKey);
   const [error, setError] = useState<string | null>(null);
   const canEdit = me.permissions.includes("edit_rules");
   const busy = useBusyTask();

@@ -12,9 +12,15 @@ function peakPerSecond(rows: readonly MinuteStatDto[]): number {
   return rows.reduce((peak, row) => Math.max(peak, row.received), 0) / 60;
 }
 
+/** 최근 1시간 통계 속성. */
+export interface StatsSectionProps {
+  /** 바뀌면 서버에서 다시 읽는다(설정 탭을 다시 열거나 '새로 고침', F6). 생략하면 처음 한 번만 읽는다. */
+  refreshKey?: number;
+}
+
 /** 최근 1시간 통계. 1단계의 핵심 측정값(초당 채팅량·건너뛰기·중복 비율)을 보여 준다(스펙 15장). */
-export function StatsSection() {
-  const stats = useApiResource<MinuteStatDto[]>("/api/stats?sinceMinutes=60");
+export function StatsSection({ refreshKey = 0 }: StatsSectionProps) {
+  const stats = useApiResource<MinuteStatDto[]>("/api/stats?sinceMinutes=60", null, refreshKey);
   if (stats.error) return <section><h2>최근 1시간</h2><p className="error" role="alert">{stats.error}</p></section>;
   const rows = stats.data ?? [];
   return (

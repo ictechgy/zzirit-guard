@@ -19,9 +19,10 @@ type ResourceState<T> = Omit<ApiResource<T>, "reload">;
 /**
  * 경로를 조회하고 결과를 상태로 돌려준다. path가 null이면 조회하지 않는다(권한이 없을 때).
  * refreshIntervalMs를 주면 그 간격으로 다시 읽는다(상태 점검처럼 서버가 방송하지 않는 값, R-7).
+ * refreshKey가 바뀌면 다시 읽는다(설정 탭을 다시 열거나 '새로 고침'을 눌렀을 때, F6).
  * 화면이 사라진 뒤 도착한 응답은 버린다.
  */
-export function useApiResource<T>(path: string | null, refreshIntervalMs: number | null = null): ApiResource<T> {
+export function useApiResource<T>(path: string | null, refreshIntervalMs: number | null = null, refreshKey = 0): ApiResource<T> {
   const [state, setState] = useState<ResourceState<T>>({ data: null, error: null, loading: path !== null });
   const [version, setVersion] = useState(0);
   useEffect(() => {
@@ -38,7 +39,7 @@ export function useApiResource<T>(path: string | null, refreshIntervalMs: number
     return () => {
       cancelled = true;
     };
-  }, [path, version]);
+  }, [path, version, refreshKey]);
   useEffect(() => {
     if (path === null || refreshIntervalMs === null) return;
     const timer = setInterval(() => setVersion((value) => value + 1), refreshIntervalMs);
