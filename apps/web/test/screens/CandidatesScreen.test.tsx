@@ -32,6 +32,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   Reflect.deleteProperty(window, "scrollY");
+  Reflect.deleteProperty(document, "visibilityState");
 });
 
 /**
@@ -311,6 +312,21 @@ describe("CandidatesScreen 조작 중 목록 고정(F4, 스모크 S1)", () => {
     fireEvent.pointerDown(listElement());
     update([verdict(1), newcomer]);
     fireEvent.pointerUp(document);
+    act(() => vi.advanceTimersByTime(1_499));
+    expect(cardOrder()).toEqual(["악플러"]);
+    act(() => vi.advanceTimersByTime(1));
+    expect(cardOrder()).toEqual(["새사람", "악플러"]);
+  });
+
+  it("누른 채 다른 앱으로 넘어가면(화면이 숨겨지면) 손을 뗀 것으로 보아, 고정이 붙은 채 남지 않는다(B19-8)", () => {
+    vi.useFakeTimers();
+    const { update } = renderLive([verdict(1)]);
+    fireEvent.pointerDown(listElement());
+    update([verdict(1), newcomer]);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
     act(() => vi.advanceTimersByTime(1_499));
     expect(cardOrder()).toEqual(["악플러"]);
     act(() => vi.advanceTimersByTime(1));

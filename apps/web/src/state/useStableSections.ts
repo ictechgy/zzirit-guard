@@ -105,6 +105,7 @@ interface PressHandlers {
 
 /**
  * 목록 안의 누르기와 문서 어디서든의 손 떼기를 듣는다. pointer와 touch를 둘 다 듣는 이유: 일부 모바일 브라우저는 스크롤을 시작하면 pointercancel만 보낸다.
+ * 화면이 숨겨지는 것(visibilitychange → hidden)도 손 떼기로 본다(B19-8): 누른 채 다른 앱으로 넘어가면 손 떼기 이벤트가 오지 않아 고정이 영영 풀리지 않는다.
  * @param container 목록 영역
  * @param handlers 누르기·손 떼기·안정 콜백
  * @returns 듣기를 멈추고 남은 타이머를 지우는 함수
@@ -124,13 +125,18 @@ function listenForPress(container: HTMLElement, handlers: PressHandlers): () => 
     clearTimeout(timer);
     timer = setTimeout(handlers.onSettled, FREEZE_GRACE_MS);
   };
+  const releaseWhenHidden = () => {
+    if (document.visibilityState === "hidden") release();
+  };
   container.addEventListener("pointerdown", press);
   container.addEventListener("touchstart", press, { passive: true });
   RELEASE_EVENTS.forEach((type) => document.addEventListener(type, release));
+  document.addEventListener("visibilitychange", releaseWhenHidden);
   return () => {
     container.removeEventListener("pointerdown", press);
     container.removeEventListener("touchstart", press);
     RELEASE_EVENTS.forEach((type) => document.removeEventListener(type, release));
+    document.removeEventListener("visibilitychange", releaseWhenHidden);
     clearTimeout(timer);
   };
 }
