@@ -1,11 +1,14 @@
 import { createApp, type App } from "./app.js";
 import { loadConfig } from "./config.js";
+import { installFatalErrorHandlers } from "./fatalErrors.js";
 import { createConsoleLogger, describeError, type Logger } from "./logger.js";
 import { loadEncryptionKey, runCommandWithExecFile } from "./security/keychain.js";
 
 /** 실행 진입점. launchd가 `node --env-file=<.env> dist/main.js`로 실행한다(ops/launchd 참고). */
 async function main(): Promise<void> {
   const logger = createConsoleLogger();
+  // 시작 도중의 오류까지 로그로 남기도록 가장 먼저 등록한다.
+  installFatalErrorHandlers(process, logger, (code) => process.exit(code));
   const config = loadConfig(process.env);
   const encryptionKey = await loadEncryptionKey(config.keychainService, runCommandWithExecFile);
   const app = await createApp(config, { encryptionKey, logger });
