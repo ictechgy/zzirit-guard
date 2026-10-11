@@ -14,6 +14,13 @@ describe("wordMatch", () => {
     expect(findFirstMatch(stripExceptions("시발점이야시발", exceptions), [entry(2, "시발")])?.id).toBe(2);
   });
 
+  it("예외 단어를 지운 자리의 앞뒤를 이어 붙여 새 금칙어를 만들지 않는다(F7)", () => {
+    const exceptions = [entry(1, "시발점")];
+    expect(findFirstMatch(stripExceptions("시시발점발", exceptions), [entry(2, "시발")])).toBeNull();
+    expect(findFirstMatch(stripExceptions("출시시발점발표", exceptions), [entry(2, "시발")])).toBeNull();
+    expect(findFirstIntactMatch(stripExceptions("출시 시발점 발표", exceptions), [entry(2, "시발")])).toBeNull();
+  });
+
   it("목록 순서대로 첫 일치를 돌려준다", () => {
     expect(findFirstMatch("ㅂㅅ같이", [entry(3, "병신"), entry(4, "ㅂㅅ")])?.id).toBe(4);
   });

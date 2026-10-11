@@ -135,6 +135,12 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat("여기가 시발점이다")).decision).toBe("pass");
   });
 
+  it("예외 단어를 지운 앞뒤가 이어져 금칙어가 되지 않는다(F7)", () => {
+    rules.add("c1", "strong", "시발", "m");
+    expect(pipeline.evaluate(chat("시시발점발", { senderChannelId: "viewer-x" }))).toMatchObject({ decision: "pass", reason: "none" });
+    expect(pipeline.evaluate(chat("출시 시발점 발표", { senderChannelId: "viewer-y" }))).toMatchObject({ decision: "pass", reason: "none" });
+  });
+
   it("개인 도배는 다섯 번째부터 후보", () => {
     const decisions = [1, 2, 3, 4, 5].map((index) => pipeline.evaluate(chat(`그냥 말 ${index}`)).decision);
     expect(decisions).toEqual(["pass", "pass", "pass", "pass", "candidate"]);
