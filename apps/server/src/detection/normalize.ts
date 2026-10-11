@@ -26,16 +26,23 @@ const JUNGSEONG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢ�
 const JONGSEONG = "\u0000ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ";
 
 /**
+ * 보이지 않는 문자를 지우고 전각 ASCII를 반각으로 바꾼다. 소문자화·글자 제거는 하지 않는다.
+ * 채팅 UI는 이런 문자를 건너뛰고 링크·번호로 그려 주므로, 패턴 검사 전에 같은 모양으로 맞춰야 우회를 막는다.
+ * 순서: NFC → 보이지 않는 문자 제거 → 전각→반각.
+ */
+export function stripInvisibleAndFullwidth(text: string): string {
+  return text
+    .normalize("NFC")
+    .replace(INVISIBLE_CHARACTERS, "")
+    .replace(FULLWIDTH_ASCII, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0));
+}
+
+/**
  * 금칙어 비교용 문자열을 만든다. 표시용이 아니다.
  * 순서: NFC → 제로폭 제거 → 전각→반각 → 소문자 → 허용 문자만 → 모음 대용 1 → 잡음 1 제거 → 자모 조합 → 반복 축약.
  */
 export function normalizeForMatching(text: string): string {
-  const cleaned = text
-    .normalize("NFC")
-    .replace(INVISIBLE_CHARACTERS, "")
-    .replace(FULLWIDTH_ASCII, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0))
-    .toLowerCase()
-    .replace(DISALLOWED_CHARACTERS, "");
+  const cleaned = stripInvisibleAndFullwidth(text).toLowerCase().replace(DISALLOWED_CHARACTERS, "");
   const withVowels = cleaned.replace(VOWEL_LOOKALIKE_AFTER_CONSONANT, "ㅣ").replace(FILLER_BETWEEN_SYLLABLES, "").replace(/\|/g, "");
   return composeJamo(withVowels).replace(REPEATED_CHARACTERS, "$1$1");
 }

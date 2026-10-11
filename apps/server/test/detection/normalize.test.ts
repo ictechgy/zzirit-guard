@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeForMatching } from "../../src/detection/normalize.js";
+import { normalizeForMatching, stripInvisibleAndFullwidth } from "../../src/detection/normalize.js";
 
 describe("normalizeForMatching", () => {
   it.each([
@@ -19,5 +19,14 @@ describe("normalizeForMatching", () => {
     ["반각 채움 문자도 지운다", "시\uFFA0발", "시발"],
   ])("%s", (_name, input, expected) => {
     expect(normalizeForMatching(input)).toBe(expected);
+  });
+});
+
+describe("stripInvisibleAndFullwidth", () => {
+  it.each([
+    ["보이지 않는 문자와 전각 영문을 바꾸고 대소문자·공백은 그대로", "ｅｖｉｌ​．Ｃｏｍ 1", "evil.Com 1"],
+    ["전각 숫자와 하이픈을 반각으로", "０１０－１２３４", "010-1234"],
+  ])("%s", (_name, input, expected) => {
+    expect(stripInvisibleAndFullwidth(input)).toBe(expected);
   });
 });
