@@ -102,7 +102,7 @@ describe("AuthFlow", () => {
     roleVerifier.invalidate();
     const onRevoked = vi.fn();
     await recheckSessionRoles({ sessions, roleVerifier, logger: silentLogger, onRevoked });
-    expect(onRevoked).toHaveBeenCalledWith([session.id]);
+    expect(onRevoked).toHaveBeenCalledWith([{ sessionId: session.id, managerChannelId: "manager-1" }]);
     expect(sessions.getById(session.id)).toBeNull();
   });
 

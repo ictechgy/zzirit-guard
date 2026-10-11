@@ -143,22 +143,38 @@ class SerialExecutor implements Executor {
   private async decideAfterFailure(request: ActionRequest, error: unknown, attempt: number): Promise<FailureDecision> {
     if (error instanceof WriteLockedError) return { kind: "done", outcome: { ok: false, message: error.message } };
     if (isStatus(error, 404) && request.kind === "hide") return { kind: "done", outcome: { ok: true, note: "이미 사라진 메시지입니다" } };
-    if (isStatus(error, 401) && attempt === 0) return this.refreshAfterUnauthorized();
+    if (isStatus(error, 401) && attempt === 0) return this.refreshAfterUnauthorized(request);
     if (isRetryable(error) && attempt < MAX_RETRIES) {
       await this.sleep(RETRY_BASE_MS * 2 ** attempt);
       return { kind: "retry" };
     }
-    return { kind: "done", outcome: { ok: false, message: toUserMessage(error) } };
+    return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error) } };
   }
 
-  /** 401: 토큰을 강제로 갱신하고 한 번 더 시도한다. 갱신도 실패하면 그 이유로 끝낸다. */
-  private async refreshAfterUnauthorized(): Promise<FailureDecision> {
+  /**
+   * 401: 토큰을 강제로 갱신하고 한 번 더 시도한다. 갱신도 실패하면 그 이유로 끝낸다.
+   * @param request 401을 받은 요청(갱신 실패를 기록할 때 쓴다)
+   */
+  private async refreshAfterUnauthorized(request: ActionRequest): Promise<FailureDecision> {
     try {
       await this.options.tokenManager.forceRefresh();
       return { kind: "retry" };
     } catch (error) {
-      return { kind: "done", outcome: { ok: false, message: toUserMessage(error) } };
+      return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error) } };
     }
+  }
+
+  /**
+   * 실패를 매니저용 문구로 바꾸고, 치지직 오류가 아니면(네트워크·내부 오류) 자세한 내용을 경고 로그로 남긴다.
+   * 왜: 내부 오류 문구(주소·포트·스택 이름)는 화면에 보일 필요가 없고 운영자 로그에만 있어야 한다(F10).
+   * @param request 실패한 요청(종류만 로그에 남긴다. 채팅 원문은 남기지 않는다)
+   * @param error 잡은 오류
+   */
+  private describeFailure(request: ActionRequest, error: unknown): string {
+    if (!(error instanceof ChzzkApiError) && !(error instanceof WriteLockedError)) {
+      this.options.logger.warn("치지직 호출 실패(치지직 응답이 아닌 오류)", { action: request.kind, error: describeError(error) });
+    }
+    return toUserMessage(error);
   }
 
   /** 감사 기록·판정 상태·실패율을 갱신한다. 각 단계는 서로 영향을 주지 않도록 따로 보호한다. */
@@ -260,7 +276,8 @@ function isRetryable(error: unknown): boolean {
 /** 오류를 매니저에게 보여 줄 문장으로 바꾼다(원인과 해결 방향 포함). */
 function toUserMessage(error: unknown): string {
   if (error instanceof WriteLockedError) return error.message;
-  if (!(error instanceof ChzzkApiError)) return `치지직에 연결하지 못했습니다(${describeError(error)}). 네트워크를 확인하세요.`;
+  // 내부 오류 내용은 넣지 않는다(describeFailure가 로그로 남긴다).
+  if (!(error instanceof ChzzkApiError)) return "치지직에 연결하지 못했습니다. 네트워크를 확인하세요.";
   if (error.status === 429) return "치지직 호출 한도를 넘었습니다. 잠시 뒤 다시 시도하세요.";
   if (error.status === 403) return "치지직이 권한 없음으로 거부했습니다. 스트리머 연결 때 동의한 권한(Scope)을 확인하세요.";
   if (error.status >= 500) return "치지직 서버 오류로 실패했습니다. 잠시 뒤 다시 시도하세요.";

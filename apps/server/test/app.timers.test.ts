@@ -10,6 +10,8 @@ const control = vi.hoisted(() => ({
   loadChannelError: null as Error | null,
   database: null as Database | null,
   hub: null as RealtimeHub | null,
+  /** 다음 역할 재확인이 해임했다고 알릴 세션(세션 ID와 매니저 채널 ID). */
+  revokedOnRecheck: [] as Array<{ sessionId: string; managerChannelId: string }>,
 }));
 
 vi.mock("../src/records/minuteStats.js", async (importOriginal) => {
@@ -38,7 +40,11 @@ vi.mock("../src/records/maintenance.js", () => ({
   runBackup: async () => "backup-skipped",
 }));
 vi.mock("../src/managers/roleRecheck.js", () => ({
-  recheckSessionRoles: async () => { if (control.recheckError) throw control.recheckError; },
+  /** 실패를 흉내 내거나, 해임된 세션을 앱의 onRevoked로 알린다(앱이 그 뒤 무엇을 하는지 보려고). */
+  recheckSessionRoles: async (deps: { onRevoked(revoked: Array<{ sessionId: string; managerChannelId: string }>): void }) => {
+    if (control.recheckError) throw control.recheckError;
+    if (control.revokedOnRecheck.length > 0) deps.onRevoked(control.revokedOnRecheck);
+  },
 }));
 vi.mock("../src/db/database.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/db/database.js")>();
@@ -68,6 +74,7 @@ beforeEach(async () => {
   control.flushError = null;
   control.recheckError = null;
   control.loadChannelError = null;
+  control.revokedOnRecheck = [];
   errorLines = [];
   warnLines = [];
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
@@ -125,6 +132,18 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
     expect(expired.sent).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
     expect(expired.closedWith).toBe(4001);
     expect(active.closedWith).toBeNull();
+  });
+});
+
+describe("해임된 매니저의 장애 알림 구독(F10)", () => {
+  it("역할 재확인이 해임한 매니저의 푸시 구독을 지우고, 다른 매니저의 구독은 둔다", async () => {
+    const insert = control.database?.prepare("INSERT INTO push_subscription (manager_channel_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, 'p', 'a', 0)");
+    insert?.run("revoked-manager", "https://fcm.googleapis.com/fcm/send/revoked");
+    insert?.run("kept-manager", "https://fcm.googleapis.com/fcm/send/kept");
+    control.revokedOnRecheck = [{ sessionId: "revoked-session", managerChannelId: "revoked-manager" }];
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const owners = control.database?.prepare("SELECT manager_channel_id AS owner FROM push_subscription").all() as Array<{ owner: string }>;
+    expect(owners.map((row) => row.owner)).toEqual(["kept-manager"]);
   });
 });
 

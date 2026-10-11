@@ -23,6 +23,11 @@ export interface PushNotifier {
   publicKey(): string;
   subscribe(managerChannelId: string, subscription: PushSubscriptionInput): void;
   unsubscribe(endpoint: string): void;
+  /**
+   * 한 매니저의 구독(모든 기기)을 지운다. 치지직에서 해임된 매니저가 장애 알림을 계속 받지 않게 한다(F10).
+   * @param managerChannelId 매니저 채널 ID
+   */
+  unsubscribeManager(managerChannelId: string): void;
   notifyAll(message: PushMessage): Promise<void>;
 }
 
@@ -146,6 +151,7 @@ export function createPushNotifier(deps: PushNotifierDeps): PushNotifier {
     publicKey: () => deps.vapid.publicKey,
     subscribe: (managerChannelId, subscription) => saveSubscription(deps, managerChannelId, subscription),
     unsubscribe: (endpoint) => void deps.database.prepare("DELETE FROM push_subscription WHERE endpoint = ?").run(endpoint),
+    unsubscribeManager: (managerChannelId) => void deps.database.prepare("DELETE FROM push_subscription WHERE manager_channel_id = ?").run(managerChannelId),
     notifyAll: (message) => notifyAll(deps, send, message),
   };
 }
