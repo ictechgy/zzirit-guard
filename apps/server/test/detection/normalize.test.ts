@@ -20,6 +20,8 @@ describe("normalizeForMatching", () => {
     ["한글 방점(U+302E)을 지운다", "씨\u302E발", "씨발"],
     ["한글 겹방점(U+302F)을 지운다", "시\u302F발", "시발"],
     ["아래아(ㆍ, U+318D)를 지운다", "병\u318D신", "병신"],
+    ["옛 아래아(U+119E)를 지운다", "병\u119E신", "병신"],
+    ["옛 쌍아래아(U+11A2)를 지운다", "병\u11A2신", "병신"],
   ])("%s", (_name, input, expected) => {
     expect(normalizeForMatching(input)).toBe(expected);
   });

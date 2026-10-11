@@ -88,8 +88,9 @@ async function applySecurityHeaders(reply: FastifyReply, publicOrigin: string, p
 
 /**
  * 모든 /auth 요청이 합쳐서 1분에 받을 상한(120). state 확인 전에 세는 값싼 바깥 한도다.
- * 왜: state가 틀린 쓰레기 콜백은 콜백 한도를 쓰지 않으므로(S3), 이것이 없으면 그런 요청이 끝없이 서버를 돌릴 수 있다.
- * 주의: 이 상한을 쓰레기 요청으로 비우면 그 1분 동안 정상 로그인도 막힌다(가용성). 정상 사용(사람이 가끔 누름)보다 훨씬 크게 잡았다.
+ * 왜: 서버가 발급하지 않은 state의 쓰레기 콜백은 콜백 한도를 쓰지 않으므로(S3), 이것이 없으면 그런 요청이 끝없이 서버를 돌릴 수 있다.
+ * 주의: 클라이언트를 구분할 수 없어 쓰레기 요청으로 이 상한을 비울 수 있다. 공격이 이어지는 동안 세션 없는 새 로그인은 막힐 수 있다;
+ * 공격이 멈추면 수 초 안에 회복. 완화: 서버가 발급한 state의 콜백(시작 한도로만 만들 수 있다)과 유효한 세션이 있는 요청은 이 상한을 건너뛴다(B9).
  */
 const AUTH_GLOBAL_LIMIT_PER_MINUTE = 120;
 /**
@@ -98,8 +99,9 @@ const AUTH_GLOBAL_LIMIT_PER_MINUTE = 120;
  */
 const AUTH_START_LIMIT_PER_MINUTE = 30;
 /**
- * 콜백이 1분에 치지직 토큰 교환까지 갈 수 있는 횟수(60). state 쿠키 확인을 통과한 요청만 센다.
+ * 콜백이 1분에 치지직 토큰 교환까지 갈 수 있는 횟수(60). state 확인(쿠키 일치 + 서버 발급)을 통과한 요청만 센다.
  * 왜 따로 세나: 시작과 한 버킷을 쓰면 쿠키 없는 가짜 콜백만으로 버킷을 비워 정상 로그인을 막을 수 있다(S3).
+ * 쿠키와 쿼리가 같고 서버가 발급한 state(hasPendingState)인 콜백만 센다. 쿠키·쿼리 일치만으로는 공격자가 임의 값을 양쪽에 넣을 수 있다(B9-1).
  * 왜 시작보다 크게 두나: 인증 화면에서 뒤로 갔다가 다시 오는 경우 등 정상 재시도를 넉넉히 받으려는 것이다.
  */
 const AUTH_CALLBACK_LIMIT_PER_MINUTE = 60;
@@ -125,13 +127,14 @@ interface AuthLimiters {
 
 /**
  * 치지직 OAuth 시작·콜백. 바깥 상한 → 시작 한도(시작 두 경로) → state 확인 → 콜백 한도 순서로 거른다.
+ * 유효한 세션이 있는 요청은 바깥 상한과 시작 한도를, 서버가 발급한 state의 콜백은 바깥 상한을 건너뛴다(B9-2).
  * 왜 IP별이 아니라 전역인가: Tailscale Funnel 뒤에서는 모든 요청이 127.0.0.1에서 온 것처럼 보여 IP로 나눌 수 없다.
  * 왜 exposeHeadRoute: false인가: Fastify는 GET마다 HEAD 라우트를 자동으로 만들어 같은 핸들러를 돌린다. 그러면 HEAD 콜백이
  * state를 쓰고 토큰 교환까지 해 버린다. /auth는 브라우저 이동만 받으므로 HEAD를 열지 않는다(g).
  */
 function registerAuthRoutes(app: FastifyInstance, deps: HttpDeps): void {
   const limiters = createAuthLimiters(deps.services.clock);
-  const options = { exposeHeadRoute: false, onRequest: async (request: FastifyRequest, reply: FastifyReply) => rejectOverAuthLimit(limiters, request, reply) };
+  const options = { exposeHeadRoute: false, onRequest: async (request: FastifyRequest, reply: FastifyReply) => rejectOverAuthLimit(deps, limiters, request, reply) };
   app.get("/auth/connect", options, async (_request, reply) => startAuthorization(deps, reply, "connect"));
   app.get("/auth/login", options, async (_request, reply) => startAuthorization(deps, reply, "login"));
   app.get(CALLBACK_PATH, options, async (request, reply) => completeLogin(deps, limiters.callback, request, reply));
@@ -148,14 +151,29 @@ function createAuthLimiters(clock: Clock): AuthLimiters {
 
 /**
  * 바깥 상한과(시작 경로면) 시작 한도를 확인하고, 넘었으면 이유와 함께 첫 화면으로 보내 핸들러까지 가지 않게 한다.
+ * 유효한 세션이 있는 요청(로그인한 스트리머의 채널 재연결 등)과 서버가 발급한 state의 콜백은 바깥 상한을 건너뛰고, 세션 요청은 시작 한도도 건너뛴다.
+ * 왜: 클라이언트를 구분할 수 없어 쓰레기 요청으로 전역 상한을 비울 수 있기 때문이다. 세션은 onRequest 세션 훅이 먼저 채운다.
+ * @param deps 인증 흐름(발급된 state 조회)
  * @param limiters 인증 경로 한도
  * @param request 요청(라우트 주소로 시작 경로인지 본다)
  * @param reply 응답
  * @returns 거절했으면 보낸 응답, 통과면 undefined
  */
-async function rejectOverAuthLimit(limiters: AuthLimiters, request: FastifyRequest, reply: FastifyReply) {
-  if (!limiters.global.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+async function rejectOverAuthLimit(deps: HttpDeps, limiters: AuthLimiters, request: FastifyRequest, reply: FastifyReply) {
+  if (request.manager) return;
+  if (!hasIssuedCallbackState(deps, request) && !limiters.global.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
   if (AUTH_START_ROUTES.has(request.routeOptions.url ?? "") && !limiters.start.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+}
+
+/**
+ * 콜백 요청의 쿠키와 쿼리 state가 같고 서버가 발급한 대기 중 state인지 본다. 상태를 바꾸지 않는다.
+ * 왜: 이런 state는 로그인 시작 한도(30/분)를 거쳐서만 만들 수 있어, 바깥 상한을 건너뛰어도 남용 경로가 늘지 않는다.
+ */
+function hasIssuedCallbackState(deps: HttpDeps, request: FastifyRequest): boolean {
+  const query = callbackQuerySchema.safeParse(request.query);
+  if (!query.success) return false;
+  const boundState = request.cookies[OAUTH_STATE_COOKIE];
+  return boundState === query.data.state && deps.authFlow.hasPendingState(query.data.state);
 }
 
 /**
@@ -190,22 +208,22 @@ function startAuthorization(deps: HttpDeps, reply: FastifyReply, purpose: "conne
  * 왜 state 확인 뒤에 콜백 한도를 세나: 확인 전에 세면 쿠키 없는 가짜 콜백만으로 버킷을 비워 정상 로그인을 막을 수 있다(S3).
  */
 async function completeLogin(deps: HttpDeps, callbackBucket: TokenBucket, request: FastifyRequest, reply: FastifyReply) {
-  const verified = verifyCallbackState(request, reply);
+  const verified = verifyCallbackState(deps, request, reply);
   if (typeof verified === "string") return redirectWithLoginError(reply, verified);
   if (!callbackBucket.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
   return exchangeCodeForSession(deps, request, reply, verified);
 }
 
 /**
- * 콜백 쿼리와 state 쿠키를 확인한다. 쿼리가 있으면 쿠키는 결과와 관계없이 지운다(일회용).
+ * 콜백 쿼리와 state 쿠키를 확인하고, 서버가 발급한 대기 중 state인지도 본다. 쿼리가 있으면 쿠키는 결과와 관계없이 지운다(일회용).
  * @returns 통과하면 code·state, 아니면 사용자에게 보여 줄 이유
  */
-function verifyCallbackState(request: FastifyRequest, reply: FastifyReply): { code: string; state: string } | string {
+function verifyCallbackState(deps: HttpDeps, request: FastifyRequest, reply: FastifyReply): { code: string; state: string } | string {
   const query = callbackQuerySchema.safeParse(request.query);
   if (!query.success) return MISSING_CALLBACK_VALUES_MESSAGE;
   const boundState = request.cookies[OAUTH_STATE_COOKIE];
   reply.clearCookie(OAUTH_STATE_COOKIE, { path: OAUTH_STATE_COOKIE_PATH });
-  return boundState && boundState === query.data.state ? query.data : STATE_MISMATCH_MESSAGE;
+  return boundState && boundState === query.data.state && deps.authFlow.hasPendingState(query.data.state) ? query.data : STATE_MISMATCH_MESSAGE;
 }
 
 /** code를 토큰으로 바꿔 세션을 만든다. 성공하면 세션 쿠키를 주고 첫 화면으로, 실패하면 이유를 담아 첫 화면으로 보낸다. */
@@ -264,12 +282,21 @@ export function toSocketSink(socket: WebSocket): SocketSink {
   };
 }
 
+/** 화면이 아니라 서버 기능이 쓰는 경로 접두사. 라우트는 대소문자를 구분하지만 이 경로의 오타를 index.html로 받지 않으려고 소문자로 비교한다. */
+const RESERVED_PATH_PREFIXES = ["/api/", "/auth/", "/ws"];
+
+/** 서버 기능 경로인지 본다(대소문자 무시). 맞으면 index.html이 아니라 JSON 404를 줘야 한다. */
+function isReservedPath(url: string): boolean {
+  const lowerCased = url.toLowerCase();
+  return RESERVED_PATH_PREFIXES.some((prefix) => lowerCased.startsWith(prefix));
+}
+
 /** PWA 정적 파일. 빌드 결과가 없으면(서버만 테스트할 때) 건너뛴다. 알 수 없는 화면 경로는 index.html로 보낸다. */
 async function registerStatic(app: FastifyInstance, directory: string): Promise<void> {
   if (!existsSync(directory)) return;
   await app.register(fastifyStatic, { root: directory, wildcard: false });
   app.setNotFoundHandler((request, reply) => {
-    if (!["GET", "HEAD"].includes(request.method) || request.url.startsWith("/api/") || request.url.startsWith("/auth/") || request.url.startsWith("/ws")) {
+    if (!["GET", "HEAD"].includes(request.method) || isReservedPath(request.url)) {
       return reply.code(404).send(errorBody("not_found", "없는 주소입니다."));
     }
     return reply.sendFile("index.html");

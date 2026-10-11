@@ -45,6 +45,13 @@ export interface AuthFlowDeps {
 /** 치지직 OAuth로 채널을 연결하고 매니저를 로그인시킨다. */
 export interface AuthFlow {
   authorizeUrl(purpose: AuthPurpose): string;
+  /**
+   * 서버가 발급했고 아직 쓰이지 않았으며 만료되지 않은 state인지 본다. state를 지우지 않는 조회다(TTL은 적용한다).
+   * 왜: 요청 한도는 서버가 실제로 발급한 state에만 매겨야 한다. 쿠키와 쿼리의 일치만 보면 공격자가 임의의 값을 양쪽에 넣어
+   * 콜백 한도를 비울 수 있다.
+   * @param state 콜백 쿼리의 state
+   */
+  hasPendingState(state: string): boolean;
   complete(code: string, state: string): Promise<{ session: ManagerSession; rawId: string }>;
 }
 
@@ -53,6 +60,10 @@ export function createAuthFlow(deps: AuthFlowDeps): AuthFlow {
   const states = new Map<string, { purpose: AuthPurpose; createdAt: number }>();
   return {
     authorizeUrl: (purpose) => buildAuthorizeUrl(deps, states, purpose),
+    hasPendingState: (state) => {
+      const entry = states.get(state);
+      return entry !== undefined && deps.clock() - entry.createdAt <= STATE_TTL_MS;
+    },
     async complete(code, state) {
       const purpose = takeState(states, state, deps.clock());
       const tokens = await deps.api.exchangeCode(code, state);

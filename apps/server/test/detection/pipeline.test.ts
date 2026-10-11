@@ -163,7 +163,7 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat(`김치${space}녀 진짜`))).toMatchObject({ decision: "auto_hide", reason: expect.stringMatching(/^rule:strong:\d+$/) });
   });
 
-  it.each([["U+302E", "\u302E"], ["U+302F", "\u302F"], ["U+318D", "\u318D"]])("한글 방점·아래아(%s)를 끼워도 금칙어 강을 피하지 못한다", (_name, mark) => {
+  it.each([["U+302E", "\u302E"], ["U+302F", "\u302F"], ["U+318D", "\u318D"], ["U+119E", "\u119E"], ["U+11A2", "\u11A2"]])("한글 방점·아래아(%s)를 끼워도 금칙어 강을 피하지 못한다", (_name, mark) => {
     expect(pipeline.evaluate(chat(`김치${mark}녀`))).toMatchObject({ decision: "auto_hide", reason: expect.stringMatching(/^rule:strong:\d+$/) });
   });
 

@@ -13,10 +13,10 @@ const DISALLOWED_CHARACTERS_EXCEPT_WHITESPACE = /[^\p{Script=Hangul}a-z0-9|\s]/g
 /** 연이은 공백 문자(줄바꿈·전각 공백 포함). 한 칸으로 줄여 공백 개수에 따라 일치가 갈리지 않게 한다. */
 const WHITESPACE_RUN = /\s+/g;
 /**
- * 한글 방점(U+302E·U+302F)과 아래아(ㆍ, U+318D). Script=Hangul이라 DISALLOWED_CHARACTERS에서 남는데, 화면에서는 작은 점으로만 보여
+ * 한글 방점(U+302E·U+302F), 아래아(ㆍ, U+318D), 옛 아래아(ᆞ, U+119E)와 옛 쌍아래아(ᆢ, U+11A2). Script=Hangul이라 DISALLOWED_CHARACTERS에서 남는데, 화면에서는 작은 점으로만 보여
  * 금칙어 글자 사이에 끼워 넣는 우회("김치〮녀")에 쓰인다. 두 비교용 정규화 모두에서 지운다.
  */
-const HANGUL_DOT_MARKS = /[\u302E\u302F\u318D]/g;
+const HANGUL_DOT_MARKS = /[\u302E\u302F\u318D\u119E\u11A2]/g;
 /**
  * 좁은 공백류(U+1680, U+2006~U+200A, U+2028, U+2029, U+202F, U+205F). \s에 들어 있어 공백 유지 형태에서 공백 한 칸이 되는데,
  * 화면에서는 거의 붙어 보여 글자 사이에 끼우면 금칙어 강이 "단어를 걸친 일치"로 보여 자동 숨김이 후보로 낮아진다(S2).

@@ -1,4 +1,7 @@
 import type { FalsePositiveReviewDto } from "@zzirit-guard/shared";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { toSocketSink } from "../../src/http/server.js";
@@ -152,7 +155,7 @@ describe("규칙·감사 기록", () => {
 
 describe("로그인 콜백", () => {
   it("실패하면 이유를 담아 첫 화면으로 보낸다", async () => {
-    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: "zg_oauth_state=s" } });
+    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=test-state", headers: { cookie: "zg_oauth_state=test-state" } });
     expect(response.statusCode).toBe(302);
     expect(decodeURIComponent(response.headers.location as string)).toBe("/?loginError=이 채널의 매니저가 아닙니다.");
   });
@@ -162,7 +165,7 @@ describe("로그인 콜백", () => {
     harness = await createHttpHarness({
       complete: async () => ({ rawId: "raw-session", session: { id: "h", managerChannelId: "m", managerChannelName: "m", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 } }),
     });
-    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: "zg_oauth_state=s" } });
+    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=test-state", headers: { cookie: "zg_oauth_state=test-state" } });
     expect(response.headers.location).toBe("/");
     const cookies = [response.headers["set-cookie"]].flat().map(String);
     const cookie = cookies.find((value) => value.startsWith("zg_session=")) ?? "";
@@ -201,7 +204,7 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
 
   /** state 쿠키가 맞는 콜백 요청. */
   function validCallback() {
-    return send("/auth/callback?code=c&state=s", "GET", "zg_oauth_state=s");
+    return send("/auth/callback?code=c&state=test-state", "GET", "zg_oauth_state=test-state");
   }
 
   it("로그인 시작(connect·login)은 합쳐 1분에 30번까지 받고, 넘으면 JSON이 아니라 첫 화면으로 이유를 보내며, 시간이 지나면 다시 받는다(R-8)", async () => {
@@ -217,9 +220,9 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
     expect(locationOf(await send("/auth/connect"))).toBe(RATE_LIMITED_LOCATION);
   });
 
-  it("인코딩한 경로로 들어와도 같은 라우트의 한도를 쓴다(g)", async () => {
+  it("인코딩하거나 쿼리를 붙인 경로로 들어와도 같은 라우트의 한도를 쓴다(g)", async () => {
     await useControlledClock();
-    for (let index = 0; index < 30; index += 1) await send(index % 2 === 0 ? "/auth/%6Cogin" : "/auth/./login");
+    for (let index = 0; index < 30; index += 1) await send(index % 2 === 0 ? "/auth/%6Cogin" : "/auth/login?x");
     expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
     expect(locationOf(await send("/auth/%6Cogin"))).toBe(RATE_LIMITED_LOCATION);
   });
@@ -259,10 +262,42 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
     expect(complete).toHaveBeenCalledTimes(61);
   });
 
+  it("서버가 발급하지 않은 state를 쿠키와 쿼리에 맞춰 보낸 위조 콜백은 콜백 한도를 쓰지 않아 뒤따르는 진짜 콜백을 막지 못한다(B9-1)", async () => {
+    const { complete } = await useControlledClock();
+    for (let index = 0; index < 70; index += 1) {
+      expect(locationOf(await send("/auth/callback?code=c&state=forged", "GET", "zg_oauth_state=forged"))).toMatch(/로그인 요청이 만료되었거나/);
+    }
+    expect(locationOf(await validCallback())).toBe(NOT_MANAGER_LOCATION);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("발급된 state의 콜백은 콜백 한도를 쓴다(B9-1)", async () => {
+    await useControlledClock();
+    for (let index = 0; index < 60; index += 1) await validCallback();
+    expect(locationOf(await validCallback())).toBe(RATE_LIMITED_LOCATION);
+  });
+
+  it("바깥 상한이 쓰레기 요청으로 비어도 발급된 state의 콜백은 통과한다(B9-2a)", async () => {
+    const { complete } = await useControlledClock();
+    for (let index = 0; index < 120; index += 1) await send("/auth/callback?code=c&state=wrong");
+    expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
+    expect(locationOf(await validCallback())).toBe(NOT_MANAGER_LOCATION);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("바깥 상한과 시작 한도가 비어도 유효한 세션이 있는 요청은 /auth/connect로 치지직에 갈 수 있다(B9-2b)", async () => {
+    await useControlledClock();
+    const rawId = harness.login("STREAMING_CHANNEL_OWNER");
+    for (let index = 0; index < 120; index += 1) await send("/auth/callback?code=c&state=wrong");
+    expect(locationOf(await send("/auth/connect"))).toBe(RATE_LIMITED_LOCATION);
+    expect(String((await send("/auth/connect", "GET", `zg_session=${rawId}`)).headers.location)).toMatch(/^https:\/\/chzzk\.example\//);
+    expect(locationOf(await send("/auth/connect", "GET", "zg_session=not-a-session"))).toBe(RATE_LIMITED_LOCATION);
+  });
+
   it("모든 /auth 요청은 합쳐 1분에 120번까지만 받는다(값싼 바깥 상한, g)", async () => {
     const { complete } = await useControlledClock();
     for (let index = 0; index < 120; index += 1) await send("/auth/callback?code=c&state=wrong", "GET", "zg_oauth_state=s");
-    expect(locationOf(await validCallback())).toBe(RATE_LIMITED_LOCATION);
+    expect(locationOf(await send("/auth/callback?code=c&state=x"))).toBe(RATE_LIMITED_LOCATION);
     expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
     expect(complete).not.toHaveBeenCalled();
   });
@@ -375,7 +410,7 @@ describe("로그인 state 묶기", () => {
     });
     const oldRawId = harness.login("STREAMING_CHAT_MANAGER");
     const oldId = harness.sessions.get(oldRawId)?.id;
-    await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: `zg_oauth_state=s; zg_session=${oldRawId}` } });
+    await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=test-state", headers: { cookie: `zg_oauth_state=test-state; zg_session=${oldRawId}` } });
     expect(harness.sessions.get(oldRawId)).toBeNull();
     expect(harness.services.endSessions).toHaveBeenCalledWith([oldId], "새로 로그인했습니다");
   });
@@ -485,11 +520,32 @@ describe("오판 검토 목록(스펙 5.5, R-16)", () => {
     const cookie = `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}`;
     expect((await harness.app.inject({ method: "GET", url: "/api/false-positives", headers: { cookie } })).statusCode).toBe(200);
     for (const limit of ["0", "201", "abc"]) {
-      expect((await harness.app.inject({ method: "GET", url: `/api/false-positives?limit=${limit}`, headers: { cookie } })).statusCode).toBe(400);
+      const response = await harness.app.inject({ method: "GET", url: `/api/false-positives?limit=${limit}`, headers: { cookie } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ error: "invalid_input" });
     }
   });
 
   it("로그인하지 않으면 401", async () => {
     expect((await harness.app.inject({ method: "GET", url: "/api/false-positives" })).statusCode).toBe(401);
+  });
+});
+
+describe("정적 파일 서버의 JSON 404 경로", () => {
+  it("/api/·/auth/·/ws 접두사는 대소문자와 관계없이 index.html이 아니라 JSON 404를 준다(B9-4)", async () => {
+    await harness.close();
+    const directory = mkdtempSync(join(tmpdir(), "zzirit-web-"));
+    writeFileSync(join(directory, "index.html"), "<html></html>");
+    try {
+      harness = await createHttpHarness({}, { webDistDirectory: directory });
+      for (const url of ["/AUTH/login", "/Api/nothing", "/WS", "/auth/nothing"]) {
+        const response = await harness.app.inject({ method: "GET", url });
+        expect(response.statusCode).toBe(404);
+        expect(response.json()).toMatchObject({ error: "not_found" });
+      }
+      expect((await harness.app.inject({ method: "GET", url: "/some/screen" })).body).toBe("<html></html>");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
