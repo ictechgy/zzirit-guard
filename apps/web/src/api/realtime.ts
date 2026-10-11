@@ -1,0 +1,182 @@
+import type { RealtimeEvent } from "@zzirit-guard/shared";
+import { API_BASE, apiSend, requiresSignIn } from "./client";
+
+/** 연결에 필요한 WebSocket 기능. 테스트에서 가짜로 바꾼다. onopen은 쓰지 않는다(연결됨은 첫 메시지로 판단, RealtimeOptions 참고). */
+export interface SocketLike {
+  /** 서버 메시지를 받았을 때. */
+  onmessage: ((event: { data: unknown }) => void) | null;
+  /** 연결이 닫혔을 때(닫기 코드 포함). */
+  onclose: ((event: { code: number }) => void) | null;
+  /** 연결을 닫는다. */
+  close(): void;
+}
+
+/** RealtimeConnection 옵션. issueTicket·openSocket·schedule은 테스트에서 바꿔 끼운다. */
+export interface RealtimeOptions {
+  /** 판정·상태·채팅 이벤트를 받는다(session_ended는 onSessionEnded로 간다). */
+  onEvent(event: RealtimeEvent): void;
+  /**
+   * 연결 상태가 바뀔 때. true는 열린 뒤 첫 메시지를 받았을 때다.
+   * 왜 onopen이 아닌가: 서버는 업그레이드를 마친 뒤에 티켓·출처를 확인하고 실패하면 4003으로 닫으므로, 열렸다고 인증된 것이 아니다.
+   * 인증된 연결에는 곧바로 status를 보낸다(server.ts registerWebSocket).
+   */
+  onConnectionChange(connected: boolean): void;
+  /** 세션이 끝나 로그인 화면으로 가야 할 때(4001·session_ended·티켓 401·409 no_channel). */
+  onSessionEnded(reason: string): void;
+  /** 4003 거절이 MAX_CONSECUTIVE_REJECTIONS번 이어져 다시 연결을 멈췄을 때. */
+  onRejected(): void;
+  /** 티켓 발급(기본: POST /api/ws-ticket). */
+  issueTicket?: () => Promise<string>;
+  /** 소켓 열기(기본: 브라우저 WebSocket). */
+  openSocket?: (url: string) => SocketLike;
+  /** 재연결 예약(기본: setTimeout). */
+  schedule?: (callback: () => void, ms: number) => void;
+}
+
+/** 서버가 세션을 끝낼 때 쓰는 닫기 코드(hub.ts). */
+const SESSION_ENDED_CLOSE_CODE = 4001;
+/** 티켓이 틀렸거나 출처가 다를 때 서버가 쓰는 닫기 코드(server.ts). */
+const REJECTED_CLOSE_CODE = 4003;
+/**
+ * 4003을 이만큼 이어서 받으면 다시 연결을 멈춘다.
+ * 왜: 출처 불일치(다른 주소로 접속)는 재시도해도 낫지 않는데, 멈추지 않으면 그때마다 티켓을 발급받으며 끝없이 되풀이한다(R-6).
+ */
+const MAX_CONSECUTIVE_REJECTIONS = 3;
+/** 재연결 대기 시간의 시작값(1초). 시도마다 두 배로 늘린다. */
+const BACKOFF_BASE_MS = 1000;
+/** 재연결 대기 시간의 최댓값(30초, 스펙 10장). */
+const BACKOFF_MAX_MS = 30_000;
+
+/** n번째 재연결 대기 시간. */
+export function reconnectDelayMs(attempt: number): number {
+  return Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+}
+
+/** 티켓을 붙인 WebSocket 주소. base가 비면 현재 화면의 출처를 쓴다. */
+export function websocketUrl(ticket: string, base: string = API_BASE, origin: string = window.location.origin): string {
+  return `${(base || origin).replace(/^http/, "ws")}/ws?ticket=${encodeURIComponent(ticket)}`;
+}
+
+/** 기본 티켓 발급. */
+async function requestTicket(): Promise<string> {
+  return (await apiSend<{ ticket: string }>("POST", "/api/ws-ticket")).ticket;
+}
+
+/** 서버와의 실시간 연결. 끊기면 새 티켓으로 다시 연결하고, 세션이 끝났거나 거듭 거절되면 멈춘다. */
+export class RealtimeConnection {
+  /** 지금 열려 있거나 여는 중인 소켓. */
+  private socket: SocketLike | null = null;
+  /** stop()을 불렀거나 아직 start()하지 않았으면 true. 비동기 처리 중에 멈췄는지 확인하는 데 쓴다. */
+  private stopped = true;
+  /** 연이은 재연결 시도 횟수. 백오프에 쓰고, 서버 메시지를 받으면 0으로 되돌린다. */
+  private attempt = 0;
+  /** 연이은 4003 거절 횟수. 서버 메시지를 받으면 0으로 되돌린다. */
+  private rejections = 0;
+  /** 티켓 발급 함수. */
+  private readonly issueTicket: () => Promise<string>;
+  /** 소켓 여는 함수. */
+  private readonly openSocket: (url: string) => SocketLike;
+  /** 재연결 예약 함수. */
+  private readonly schedule: (callback: () => void, ms: number) => void;
+
+  /** @param options 이벤트 수신자와(테스트용) 바꿔 끼울 함수 */
+  constructor(private readonly options: RealtimeOptions) {
+    this.issueTicket = options.issueTicket ?? requestTicket;
+    this.openSocket = options.openSocket ?? ((url) => new WebSocket(url) as unknown as SocketLike);
+    this.schedule = options.schedule ?? ((callback, ms) => void setTimeout(callback, ms));
+  }
+
+  /** 연결을 시작한다. 이미 돌고 있으면 무시한다. 거절로 멈춘 뒤 다시 부르면 처음부터 센다. */
+  start(): void {
+    if (!this.stopped) return;
+    this.stopped = false;
+    this.attempt = 0;
+    this.rejections = 0;
+    void this.connect();
+  }
+
+  /** 연결을 멈추고 소켓을 닫는다. 이후 닫힘·예약된 재연결은 무시된다. */
+  stop(): void {
+    this.stopped = true;
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
+  }
+
+  /** 티켓을 받아 소켓을 연다. 로그인이 필요한 오류(401·no_channel)면 세션 종료, 그 밖의 실패는 재연결. */
+  private async connect(): Promise<void> {
+    try {
+      const ticket = await this.issueTicket();
+      if (this.stopped) return;
+      this.attach(this.openSocket(websocketUrl(ticket)));
+    } catch (error) {
+      if (requiresSignIn(error)) return this.endSession(error.message);
+      console.warn("실시간 연결 티켓 발급 실패, 다시 시도합니다", error);
+      this.scheduleReconnect();
+    }
+  }
+
+  /** 소켓 이벤트를 연결한다. 연결됨 표시는 첫 메시지에서 한다(RealtimeOptions.onConnectionChange 참고). */
+  private attach(socket: SocketLike): void {
+    this.socket = socket;
+    let received = false;
+    socket.onmessage = (event) => {
+      if (!received) this.markConnected();
+      received = true;
+      this.handleMessage(event.data);
+    };
+    socket.onclose = (event) => this.handleClose(socket, event.code);
+  }
+
+  /** 인증된 연결을 확인했다: 백오프·거절 횟수를 처음으로 되돌리고 알린다. */
+  private markConnected(): void {
+    this.attempt = 0;
+    this.rejections = 0;
+    this.options.onConnectionChange(true);
+  }
+
+  /** 메시지 처리. 형식이 틀린 메시지는 콘솔에 남기고 버린다(연결은 유지). */
+  private handleMessage(data: unknown): void {
+    let event: RealtimeEvent;
+    try {
+      event = JSON.parse(String(data)) as RealtimeEvent;
+    } catch (error) {
+      console.warn("실시간 메시지 형식 오류", error);
+      return;
+    }
+    if (event.type === "session_ended") this.endSession(event.reason);
+    else this.options.onEvent(event);
+  }
+
+  /** 닫힘 처리: 4001이면 세션 종료, 4003이 이어지면 멈춤, 그 밖에는 백오프 재연결. */
+  private handleClose(socket: SocketLike, code: number): void {
+    if (this.socket === socket) this.socket = null;
+    this.options.onConnectionChange(false);
+    if (this.stopped) return;
+    if (code === SESSION_ENDED_CLOSE_CODE) return this.endSession("세션이 종료되었습니다. 다시 로그인하세요.");
+    if (code === REJECTED_CLOSE_CODE && ++this.rejections >= MAX_CONSECUTIVE_REJECTIONS) return this.giveUp();
+    this.scheduleReconnect();
+  }
+
+  /** 세션 종료: 멈추고 한 번만 알린다. */
+  private endSession(reason: string): void {
+    if (this.stopped) return;
+    this.stop();
+    this.options.onSessionEnded(reason);
+  }
+
+  /** 거절이 이어져 멈춘다. 화면이 /api/me를 다시 확인하고 이유를 보여 준다. */
+  private giveUp(): void {
+    this.stop();
+    this.options.onRejected();
+  }
+
+  /** 재연결 예약. */
+  private scheduleReconnect(): void {
+    const delay = reconnectDelayMs(this.attempt);
+    this.attempt += 1;
+    this.schedule(() => {
+      if (!this.stopped) void this.connect();
+    }, delay);
+  }
+}
