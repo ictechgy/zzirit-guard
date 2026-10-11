@@ -97,7 +97,8 @@ describe("판정 조치", () => {
     harness.verdicts.updateStatus(verdict.id, status);
     const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
     expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({ error: "already_handled" });
+    // 홈 화면 앱에는 새로고침이 없어, 앱에 있는 '다시 불러오기'를 가리킨다(B19-6).
+    expect(response.json()).toMatchObject({ error: "already_handled", message: "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요." });
     expect(harness.submit).not.toHaveBeenCalled();
   });
 
@@ -502,7 +503,7 @@ describe("판정 ID 검증", () => {
     const restrict = await harness.app.inject({ method: "POST", url: restrictUrl, headers, payload: { verdictId: other.id } });
     const temporary = await harness.app.inject({ method: "POST", url: "/api/senders/bad/temporary-restrict", headers, payload: { chatChannelId: "chat-1", verdictId: other.id } });
     expect([restrict.statusCode, temporary.statusCode]).toEqual([400, 400]);
-    expect(restrict.json().error).toBe("verdict_mismatch");
+    expect(restrict.json()).toMatchObject({ error: "verdict_mismatch", message: "판정의 보낸 사람과 대상 사용자가 다릅니다. '다시 불러오기'를 누른 뒤 다시 시도하세요." });
     expect(harness.submit).not.toHaveBeenCalled();
   });
 

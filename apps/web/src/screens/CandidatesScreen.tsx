@@ -62,8 +62,14 @@ const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kin
 ];
 
 /**
+ * 이미 처리된 판정(409 already_handled)일 때의 안내(B19-6). 실패가 아니라 화면이 낡았던 것이라 빨간 오류로 보이지 않는다.
+ * 서버 문구 대신 이 문구를 쓰는 이유: 목록은 이미 다시 읽으므로, 매니저가 할 일이 없다고 알리면 된다.
+ */
+const ALREADY_HANDLED_NOTICE = "이미 처리된 항목입니다. 목록을 다시 불러왔습니다.";
+
+/**
  * 동작 실행기를 만든다. 성공하면 안내를, 실패하면 서버 문구를 남긴다.
- * 이미 처리된 판정(409 already_handled)이면 화면이 낡은 것이므로 목록을 다시 읽는다(R-13).
+ * 이미 처리된 판정(409 already_handled)이면 화면이 낡은 것이므로 목록을 다시 읽고 안내(info)로 알린다(R-13·B19-6).
  * @param setFeedback 결과를 화면에 남긴다
  * @param onReload 목록을 다시 읽는다
  * @param locks 열쇠별 잠금(같은 열쇠의 동작만 막는다)
@@ -75,8 +81,12 @@ function createRunner(setFeedback: (feedback: ActionFeedback) => void, onReload:
     startTask(task).then(
       (message) => setFeedback(message ? { kind: "ok", message } : null),
       (error: unknown) => {
+        if (error instanceof ApiError && error.code === "already_handled") {
+          setFeedback({ kind: "info", message: ALREADY_HANDLED_NOTICE });
+          onReload();
+          return;
+        }
         setFeedback({ kind: "error", message: describeApiError(error) });
-        if (error instanceof ApiError && error.code === "already_handled") onReload();
       },
     ).finally(() => locks.unlock(lockKey));
   };

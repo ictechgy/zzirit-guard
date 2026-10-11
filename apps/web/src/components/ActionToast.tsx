@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 
-/** 화면에 남기는 동작 결과. 없으면 null. */
-export type ActionFeedback = { kind: "ok" | "error"; message: string } | null;
+/**
+ * 화면에 남기는 동작 결과. 없으면 null.
+ * ok는 성공, info는 실패가 아닌 알림(예: 이미 처리된 항목이라 목록을 다시 읽음), error는 실패다. ok·info는 잠깐 보이고 error는 닫을 때까지 남는다.
+ */
+export type ActionFeedback = { kind: "ok" | "info" | "error"; message: string } | null;
 
 /**
  * 성공 안내를 보여 주는 시간(4초).
@@ -20,16 +23,16 @@ export interface ActionToastProps {
 /**
  * 동작 결과 알림: 탭 막대 바로 위에 떠 있는 토스트(F9, 스모크 S3).
  * 왜 아래쪽인가: 결과를 맨 위에만 보이면, 목록 아래에서 누른 매니저는 성공·실패를 못 본다(성공한 숨기기는 아무것도 안 보였다).
- * 성공은 status(작업 결과)로 읽어 주고 4초 뒤 사라진다. 오류는 alert로 읽어 주고 닫을 때까지 남는다.
+ * 성공·안내는 status(작업 결과)로 읽어 주고 4초 뒤 사라진다. 오류는 alert로 읽어 주고 닫을 때까지 남는다.
  */
 export function ActionToast({ feedback, onDismiss }: ActionToastProps) {
   useEffect(() => {
-    if (feedback?.kind !== "ok") return;
+    if (!feedback || feedback.kind === "error") return;
     const timer = setTimeout(onDismiss, SUCCESS_TOAST_MS);
     return () => clearTimeout(timer);
   }, [feedback, onDismiss]);
   if (!feedback) return null;
-  if (feedback.kind === "ok") return <p className="toast feedback" role="status" aria-label="작업 결과">{feedback.message}</p>;
+  if (feedback.kind !== "error") return <p className={feedback.kind === "ok" ? "toast feedback" : "toast info"} role="status" aria-label="작업 결과">{feedback.message}</p>;
   return (
     <div className="toast error" role="alert">
       <p>{feedback.message}</p>

@@ -67,7 +67,7 @@ const MAX_PUSH_KEY_LENGTH = 256;
  */
 const HIDE_BLOCKING_STATUSES: ReadonlySet<VerdictStatus> = new Set(["hidden", "restricted"]);
 /** 이미 처리된 판정에 다시 조치하려 할 때의 안내 문구. */
-const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. 화면을 새로고침해 현재 상태를 확인하세요.";
+const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -348,7 +348,7 @@ function findVerdict(services: RouteServices, params: unknown, channelId: string
 function resolveVerdictId(services: RouteServices, verdictId: number | null | undefined, senderChannelId: string, channelId: string): number | null {
   if (verdictId === null || verdictId === undefined) return null;
   const verdict = findVerdict(services, { id: verdictId }, channelId);
-  if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. 화면을 새로고침한 뒤 다시 시도하세요.");
+  if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. '다시 불러오기'를 누른 뒤 다시 시도하세요.");
   return verdict.id;
 }
 

@@ -104,11 +104,13 @@ describe("CandidatesScreen", () => {
     await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 사라진 메시지입니다"));
   });
 
-  it("이미 처리된 판정(409 already_handled)이면 이유를 보여 주고 목록을 다시 읽는다(R-13)", async () => {
-    const conflict = new ApiError(409, "already_handled", "이미 다른 조치가 끝난 판정입니다. 화면을 새로고침해 현재 상태를 확인하세요.");
+  it("이미 처리된 판정(409 already_handled)이면 빨간 오류가 아니라 안내로 알리고 목록을 다시 읽는다(R-13·B19-6)", async () => {
+    const conflict = new ApiError(409, "already_handled", "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.");
     const { onReload } = renderScreen([verdict(1)], fakeActions({ ignore: async () => { throw conflict; } }));
     await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }));
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/이미 다른 조치가 끝난 판정/));
+    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status", { name: "작업 결과" }).classList.contains("error")).toBe(false);
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 
