@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import type { ServerStatus } from "@zzirit-guard/shared";
+import type { AutoHideOffReason, ServerStatus } from "@zzirit-guard/shared";
 import type { FastifyInstance } from "fastify";
 import { createAutoHideSwitch } from "./actions/autoHideSwitch.js";
 import { createDecisionHandler } from "./actions/decisionHandler.js";
@@ -18,7 +18,7 @@ import type { RouteServices } from "./http/routes.js";
 import { buildHttpServer } from "./http/server.js";
 import { createConsoleLogger, describeError, type Logger } from "./logger.js";
 import { createAuthFlow } from "./managers/authFlow.js";
-import { recheckSessionRoles } from "./managers/roleRecheck.js";
+import { recheckSessionRoles, type RevokedSession } from "./managers/roleRecheck.js";
 import { createRoleVerifier } from "./managers/roleVerifier.js";
 import { createSessionStore } from "./managers/sessionStore.js";
 import { createPushNotifier, type PushMessage, type PushSender } from "./push/pushNotifier.js";
@@ -57,6 +57,12 @@ const INTERVALS = {
   maintenanceMs: 24 * 60 * 60 * 1000,
   firstMaintenanceDelayMs: 5 * 60 * 1000,
 };
+/**
+ * 열린 매니저 화면에 현재 상태(status)를 다시 보내는 간격(20초, B19-2).
+ * 왜: 화면은 45초 동안 메시지가 없으면 연결이 조용히 죽었다고 보고 다시 연결한다(useServerState STALE_CONNECTION_MS).
+ * 채팅이 없는 조용한 채널은 보낼 것이 없어 살아 있는 연결도 죽은 것처럼 보였다. 이미 있는 status 메시지를 주기적으로 보내므로 프로토콜은 바뀌지 않는다.
+ */
+const STATUS_BROADCAST_MS = 20_000;
 /** 시스템 행위자. */
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
 /** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
@@ -106,6 +112,17 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const roleVerifier = createRoleVerifier({ api, tokenManager, credentialStore, clock, logger });
   /** 마지막으로 채팅을 받은 시각(ms). 화면의 "채팅 수신 중" 표시에 쓰며, 아직 받은 적이 없으면 null이다. */
   let lastChatAt: number | null = null;
+  /**
+   * 일부러 연결을 끊는 중인지(스트리머의 연결 해제·설정과 다른 저장 채널 정리).
+   * 왜: tokenManager.disconnect()도 잠금(setLocked(true))을 알려, 표시가 없으면 모든 매니저에게 "토큰을 갱신하지 못해" 장애 알림이 잘못 간다(F10).
+   */
+  let isDisconnectingOnPurpose = false;
+  /**
+   * 자동 숨김이 마지막으로 꺼진 이유. 켜지면 null로 되돌린다(B19-3).
+   * 왜: 화면이 시스템이 끈 것(1분 한도·실패율)과 매니저가 손으로 끈 것을 가려, 앞의 경우에만 이유를 밝힌 안내를 띄우게 한다.
+   * 메모리에만 둔다: 재시작 뒤에는 이유를 모르므로 null이다(감사 기록에는 남아 있다).
+   */
+  let autoHideOffReason: AutoHideOffReason | null = null;
 
   /**
    * 등록된 기기에 푸시 알림을 보낸다. 알림 실패가 본 동작을 막으면 안 되므로 거부는 경고 로그로만 남긴다.
@@ -128,6 +145,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       writeLocked: channel === null || tokenManager.isWriteLocked(),
       accessExpiresAt: tokenManager.accessExpiresAt(),
       autoHideEnabled: channel ? autoHide.isEnabled(channel.channelId) : false,
+      autoHideOffReason,
       lastChatAt,
       pendingActions: executor.pendingCount(),
     };
@@ -162,12 +180,24 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     receiver.start();
   };
   /**
+   * 토큰 연결을 일부러 해제한다. 해제가 알리는 잠금 변화는 장애가 아니므로 장애 알림을 보내지 않게 표시해 둔다.
+   * 리스너는 setLocked 안에서 동기로 불리므로, 표시는 disconnect()가 끝나면 바로 내린다.
+   */
+  const disconnectTokensOnPurpose = (): void => {
+    isDisconnectingOnPurpose = true;
+    try {
+      tokenManager.disconnect();
+    } finally {
+      isDisconnectingOnPurpose = false;
+    }
+  };
+  /**
    * 스트리머 요청으로 채널 연결을 해제한다: 수신 중지, 토큰·연결 삭제, 모든 세션 삭제와 소켓 종료.
    * 왜 세션도 지우나: 연결이 없는 채널의 화면을 열어 둘 이유가 없고, 다시 연결하면 새로 로그인해야 안전하다.
    */
   const disconnectChannel = (): void => {
     receiver.stop();
-    tokenManager.disconnect();
+    disconnectTokensOnPurpose();
     const ids = sessions.listActive().map((session) => session.id);
     ids.forEach((id) => sessions.deleteById(id));
     hub.closeSessions(ids, "채널 연결이 해제되었습니다");
@@ -181,11 +211,12 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   });
 
   tokenManager.onLockChange((locked) => {
-    if (locked) notify({ title: "찌리릿 가드", body: "치지직 토큰을 갱신하지 못해 숨김·제재를 멈췄습니다. 스트리머가 다시 연결해 주세요." });
+    if (locked && !isDisconnectingOnPurpose) notify({ title: "찌리릿 가드", body: "치지직 토큰을 갱신하지 못해 숨김·제재를 멈췄습니다. 스트리머가 다시 연결해 주세요." });
     broadcastStatus();
   });
   executor.onFailureRateExceeded((channelId) => autoHide.setEnabled(channelId, false, SYSTEM_ACTOR, "failure_rate"));
   autoHide.onChange((_channelId, enabled, reason) => {
+    autoHideOffReason = enabled ? null : reason;
     if (!enabled && reason !== "manual") notify({ title: "찌리릿 가드", body: `자동 숨김이 꺼졌습니다(${reason === "breaker" ? "1분 한도 초과" : "치지직 호출 실패 증가"}).` });
     broadcastStatus();
   });
@@ -199,6 +230,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     verifyRole: (managerChannelId) => roleVerifier.roleOf(managerChannelId),
     disconnectChannel,
     endSessions: (sessionIds, reason) => hub.closeSessions(sessionIds, reason),
+    logger,
   };
   const http = await buildHttpServer({ config, sessions, authFlow, hub, services, logger });
   /** 반복 타이머 핸들. stop()에서 비운다. */
@@ -248,18 +280,29 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     }
   };
   /**
+   * 해임된 매니저의 소켓을 닫고 장애 알림 구독(모든 기기)을 지운다.
+   * 왜 구독도 지우나: 해임된 매니저가 채널 장애 알림을 계속 받으면 안 된다(F10). 지우기가 실패해도 다른 정리는 이어지게 기록만 남긴다.
+   * @param revoked 해임으로 지운 세션과 그 매니저
+   */
+  const handleRevokedSessions = (revoked: RevokedSession[]): void => {
+    hub.closeSessions(revoked.map(({ sessionId }) => sessionId), "치지직에서 매니저 권한이 해제되었습니다");
+    try {
+      new Set(revoked.map(({ managerChannelId }) => managerChannelId)).forEach((managerChannelId) => push.unsubscribeManager(managerChannelId));
+    } catch (error) {
+      logger.error("해임된 매니저의 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
+    }
+  };
+  /**
    * 활성 세션의 역할을 다시 확인한 뒤, 활성 목록에 없는 세션(12시간 만료 등)의 소켓을 닫는다.
    * 왜: 세션 만료는 DB에서만 일어나 허브가 모르므로, 재확인 주기마다 맞추지 않으면 만료된 화면이 판정·채팅을 계속 받는다(스펙 7장, F2).
    */
   const recheckRolesAndCloseExpired = async (): Promise<void> => {
-    await recheckSessionRoles({
-      sessions, roleVerifier, logger,
-      onRevoked: (ids) => hub.closeSessions(ids, "치지직에서 매니저 권한이 해제되었습니다"),
-    });
+    await recheckSessionRoles({ sessions, roleVerifier, logger, onRevoked: handleRevokedSessions });
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
-  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업. */
+  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
   const startTimers = (): void => {
+    intervalTimers.push(setInterval(guarded("상태 방송 실패", broadcastStatus), STATUS_BROADCAST_MS));
     intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenQuietly), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
     intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesAndCloseExpired), INTERVALS.roleRecheckMs));
@@ -282,7 +325,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const disconnectMismatchedChannel = (): boolean => {
     const stored = credentialStore.loadChannel();
     if (!stored || stored.channelId === config.channelId) return false;
-    tokenManager.disconnect();
+    disconnectTokensOnPurpose();
     const ids = sessions.listActive().map((session) => session.id);
     ids.forEach((id) => sessions.deleteById(id));
     logger.error("저장된 채널이 ZG_CHANNEL_ID와 다릅니다. 연결을 해제했습니다. 설정한 스트리머 계정으로 다시 연결하세요.", { storedChannelId: stored.channelId, configuredChannelId: config.channelId });

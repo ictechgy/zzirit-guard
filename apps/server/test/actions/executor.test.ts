@@ -204,3 +204,15 @@ describe("Executor", () => {
     expect(JSON.stringify(error.mock.calls)).not.toContain("나쁜 말");
   });
 });
+
+describe("Executor 사용자 문구(F10)", () => {
+  it("치지직 오류가 아닌 실패(네트워크 등)는 내부 내용을 문구에 넣지 않고, 자세한 내용은 경고 로그로 남긴다", async () => {
+    const internal = () => new Error("connect ECONNREFUSED 10.0.0.7:443");
+    const blindMessage = failingThenOk([internal(), internal(), internal(), internal()]);
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const { executor, hide } = setup({ blindMessage }, {}, logger);
+    const outcome = await executor.submit("c1", hide, manager);
+    expect(outcome).toEqual({ ok: false, message: "치지직에 연결하지 못했습니다. 네트워크를 확인하세요." });
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ action: "hide", error: "Error: connect ECONNREFUSED 10.0.0.7:443" }));
+  });
+});

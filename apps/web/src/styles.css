@@ -1,0 +1,85 @@
+/* 모바일 우선 스타일. 어두운 바탕에 노란 강조(로고 색). */
+:root {
+  --background: #17171f;
+  --surface: #23232e;
+  --text: #f2f2f5;
+  --muted: #a0a0b0;
+  --accent: #ffd21f;
+  --danger: #ff5c5c;
+  --care: #6ec1ff;
+  --ok: #7ad99a;
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  background: var(--background);
+  color: var(--text);
+}
+body { margin: 0; }
+[hidden] { display: none !important; }
+button, .button { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #3a3a48; background: var(--surface); color: var(--text); font-size: 15px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+button:disabled { opacity: 0.4; }
+.button.primary { background: var(--accent); color: #17171f; border-color: var(--accent); font-weight: 700; }
+.danger { border-color: var(--danger); color: var(--danger); }
+.app { padding: 12px 12px 76px; }
+.screen { display: flex; flex-direction: column; gap: 12px; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.banner { margin: 0; padding: 10px 12px; border-radius: 10px; list-style: none; }
+.banner-ok { background: #1f3a2a; }
+.banner-warning { background: #4a2a1a; }
+.toggle-on { background: var(--accent); color: #17171f; font-weight: 700; }
+.error { color: var(--danger); }
+.feedback { color: var(--ok); }
+/* 시스템이 자동 숨김을 껐다는 안내(F8). 닫기 버튼과 한 줄에 둔다. 아래 떠 있는 층(.overlay-bottom)에 뜬다. */
+.system-notice { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--danger); border-radius: 10px; background: var(--surface); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+.system-notice p { margin: 0; flex: 1; }
+.hint, .notice, .empty { color: var(--muted); font-size: 13px; }
+.card { background: var(--surface); border-radius: 12px; padding: 10px; }
+.card-care { border-left: 4px solid var(--care); }
+.card-shadow { border-left: 4px solid var(--accent); }
+.card-header { display: flex; align-items: center; gap: 8px; }
+.card-header .count { color: var(--muted); margin-right: auto; }
+.messages { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.message { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; }
+.message .buttons { grid-column: 1 / -1; display: flex; gap: 8px; }
+.message .time { color: var(--muted); font-size: 12px; }
+.message .reason { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.section-auto-pending { border: 1px solid var(--danger); border-radius: 12px; padding: 10px; }
+/* 후보 목록 영역. 만지는 동안 고정된다(useStableSections). */
+.candidate-list { display: flex; flex-direction: column; gap: 12px; }
+/*
+  떠 있는 층(B19-1·4): position: fixed라 나타나도 목록 줄을 밀지 않는다(만지는 중에 줄이 밀리면 엉뚱한 줄을 누른다).
+  층 자체는 누르기를 통과시키고 안의 요소만 받는다. 위층은 한 줄짜리 상태 배너 아래 높이(안전 영역 포함)에 가운데로 둔다.
+  위층 버튼이 줄을 가려 잘못 눌려도 결과는 '최신 목록 보기'뿐이라 되돌릴 수 없는 조치가 일어나지 않는다.
+*/
+.overlay-top { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 0; right: 0; z-index: 15; display: flex; justify-content: center; pointer-events: none; }
+.overlay-bottom { position: fixed; left: 12px; right: 12px; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.overlay-top > *, .overlay-bottom > * { pointer-events: auto; }
+.new-items { background: var(--accent); color: #17171f; border-color: var(--accent); font-weight: 700; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+.message-handled { opacity: 0.45; }
+.handled-label { margin-left: 6px; color: var(--ok); font-weight: 700; }
+.content { overflow-wrap: anywhere; }
+.chat-lines { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-line { padding: 4px 6px; border-radius: 6px; }
+.chat-candidate, .chat-shadow { background: #3a3220; }
+.chat-auto_hide { background: #3a2020; text-decoration: line-through; }
+.chat-needs_care { background: #1f2f3f; }
+.chat-line .nickname { color: var(--muted); margin-right: 6px; }
+.chat-line .tag { margin-left: 6px; font-size: 12px; color: var(--accent); }
+/* 작업 결과 알림(F9): 아래 떠 있는 층(.overlay-bottom, 탭 막대 바로 위)에 뜬다. 오류는 닫기 버튼과 한 줄에 둔다. */
+.toast { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid #3a3a48; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+.toast.info { color: var(--text); }
+.toast.error { display: flex; align-items: center; gap: 8px; border-color: var(--danger); }
+.toast.error p { margin: 0; flex: 1; }
+.tab-bar { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--surface); padding-bottom: env(safe-area-inset-bottom); }
+.tab-bar button { border: none; border-radius: 0; background: transparent; }
+.tab-bar button[aria-pressed="true"] { color: var(--accent); font-weight: 700; }
+.badge { margin-left: 6px; background: var(--danger); color: white; border-radius: 999px; padding: 0 6px; font-size: 12px; }
+.login { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; text-align: center; }
+.login .button { width: 100%; max-width: 320px; }
+.rows div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #2c2c38; }
+.rows dt { color: var(--muted); }
+.rows dd { margin: 0; }
+.false-positive-counts { padding-left: 18px; }
+.field, .rule-form label { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+/* 입력 글자는 16px 이상: 더 작으면 iOS Safari가 누를 때마다 화면을 확대해 홈 화면 앱이 어긋난다(F10). */
+input, select, textarea { min-height: 40px; border-radius: 8px; border: 1px solid #3a3a48; background: #101018; color: var(--text); padding: 0 8px; font-size: 16px; }
+.splash { padding: 48px; text-align: center; color: var(--muted); }

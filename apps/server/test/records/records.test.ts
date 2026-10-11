@@ -1,3 +1,4 @@
+import type { MinuteStatDto } from "@zzirit-guard/shared";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
 import { createAuditLog } from "../../src/records/auditLog.js";
@@ -84,5 +85,42 @@ describe("MinuteStats 저장 실패", () => {
     expect(stats.recent("c1", 0)).toEqual([
       expect.objectContaining({ minute: 60_000, received: 3 }),
     ]);
+  });
+});
+
+describe("VerdictRepository 오판 검토(스펙 5.5)", () => {
+  it("오판 신고된 판정만 최신순으로 limit개 읽고, 이유별 건수는 많은 순으로 센다(다른 채널·다른 상태는 뺀다)", () => {
+    let now = 1_000;
+    const repository = createVerdictRepository(openDatabase(":memory:"), () => now);
+    const report = (reason: string, channelId = "c1") => {
+      now += 1_000;
+      const verdict = repository.insert({ ...sample, channelId, reason });
+      repository.updateStatus(verdict.id, "false_positive");
+      return verdict.id;
+    };
+    const first = report("rule:strong:3");
+    const second = report("rule:weak:7");
+    const third = report("rule:strong:3");
+    report("rule:strong:3", "other-channel");
+    repository.insert({ ...sample, reason: "rule:strong:3" });
+    expect(repository.listFalsePositives("c1", 2).map((verdict) => verdict.id)).toEqual([third, second]);
+    expect(repository.listFalsePositives("c1", 10).map((verdict) => verdict.id)).toEqual([third, second, first]);
+    expect(repository.countFalsePositivesByReason("c1")).toEqual([
+      { reason: "rule:strong:3", count: 2 },
+      { reason: "rule:weak:7", count: 1 },
+    ]);
+  });
+});
+
+describe("MinuteStats 행 형태", () => {
+  it("recent 행의 키가 shared의 MinuteStatDto와 정확히 같다(웹이 같은 타입을 쓴다, R-20)", () => {
+    const stats = createMinuteStats(openDatabase(":memory:"), () => 61_000);
+    stats.increment("c1", "received");
+    stats.flush();
+    const expected: MinuteStatDto = {
+      minute: 60_000, received: 1, skipped: 0, deduplicated: 0, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0,
+      candidates: 0, auto_hidden: 0, shadow: 0, invalid_events: 0,
+    };
+    expect(stats.recent("c1", 0)).toEqual([expected]);
   });
 });

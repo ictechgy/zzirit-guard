@@ -29,9 +29,9 @@ export function mutatingHeaders(rawId: string): Record<string, string> {
 /**
  * 실제 저장소와 가짜 실행기로 HTTP 서버를 띄운다.
  * @param authFlowOverrides 인증 흐름 일부를 바꿔 끼울 때
- * @param options clock을 넘기면 시간이 흐르는 상황(요청 한도 회복 등)을 흉내 낼 수 있다. 생략하면 고정 시각이다.
+ * @param options clock을 넘기면 시간이 흐르는 상황(요청 한도 회복 등)을 흉내 낼 수 있다. 생략하면 고정 시각이다. webDistDirectory는 정적 파일 경로 테스트용이다.
  */
-export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {}, options: { clock?: Clock } = {}) {
+export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {}, options: { clock?: Clock; webDistDirectory?: string } = {}) {
   const database = openDatabase(":memory:");
   database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
   database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
@@ -44,7 +44,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
   const submit = vi.fn<Executor["submit"]>(async () => ({ ok: true, note: null }) as ActionOutcome);
   const services: RouteServices = {
     channel: () => ({ channelId: "c1", channelName: "채널" }),
-    status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 }),
+    status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }),
     verdicts, auditLog, settings, clock,
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ settings, auditLog, clock, logger: silentLogger }),
@@ -57,13 +57,16 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     verifyRole: async (managerChannelId) => managerChannelId.replace(/-id$/, "") as ManagerRole,
     disconnectChannel: vi.fn(),
     endSessions: vi.fn<RouteServices["endSessions"]>(),
+    logger: silentLogger,
   };
   const authFlow: AuthFlow = {
     authorizeUrl: (purpose) => `https://chzzk.example/account-interlock?purpose=${purpose}&state=test-state`,
-    complete: async () => { throw new AuthError("이 채널의 매니저가 아닙니다."); },
+    /** 기본 가짜 흐름은 authorizeUrl이 내준 state(test-state)만 대기 중으로 본다. */
+    hasPendingState: (state) => state === "test-state",
+    complete: async () => { throw new AuthError("이 채널의 매니저가 아닙니다.", "not_manager"); },
     ...authFlowOverrides,
   };
-  const app = await buildHttpServer({ config: { publicOrigin: ORIGIN, webDistDirectory: "/nonexistent-web-dist" }, sessions, authFlow, hub, services, logger: silentLogger });
+  const app = await buildHttpServer({ config: { publicOrigin: ORIGIN, webDistDirectory: options.webDistDirectory ?? "/nonexistent-web-dist" }, sessions, authFlow, hub, services, logger: silentLogger });
   /** 역할로 로그인한 세션의 쿠키 값. */
   const login = (role: ManagerRole) => sessions.create({ channelId: `${role}-id`, channelName: role, role }).rawId;
   return { app, verdicts, auditLog, sessions, hub, services, submit, login, close: async () => { hub.stop(); await app.close(); } };

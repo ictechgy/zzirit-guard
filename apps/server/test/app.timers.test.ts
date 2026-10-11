@@ -10,6 +10,8 @@ const control = vi.hoisted(() => ({
   loadChannelError: null as Error | null,
   database: null as Database | null,
   hub: null as RealtimeHub | null,
+  /** 다음 역할 재확인이 해임했다고 알릴 세션(세션 ID와 매니저 채널 ID). */
+  revokedOnRecheck: [] as Array<{ sessionId: string; managerChannelId: string }>,
 }));
 
 vi.mock("../src/records/minuteStats.js", async (importOriginal) => {
@@ -38,7 +40,11 @@ vi.mock("../src/records/maintenance.js", () => ({
   runBackup: async () => "backup-skipped",
 }));
 vi.mock("../src/managers/roleRecheck.js", () => ({
-  recheckSessionRoles: async () => { if (control.recheckError) throw control.recheckError; },
+  /** 실패를 흉내 내거나, 해임된 세션을 앱의 onRevoked로 알린다(앱이 그 뒤 무엇을 하는지 보려고). */
+  recheckSessionRoles: async (deps: { onRevoked(revoked: Array<{ sessionId: string; managerChannelId: string }>): void }) => {
+    if (control.recheckError) throw control.recheckError;
+    if (control.revokedOnRecheck.length > 0) deps.onRevoked(control.revokedOnRecheck);
+  },
 }));
 vi.mock("../src/db/database.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/db/database.js")>();
@@ -68,6 +74,7 @@ beforeEach(async () => {
   control.flushError = null;
   control.recheckError = null;
   control.loadChannelError = null;
+  control.revokedOnRecheck = [];
   errorLines = [];
   warnLines = [];
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
@@ -122,9 +129,42 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
     await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
     expect(expired.closedWith).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
-    expect(expired.sent).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
+    // 주기 상태 방송(status)도 함께 오므로 종류로 걸러 본다.
+    expect(expired.sent.filter((event) => event.type === "session_ended")).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
     expect(expired.closedWith).toBe(4001);
     expect(active.closedWith).toBeNull();
+  });
+});
+
+describe("주기 상태 방송(B19-2)", () => {
+  it("20초마다 열린 화면에 status를 보내, 채팅이 없는 조용한 채널도 살아 있는 연결로 보이게 한다", async () => {
+    const hub = control.hub as RealtimeHub;
+    const socket = recordingSocket();
+    hub.attach(socket, { id: "s1", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(2);
+  });
+
+  it("stop()이 방송 타이머도 지워, 닫힌 DB로 상태를 계산하려다 실패하지 않는다", async () => {
+    await app.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(errorLines.filter((line) => line.message === "상태 방송 실패")).toEqual([]);
+  });
+});
+
+describe("해임된 매니저의 장애 알림 구독(F10)", () => {
+  it("역할 재확인이 해임한 매니저의 푸시 구독을 지우고, 다른 매니저의 구독은 둔다", async () => {
+    const insert = control.database?.prepare("INSERT INTO push_subscription (manager_channel_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, 'p', 'a', 0)");
+    insert?.run("revoked-manager", "https://fcm.googleapis.com/fcm/send/revoked");
+    insert?.run("kept-manager", "https://fcm.googleapis.com/fcm/send/kept");
+    control.revokedOnRecheck = [{ sessionId: "revoked-session", managerChannelId: "revoked-manager" }];
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const owners = control.database?.prepare("SELECT manager_channel_id AS owner FROM push_subscription").all() as Array<{ owner: string }>;
+    expect(owners.map((row) => row.owner)).toEqual(["kept-manager"]);
   });
 });
 

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">찌리릿 가드 로고</title>
+  <defs>
+    <linearGradient id="bolt-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE45C"/>
+      <stop offset="1" stop-color="#FFC107"/>
+    </linearGradient>
+  </defs>
+  <!-- 방패: 채팅을 지키는 '가드' -->
+  <path d="M256 36 L436 100 V236 C436 352 356 432 256 476 C156 432 76 352 76 236 V100 Z"
+        fill="#17171F" stroke="#FFD21F" stroke-width="18" stroke-linejoin="round"/>
+  <!-- 번개: 찌리릿 -->
+  <path d="M288 84 L330 84 L272 222 L350 222 L222 428 L248 278 L168 278 Z"
+        fill="url(#bolt-fill)" stroke="#17171F" stroke-width="6" stroke-linejoin="round"/>
+  <!-- 불꽃 튀는 자국 -->
+  <g stroke="#FFD21F" stroke-width="12" stroke-linecap="round">
+    <line x1="152" y1="168" x2="182" y2="186"/>
+    <line x1="140" y1="222" x2="172" y2="224"/>
+    <line x1="362" y1="300" x2="334" y2="318"/>
+    <line x1="374" y1="352" x2="342" y2="350"/>
+  </g>
+</svg>

@@ -237,3 +237,17 @@ describe("isAllowedPushEndpoint", () => {
     expect(isAllowedPushEndpoint(endpoint)).toBe(expected);
   });
 });
+
+describe("해임된 매니저의 구독 삭제(F10)", () => {
+  it("unsubscribeManager는 그 매니저의 구독만 모두 지운다", async () => {
+    const database = openDatabase(":memory:");
+    const send = vi.fn<PushSender>(async () => ({}));
+    const notifier = createPushNotifier({ database, clock: () => 0, logger: silentTestLogger(), vapid, send });
+    notifier.subscribe("revoked", subscription("https://fcm.googleapis.com/fcm/send/phone"));
+    notifier.subscribe("revoked", subscription("https://fcm.googleapis.com/fcm/send/tablet"));
+    notifier.subscribe("kept", subscription("https://fcm.googleapis.com/fcm/send/kept"));
+    notifier.unsubscribeManager("revoked");
+    await notifier.notifyAll({ title: "찌리릿 가드", body: "장애" });
+    expect(send.mock.calls.map(([target]) => target.endpoint)).toEqual(["https://fcm.googleapis.com/fcm/send/kept"]);
+  });
+});

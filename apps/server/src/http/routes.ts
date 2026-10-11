@@ -1,4 +1,4 @@
-import type { ChatSettingsDto, ManagerRole, MeDto, Permission, ServerStatus, SettingsDto, VerdictStatus } from "@zzirit-guard/shared";
+import type { ChatSettingsDto, FalsePositiveReviewDto, ManagerRole, MeDto, Permission, ServerStatus, SettingsDto, VerdictStatus } from "@zzirit-guard/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
@@ -6,6 +6,7 @@ import type { Broadcaster } from "../actions/decisionHandler.js";
 import type { ActionOutcome, Actor, Executor } from "../actions/executor.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
 import type { RuleRepository } from "../detection/ruleRepository.js";
+import { describeError, type Logger } from "../logger.js";
 import { hasPermission, permissionsFor } from "../managers/permissions.js";
 import type { ManagerSession, SessionStore } from "../managers/sessionStore.js";
 import type { PushNotifier } from "../push/pushNotifier.js";
@@ -40,6 +41,8 @@ export interface RouteServices {
    */
   endSessions(sessionIds: readonly string[], reason: string): void;
   clock: Clock;
+  /** 요청은 성공으로 끝내되 따로 남겨야 하는 실패(예: 해임된 매니저의 구독 삭제 실패)를 기록한다. 토큰·채팅 원문은 넘기지 않는다. */
+  logger: Logger;
 }
 
 /** 권한 이름(오류 문구용). */
@@ -64,7 +67,7 @@ const MAX_PUSH_KEY_LENGTH = 256;
  */
 const HIDE_BLOCKING_STATUSES: ReadonlySet<VerdictStatus> = new Set(["hidden", "restricted"]);
 /** 이미 처리된 판정에 다시 조치하려 할 때의 안내 문구. */
-const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. 화면을 새로고침해 현재 상태를 확인하세요.";
+const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -103,6 +106,8 @@ const pushSubscriptionSchema = z.object({
 const pushDeleteSchema = z.object({ endpoint: z.string().min(1).max(MAX_PUSH_ENDPOINT_LENGTH) });
 /** 감사 기록 조회 쿼리(커서와 페이지 크기). */
 const auditQuerySchema = z.object({ beforeId: z.coerce.number().int().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+/** 오판 검토 목록 쿼리. 최근 목록의 길이를 감사 기록과 같은 범위(1~200, 기본 50)로 제한한다. */
+const falsePositiveQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
 /** 통계 조회 쿼리(최근 N분, 최대 24시간). */
 const statsQuerySchema = z.object({ sinceMinutes: z.coerce.number().int().min(1).max(1440).default(60) });
 
@@ -173,6 +178,16 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
   );
   app.post("/api/verdicts/:id/ignore", guarded(services, "hide_message", (context) => markVerdict(services, context, "ignored")));
   app.post("/api/verdicts/:id/false-positive", guarded(services, "hide_message", (context) => markVerdict(services, context, "false_positive")));
+  app.get("/api/false-positives", guarded(services, null, (context) => listFalsePositiveReview(services, context)));
+}
+
+/**
+ * 오판 검토 목록(스펙 5.5): 최근 오판 신고 판정과 이유별 건수. 이유에 규칙 번호가 있어 어떤 규칙을 고칠지 보인다.
+ * 읽기 전용이라 다른 조회 라우트(/api/candidates·/api/rules)처럼 로그인한 매니저면 누구나 본다.
+ */
+function listFalsePositiveReview(services: RouteServices, { request, channelId }: GuardedContext): FalsePositiveReviewDto {
+  const { limit } = falsePositiveQuerySchema.parse(request.query);
+  return { recent: services.verdicts.listFalsePositives(channelId, limit), byReason: services.verdicts.countFalsePositivesByReason(channelId) };
 }
 
 /** 사용자 단위 제재. */
@@ -260,10 +275,25 @@ async function issueTicketAfterRoleCheck(services: RouteServices, sessions: Sess
   if (!role) {
     sessions.deleteById(manager.id);
     services.endSessions([manager.id], "매니저 권한이 해제되었습니다");
+    removeRevokedManagerPush(services, manager.managerChannelId);
     throw new RouteError(401, "unauthorized", "치지직에서 매니저 권한이 해제되었습니다. 다시 로그인하세요.");
   }
   if (role !== manager.role) sessions.updateRole(manager.id, role);
   return { ticket: sessions.issueTicket(manager.id) };
+}
+
+/**
+ * 해임된 매니저의 장애 알림 구독(모든 기기)을 지운다(B19-5). 5분 역할 재확인(app.ts)과 같은 정리를 티켓 경로에서도 한다.
+ * 실패해도 해임 처리(세션 삭제·401)는 끝까지 하고 오류만 기록한다: 구독이 남는 것보다 해임이 막히는 편이 더 나쁘다.
+ * @param services 푸시 알림기와 기록기
+ * @param managerChannelId 해임된 매니저 채널 ID
+ */
+function removeRevokedManagerPush(services: RouteServices, managerChannelId: string): void {
+  try {
+    services.push.unsubscribeManager(managerChannelId);
+  } catch (error) {
+    services.logger.error("해임된 매니저의 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
+  }
 }
 
 /** 스위치 켜기·끄기. 켜기와 끄기의 권한이 다르다(끄기는 안전한 방향이라 더 넓게 준다). */
@@ -318,7 +348,7 @@ function findVerdict(services: RouteServices, params: unknown, channelId: string
 function resolveVerdictId(services: RouteServices, verdictId: number | null | undefined, senderChannelId: string, channelId: string): number | null {
   if (verdictId === null || verdictId === undefined) return null;
   const verdict = findVerdict(services, { id: verdictId }, channelId);
-  if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. 화면을 새로고침한 뒤 다시 시도하세요.");
+  if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. '다시 불러오기'를 누른 뒤 다시 시도하세요.");
   return verdict.id;
 }
 

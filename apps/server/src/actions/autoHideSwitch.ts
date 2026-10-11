@@ -1,3 +1,4 @@
+import type { AutoHideOffReason } from "@zzirit-guard/shared";
 import { describeError, type Logger } from "../logger.js";
 import type { AuditLog } from "../records/auditLog.js";
 import type { SettingsRepository } from "../records/settingsRepository.js";
@@ -7,9 +8,9 @@ import type { Actor } from "./executor.js";
 /** 자동 숨김 스위치와 폭주 차단기. */
 export interface AutoHideSwitch {
   isEnabled(channelId: string): boolean;
-  setEnabled(channelId: string, enabled: boolean, actor: Actor, reason: string): void;
+  setEnabled(channelId: string, enabled: boolean, actor: Actor, reason: AutoHideOffReason): void;
   tryConsume(channelId: string): boolean;
-  onChange(listener: (channelId: string, enabled: boolean, reason: string) => void): void;
+  onChange(listener: (channelId: string, enabled: boolean, reason: AutoHideOffReason) => void): void;
 }
 
 /** createAutoHideSwitch 의존성. logger를 생략하면 콘솔 경고로 남긴다. */
@@ -37,7 +38,7 @@ const consoleWarnLogger: Logger = {
 /** 스위치를 만든다. 상태는 DB(setting)에 두어 재시작해도 유지한다. */
 export function createAutoHideSwitch(deps: AutoHideSwitchDeps): AutoHideSwitch {
   const recentHides = new Map<string, number[]>();
-  const listeners: Array<(channelId: string, enabled: boolean, reason: string) => void> = [];
+  const listeners: Array<(channelId: string, enabled: boolean, reason: AutoHideOffReason) => void> = [];
   const logger = deps.logger ?? consoleWarnLogger;
   const autoHide: AutoHideSwitch = {
     isEnabled: (channelId) => deps.settings.get(channelId).autoHideEnabled,
@@ -62,10 +63,10 @@ export function createAutoHideSwitch(deps: AutoHideSwitchDeps): AutoHideSwitch {
  */
 function notifyListener(
   logger: Logger,
-  listener: (channelId: string, enabled: boolean, reason: string) => void,
+  listener: (channelId: string, enabled: boolean, reason: AutoHideOffReason) => void,
   channelId: string,
   enabled: boolean,
-  reason: string,
+  reason: AutoHideOffReason,
 ): void {
   try {
     listener(channelId, enabled, reason);
