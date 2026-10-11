@@ -95,7 +95,11 @@ describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8, 스모크 S2)"
     expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
     rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
-    expect(screen.getByRole("alert").textContent).toContain(SYSTEM_DISABLED_TEXT);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(SYSTEM_DISABLED_TEXT);
+    // 안내는 목록을 밀지 않는 고정 위치 층에 뜬다: 배너 바로 다음은 여전히 도구 막대다(B19-4).
+    expect(alert.closest(".overlay-bottom")).not.toBeNull();
+    expect(screen.getByRole("status", { name: "서버 상태" }).nextElementSibling?.classList.contains("toolbar")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "닫기" }));
     expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
   });

@@ -120,12 +120,6 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   return (
     <section className="screen">
       <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
-      {isSystemDisableNoticeVisible && (
-        <div className="system-notice error" role="alert">
-          <p>{SYSTEM_DISABLE_MESSAGE}</p>
-          <button type="button" onClick={onDismissSystemDisableNotice}>닫기</button>
-        </div>
-      )}
       <div className="toolbar">
         <AutoHideToggle enabled={autoHideEnabled} canEnable={me.permissions.includes("enable_auto_hide")}
           canDisable={me.permissions.includes("disable_auto_hide")} isBusy={autoHideEnabled !== null && lockedKeys.has(autoHideLockKey(!autoHideEnabled))}
@@ -133,7 +127,6 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
         <button type="button" onClick={onReload}>다시 불러오기</button>
       </div>
       <div ref={listRef} className="candidate-list">
-        {stable.newCount > 0 && <button type="button" className="new-items" onClick={stable.showLatest}>새 항목 {stable.newCount}개 — 보기</button>}
         {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
           <GroupSection key={key} title={title} groups={shown[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} handledIds={stable.handledIds} actions={actions} />
         ))}
@@ -142,7 +135,23 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
         <AutoHiddenList verdicts={shown.autoHidden} {...rowProps} />
         <RestrictedAutoHideList verdicts={shown.restrictedAfterAutoHide} {...rowProps} />
       </div>
-      <ActionToast feedback={feedback} onDismiss={dismissFeedback} />
+      {/*
+        떠 있는 층(position: fixed): 나타나고 사라져도 문서 흐름에 자리를 차지하지 않아 목록 줄이 손가락 밑에서 밀리지 않는다(B19-1·4).
+        '새 항목' 버튼은 위(배너 아래 높이), 시스템 꺼짐 안내와 작업 결과는 탭 막대 위에 띄운다.
+        왜 안내를 아래에 두나: 위에 오래 떠 있으면 상태 배너와 자동 숨김 스위치를 가린다. 아래는 이미 작업 결과가 잠깐 뜨는 자리다.
+      */}
+      <div className="overlay-top">
+        {stable.newCount > 0 && <button type="button" className="new-items" onClick={stable.showLatest}>새 항목 {stable.newCount}개 — 보기</button>}
+      </div>
+      <div className="overlay-bottom">
+        {isSystemDisableNoticeVisible && (
+          <div className="system-notice error" role="alert">
+            <p>{SYSTEM_DISABLE_MESSAGE}</p>
+            <button type="button" onClick={onDismissSystemDisableNotice}>닫기</button>
+          </div>
+        )}
+        <ActionToast feedback={feedback} onDismiss={dismissFeedback} />
+      </div>
     </section>
   );
 });

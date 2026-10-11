@@ -13,6 +13,18 @@ const RULES = [...styles.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([
   body,
 }));
 
+describe("목록을 밀지 않는 떠 있는 층(B19-1·4)", () => {
+  it.each([".overlay-top", ".overlay-bottom"])("%s는 position: fixed라 문서 흐름에 자리를 차지하지 않는다", (selector) => {
+    const rule = RULES.find(({ selectors }) => selectors.includes(selector));
+    expect(rule?.body).toMatch(/position:\s*fixed/);
+  });
+
+  it("'새 항목' 버튼에는 자리를 차지하는 sticky를 쓰지 않는다", () => {
+    const rule = RULES.find(({ selectors }) => selectors.includes(".new-items"));
+    expect(rule?.body).not.toMatch(/position:\s*sticky/);
+  });
+});
+
 describe("입력 글자 크기(F10, iOS 확대 방지)", () => {
   it.each(["input", "select", "textarea"])("%s의 글자 크기는 16px 이상이다(작으면 iOS Safari가 누를 때 화면을 확대한다)", (tag) => {
     const rule = RULES.find(({ selectors }) => selectors.includes(tag));

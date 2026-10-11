@@ -28,8 +28,8 @@ button:disabled { opacity: 0.4; }
 .toggle-on { background: var(--accent); color: #17171f; font-weight: 700; }
 .error { color: var(--danger); }
 .feedback { color: var(--ok); }
-/* 시스템이 자동 숨김을 껐다는 안내(F8). 닫기 버튼과 한 줄에 둔다. */
-.system-notice { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--danger); border-radius: 10px; }
+/* 시스템이 자동 숨김을 껐다는 안내(F8). 닫기 버튼과 한 줄에 둔다. 아래 떠 있는 층(.overlay-bottom)에 뜬다. */
+.system-notice { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--danger); border-radius: 10px; background: var(--surface); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
 .system-notice p { margin: 0; flex: 1; }
 .hint, .notice, .empty { color: var(--muted); font-size: 13px; }
 .card { background: var(--surface); border-radius: 12px; padding: 10px; }
@@ -43,9 +43,17 @@ button:disabled { opacity: 0.4; }
 .message .time { color: var(--muted); font-size: 12px; }
 .message .reason { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
 .section-auto-pending { border: 1px solid var(--danger); border-radius: 12px; padding: 10px; }
-/* 후보 목록 영역. 만지는 동안 고정되며(useStableSections), 새 항목 버튼은 내려 본 동안에도 위에 붙어 있다. */
+/* 후보 목록 영역. 만지는 동안 고정된다(useStableSections). */
 .candidate-list { display: flex; flex-direction: column; gap: 12px; }
-.new-items { position: sticky; top: 8px; z-index: 1; background: var(--accent); color: #17171f; border-color: var(--accent); font-weight: 700; }
+/*
+  떠 있는 층(B19-1·4): position: fixed라 나타나도 목록 줄을 밀지 않는다(만지는 중에 줄이 밀리면 엉뚱한 줄을 누른다).
+  층 자체는 누르기를 통과시키고 안의 요소만 받는다. 위층은 한 줄짜리 상태 배너 아래 높이(안전 영역 포함)에 가운데로 둔다.
+  위층 버튼이 줄을 가려 잘못 눌려도 결과는 '최신 목록 보기'뿐이라 되돌릴 수 없는 조치가 일어나지 않는다.
+*/
+.overlay-top { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 0; right: 0; z-index: 15; display: flex; justify-content: center; pointer-events: none; }
+.overlay-bottom { position: fixed; left: 12px; right: 12px; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.overlay-top > *, .overlay-bottom > * { pointer-events: auto; }
+.new-items { background: var(--accent); color: #17171f; border-color: var(--accent); font-weight: 700; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
 .message-handled { opacity: 0.45; }
 .handled-label { margin-left: 6px; color: var(--ok); font-weight: 700; }
 .content { overflow-wrap: anywhere; }
@@ -56,8 +64,8 @@ button:disabled { opacity: 0.4; }
 .chat-needs_care { background: #1f2f3f; }
 .chat-line .nickname { color: var(--muted); margin-right: 6px; }
 .chat-line .tag { margin-left: 6px; font-size: 12px; color: var(--accent); }
-/* 작업 결과 알림(F9): 탭 막대(버튼 44px + 아래 안전 영역) 바로 위에 떠 있다. 오류는 닫기 버튼과 한 줄에 둔다. */
-.toast { position: fixed; left: 12px; right: 12px; bottom: calc(52px + env(safe-area-inset-bottom)); z-index: 20; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid #3a3a48; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+/* 작업 결과 알림(F9): 아래 떠 있는 층(.overlay-bottom, 탭 막대 바로 위)에 뜬다. 오류는 닫기 버튼과 한 줄에 둔다. */
+.toast { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid #3a3a48; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
 .toast.error { display: flex; align-items: center; gap: 8px; border-color: var(--danger); }
 .toast.error p { margin: 0; flex: 1; }
 .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--surface); padding-bottom: env(safe-area-inset-bottom); }

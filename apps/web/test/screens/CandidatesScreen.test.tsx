@@ -325,6 +325,18 @@ describe("CandidatesScreen 조작 중 목록 고정(F4, 스모크 S1)", () => {
     expect(cardOrder()).toEqual(["새사람", "악플러"]);
   });
 
+  it("'새 항목' 버튼은 목록 흐름 밖(고정 위치 층)에 떠서, 나타나도 첫 줄 앞에 아무것도 끼어들지 않는다(B19-1)", () => {
+    const { update } = renderLive([verdict(1)]);
+    const list = document.querySelector(".candidate-list") as HTMLElement;
+    const firstBefore = list.firstElementChild;
+    fireEvent.pointerDown(listElement());
+    update([verdict(1), newcomer]);
+    const button = screen.getByRole("button", { name: "새 항목 1개 — 보기" });
+    expect(button.closest(".overlay-top")).not.toBeNull();
+    expect(button.closest(".candidate-list")).toBeNull();
+    expect(list.firstElementChild).toBe(firstBefore);
+  });
+
   it("고정하지 않은 동안에는 새 판정을 바로 반영한다", () => {
     const { update } = renderLive([verdict(1)]);
     update([verdict(1), newcomer]);
