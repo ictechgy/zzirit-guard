@@ -18,10 +18,8 @@ const FALSE_POSITIVE_DONE = "오판으로 신고했습니다. 기록·설정 →
 /** 실시간 연결이 거듭 거절됐을 때의 안내(R-6). 출처 불일치(다른 주소로 연 경우)가 가장 흔한 원인이다. */
 const REALTIME_REJECTED_MESSAGE = "실시간 연결이 계속 거절됩니다. 운영자가 알려 준 주소(https://…ts.net)로 열었는지 확인한 뒤 '다시 연결'을 누르세요.";
 
-/** 조치 응답(서버 sendOutcome). 무시·오판·스위치는 note가 없다. */
+/** 조치 응답. 숨김·임시 제한은 { ok, note }, 무시·오판은 { ok }, 자동 숨김 스위치는 { enabled }라 공통으로 쓰는 필드만 둔다(routes.ts). */
 interface ActionResponse {
-  /** 성공 여부(실패는 오류 응답으로 온다). */
-  ok: true;
   /** 매니저에게 보여 줄 안내(예: "이미 사라진 메시지입니다"). */
   note?: string | null;
 }
@@ -61,7 +59,7 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
   const now = useNow(NOW_REFRESH_MS);
   const actions = useMemo(() => createCandidateActions(onSignedOut), [onSignedOut]);
   useEffect(() => {
-    if (state.sessionEndedReason) onSignedOut(state.sessionEndedReason);
+    if (state.sessionEndedReason !== null) onSignedOut(state.sessionEndedReason);
   }, [state.sessionEndedReason, onSignedOut]);
   // 구역은 여기서 한 번만 계산해 후보 화면과 탭 배지가 같은 값을 쓴다.
   const sections = useMemo(() => buildSections(state.verdicts, now), [state.verdicts, now]);
@@ -69,9 +67,16 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
     <div className="app">
       {state.loadError && <p className="error" role="alert">{state.loadError}</p>}
       {state.realtimeRejected && <RealtimeRejectedNotice onRetry={reconnect} onSignedOut={onSignedOut} />}
-      {tab === "candidates" && <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected} actions={actions} onReload={reload} />}
-      {tab === "chat" && <LiveChatScreen lines={state.chatLines} />}
-      {tab === "settings" && <SettingsScreen me={me} onSignedOut={onSignedOut} />}
+      {/* 세 화면을 모두 마운트해 두고 숨기기만 한다: 탭을 오가도 진행 중인 요청 결과·처리 중 잠금·채팅 필터가 사라지지 않는다. */}
+      <div hidden={tab !== "candidates"}>
+        <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected} actions={actions} onReload={reload} />
+      </div>
+      <div hidden={tab !== "chat"}>
+        <LiveChatScreen lines={state.chatLines} />
+      </div>
+      <div hidden={tab !== "settings"}>
+        <SettingsScreen me={me} onSignedOut={onSignedOut} />
+      </div>
       <TabBar active={tab} onChange={setTab} pendingCount={countActionable(sections)} />
     </div>
   );

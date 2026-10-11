@@ -61,7 +61,7 @@ export function useServerState(): ServerConnection {
  */
 function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
   let isMounted = true;
-  let lastConnected = false;
+  let wasConnected = false;
   const guarded = (action: ServerAction) => {
     if (isMounted) dispatch(action);
   };
@@ -75,8 +75,8 @@ function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
   const connection = new RealtimeConnection({
     onEvent: (event) => guarded({ type: "event", event }),
     onConnectionChange: (connected) => {
-      if (!isMounted || connected === lastConnected) return;
-      lastConnected = connected;
+      if (!isMounted || connected === wasConnected) return;
+      wasConnected = connected;
       guarded({ type: "connection", connected });
       if (connected) loader.request();
     },
@@ -103,17 +103,25 @@ function createSnapshotLoader(dispatch: Dispatch<ServerAction>, onSignInRequired
   let isCancelled = false;
   const run = async (): Promise<void> => {
     isRunning = true;
-    await loadSnapshot(dispatch, () => isCancelled, onSignInRequired);
-    isRunning = false;
+    try {
+      await loadSnapshot(dispatch, () => isCancelled, onSignInRequired);
+    } finally {
+      // 왜 finally인가: 예기치 않은 예외로 깃발이 true로 남으면 이후 요청이 영영 '진행 중'으로 합쳐져 다시는 조회하지 않는다.
+      isRunning = false;
+    }
     if (!isRequestedAgain || isCancelled) return;
     isRequestedAgain = false;
-    void run();
+    startRun();
+  };
+  /** 조회를 시작하되, 예외는 처리되지 않은 거부로 새지 않게 경고로 남긴다. */
+  const startRun = (): void => {
+    run().catch((error: unknown) => console.warn("상태·후보 조회 중 예기치 않은 오류가 났습니다", error));
   };
   return {
     request: () => {
       if (isCancelled) return;
       if (isRunning) isRequestedAgain = true;
-      else void run();
+      else startRun();
     },
     cancel: () => {
       isCancelled = true;
@@ -122,13 +130,13 @@ function createSnapshotLoader(dispatch: Dispatch<ServerAction>, onSignInRequired
 }
 
 /** 상태와 최근 후보를 함께 읽어 리듀서에 넣는다. 취소됐으면 결과를 버린다. */
-async function loadSnapshot(dispatch: Dispatch<ServerAction>, isCancelled: () => boolean, onSignInRequired: (message: string) => void): Promise<void> {
+async function loadSnapshot(dispatch: Dispatch<ServerAction>, hasBeenCancelled: () => boolean, onSignInRequired: (message: string) => void): Promise<void> {
   dispatch({ type: "snapshot_started" });
   try {
     const [status, verdicts] = await Promise.all([apiGet<ServerStatus>("/api/status"), apiGet<VerdictDto[]>("/api/candidates")]);
-    if (!isCancelled()) dispatch({ type: "snapshot_loaded", status, verdicts });
+    if (!hasBeenCancelled()) dispatch({ type: "snapshot_loaded", status, verdicts });
   } catch (error) {
-    if (isCancelled()) return;
+    if (hasBeenCancelled()) return;
     dispatch({ type: "snapshot_failed", message: describeApiError(error) });
     if (requiresSignIn(error)) onSignInRequired(error.message);
   }

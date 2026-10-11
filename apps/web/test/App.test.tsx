@@ -34,6 +34,18 @@ describe("App", () => {
     expect(screen.getByText("이 채널의 매니저가 아닙니다.")).toBeTruthy();
   });
 
+  it("loginError는 한 번만 읽고 주소에서 지운다: 다시 그려도 낡은 이유가 되살아나지 않는다", async () => {
+    window.history.pushState({}, "", `/?loginError=${encodeURIComponent("이 채널의 매니저가 아닙니다.")}&keep=1#top`);
+    stubFetch({ "GET /api/me": () => json(401, { error: "unauthorized", message: "로그인이 필요합니다." }) });
+    const { rerender } = render(<App />);
+    expect(await screen.findByText("이 채널의 매니저가 아닙니다.")).toBeTruthy();
+    expect(window.location.search).toBe("?keep=1");
+    expect(window.location.hash).toBe("#top");
+    rerender(<App />);
+    expect(screen.getByText("이 채널의 매니저가 아닙니다.")).toBeTruthy();
+    expect(window.location.search).not.toContain("loginError");
+  });
+
   it("로그인했으면 탭과 후보 화면을 보여 준다", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     stubFetch({

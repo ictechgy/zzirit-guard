@@ -11,8 +11,13 @@ const status = { channelConnected: true, channelName: "채널", chatConnected: t
 class ControlledSocket {
   /** 만들어진 소켓 목록. */
   static sockets: ControlledSocket[] = [];
+  /** 서버 메시지 수신기(RealtimeConnection이 채운다). */
   onmessage: ((event: { data: unknown }) => void) | null = null;
+  /** 닫힘 수신기(RealtimeConnection이 채운다). */
   onclose: ((event: { code: number }) => void) | null = null;
+  /** close()가 불렸는지: 실시간을 멈췄는지 확인하는 데 쓴다. */
+  isClosed = false;
+  /** @param url 열려는 주소(테스트는 쓰지 않지만 WebSocket 생성자 모양을 맞춘다) */
   constructor(readonly url: string) {
     ControlledSocket.sockets.push(this);
   }
@@ -20,7 +25,10 @@ class ControlledSocket {
   deliverStatus(): void {
     this.onmessage?.({ data: JSON.stringify({ type: "status", status }) });
   }
-  close(): void {}
+  /** 연결을 닫았다고 기록한다. */
+  close(): void {
+    this.isClosed = true;
+  }
 }
 
 /** 호출을 세고 응답을 사람이 풀어 줄 수 있게 붙잡아 두는 fetch. */
@@ -33,10 +41,10 @@ function installHeldFetch() {
     if (key === "POST /api/ws-ticket") return Promise.resolve(json(200, { ticket: "t1" }));
     return new Promise<Response>((resolve) => pending.push(resolve));
   }));
-  /** 붙잡아 둔 응답을 모두 풀어 준다(status·candidates 순서와 무관하게 URL로 구분). */
-  const releaseAll = () => {
+  /** 붙잡아 둔 응답을 모두 같은 응답으로 풀어 준다. */
+  const releaseAll = (response: () => Response = () => json(200, [])) => {
     const waiting = pending.splice(0);
-    waiting.forEach((resolve) => resolve(json(200, [])));
+    waiting.forEach((resolve) => resolve(response()));
   };
   return { calls, releaseAll, count: (path: string) => calls.filter((call) => call === `GET ${path}`).length };
 }
@@ -94,15 +102,41 @@ describe("useServerState", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("후보 조회가 401이면 실시간을 멈추고 서버 문구로 세션 종료를 알린다(R-12)", async () => {
+  it("연결된 뒤 조회가 401이면 소켓을 닫고, 티켓을 다시 받지 않고, 조회기도 멈춘다(R-12)", async () => {
     vi.stubGlobal("WebSocket", ControlledSocket);
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const key = `${init?.method ?? "GET"} ${String(input)}`;
-      if (key === "POST /api/ws-ticket") return json(200, { ticket: "t1" });
-      return json(401, { error: "unauthorized", message: "로그인이 필요합니다." });
-    }));
+    const fetcher = installHeldFetch();
     const { result } = renderHook(() => useServerState());
+    await waitFor(() => expect(ControlledSocket.sockets).toHaveLength(1));
+    act(() => ControlledSocket.sockets[0]?.deliverStatus());
+    expect(result.current.state.realtimeConnected).toBe(true);
+    await act(async () => fetcher.releaseAll(() => json(401, { error: "unauthorized", message: "로그인이 필요합니다." })));
     await waitFor(() => expect(result.current.state.sessionEndedReason).toBe("로그인이 필요합니다."));
     expect(result.current.state.realtimeConnected).toBe(false);
+    expect(ControlledSocket.sockets[0]?.isClosed).toBe(true);
+    const callsAfterEnd = fetcher.calls.length;
+    act(() => result.current.reload());
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(fetcher.calls).toHaveLength(callsAfterEnd);
+    expect(fetcher.calls.filter((call) => call === "POST /api/ws-ticket")).toHaveLength(1);
+  });
+
+  it("조회는 200인데 티켓이 401이면 세션 종료로 알리고, 진행 중이던 조회 결과는 버린다(R-12)", async () => {
+    vi.stubGlobal("WebSocket", ControlledSocket);
+    const calls: string[] = [];
+    const held: Array<(response: Response) => void> = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const key = `${init?.method ?? "GET"} ${String(input)}`;
+      calls.push(key);
+      if (key === "POST /api/ws-ticket") return Promise.resolve(json(401, { error: "unauthorized", message: "세션이 만료되었습니다." }));
+      return new Promise<Response>((resolve) => held.push(resolve));
+    }));
+    const { result } = renderHook(() => useServerState());
+    await waitFor(() => expect(result.current.state.sessionEndedReason).toBe("세션이 만료되었습니다."));
+    await act(async () => held.splice(0).forEach((resolve) => resolve(json(200, status))));
+    expect(result.current.state.status).toBeNull();
+    const callsAfterEnd = calls.length;
+    act(() => result.current.reload());
+    expect(calls).toHaveLength(callsAfterEnd);
+    expect(ControlledSocket.sockets).toHaveLength(0);
   });
 });
