@@ -29,4 +29,22 @@ describe("openDatabase", () => {
     expect(() => insertRule.run("unknown")).toThrow(/CHECK/);
     expect(() => insertRule.run("exception")).not.toThrow();
   });
+
+  it("채널을 지우면 토큰(credential)은 함께 지워진다(F3)", () => {
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO credential (channel_id, access_token_enc, refresh_token_enc, access_expires_at, refreshed_at) VALUES ('c1', 'a', 'r', 0, 0)").run();
+    database.prepare("DELETE FROM channel").run();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM credential").get()).toEqual({ count: 0 });
+  });
+
+  it("채널을 지워도 설정과 규칙은 상시 보관이라 남는다(스펙 11장, F3)", () => {
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
+    database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', 'strong', 'x', 'test', 0)").run();
+    database.prepare("DELETE FROM channel").run();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM setting").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM rule_entry").get()).toEqual({ count: 1 });
+  });
 });

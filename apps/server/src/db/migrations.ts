@@ -3,6 +3,8 @@ import type { Database } from "./database.js";
 /**
  * 스키마 버전별 SQL. 배열 순서가 곧 버전이다(PRAGMA user_version).
  * 한 번 배포한 항목은 고치지 말고 새 항목을 뒤에 추가한다.
+ * setting·rule_entry는 스펙 11장에서 상시 보관이라 channel 외래키를 두지 않는다. 연결 해제(DELETE FROM channel)가
+ * 매니저가 다듬은 규칙·설정까지 cascade로 지우지 않게 하려는 것이다. 토큰(credential)만 채널과 함께 지워진다.
  */
 const migrations: readonly string[] = [
   `
@@ -19,7 +21,7 @@ const migrations: readonly string[] = [
     refreshed_at INTEGER NOT NULL
   );
   CREATE TABLE setting (
-    channel_id TEXT PRIMARY KEY REFERENCES channel(channel_id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL PRIMARY KEY,
     auto_hide_enabled INTEGER NOT NULL DEFAULT 0,
     stage1_threshold REAL NOT NULL DEFAULT 0.05,
     candidate_threshold REAL NOT NULL DEFAULT 0.5,
@@ -30,7 +32,7 @@ const migrations: readonly string[] = [
   );
   CREATE TABLE rule_entry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id TEXT NOT NULL REFERENCES channel(channel_id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('strong','weak','exception','allow','allow_domain','threat','keyword_route')),
     pattern TEXT NOT NULL,
     created_by TEXT NOT NULL,

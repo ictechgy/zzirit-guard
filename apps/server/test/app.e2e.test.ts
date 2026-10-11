@@ -72,6 +72,29 @@ describe("종단 간: 연결 → 섀도 → 자동 숨김 → 매니저 권한",
     expect(app.status()).toMatchObject({ channelConnected: true, chatConnected: true, autoHideEnabled: false });
   });
 
+  it("채널 연결을 해제했다가 다시 연결해도 규칙·설정은 남고 기본 규칙은 중복되지 않으며 스위치는 꺼진다(F3)", async () => {
+    const owner = await signIn("/auth/connect", fake.owner);
+    // 채팅 소켓이 열리는 도중에 해제하면 이 테스트의 범위가 아닌 소켓 종료 경합이 섞이므로, 구독까지 기다린다.
+    await waitFor(() => fake.subscribedSessionCount() === 1);
+    const headers = { cookie: `zg_session=${owner}`, origin: ORIGIN, "x-zzirit-request": "1" };
+    const defaultRuleCount = (await app.http.inject({ method: "GET", url: "/api/rules", headers })).json<unknown[]>().length;
+    expect((await app.http.inject({ method: "POST", url: "/api/rules", headers, payload: { kind: "strong", pattern: "커스텀금칙어" } })).statusCode).toBe(200);
+    expect((await app.http.inject({ method: "PUT", url: "/api/settings", headers, payload: { breakerPerMinute: 30 } })).statusCode).toBe(200);
+    expect((await app.http.inject({ method: "POST", url: "/api/auto-hide", headers, payload: { enabled: true } })).statusCode).toBe(200);
+    expect((await app.http.inject({ method: "POST", url: "/api/channel/disconnect", headers })).statusCode).toBe(200);
+    expect(app.status().channelConnected).toBe(false);
+    await waitFor(() => fake.subscribedSessionCount() === 0);
+
+    const ownerAgain = await signIn("/auth/connect", fake.owner);
+    await waitFor(() => fake.subscribedSessionCount() === 1);
+    const headersAgain = { cookie: `zg_session=${ownerAgain}`, origin: ORIGIN, "x-zzirit-request": "1" };
+    const rules = (await app.http.inject({ method: "GET", url: "/api/rules", headers: headersAgain })).json<Array<{ pattern: string }>>();
+    expect(rules).toHaveLength(defaultRuleCount + 1);
+    expect(rules.some((rule) => rule.pattern === "커스텀금칙어")).toBe(true);
+    expect((await app.http.inject({ method: "GET", url: "/api/settings", headers: headersAgain })).json()).toMatchObject({ breakerPerMinute: 30 });
+    expect(app.status()).toMatchObject({ channelConnected: true, autoHideEnabled: false });
+  });
+
   it("state 쿠키 없이 콜백을 호출하면 연결되지 않는다", async () => {
     const start = await app.http.inject({ method: "GET", url: "/auth/connect" });
     const state = new URL(start.headers.location as string).searchParams.get("state");

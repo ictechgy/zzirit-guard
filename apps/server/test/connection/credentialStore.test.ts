@@ -32,12 +32,24 @@ describe("CredentialStore", () => {
     expect(() => store.saveConnection(other, { ...credential, channelId: "other" })).toThrow(/이미 다른 채널/);
   });
 
-  it("연결 해제 시 토큰과 설정까지 지운다", () => {
+  it("연결 해제 시 토큰은 지우고, 설정·규칙은 남기되 자동 숨김 스위치는 끈다(F3)", () => {
     const { database, store } = createStore();
     store.saveConnection(channel, credential);
+    database.prepare("UPDATE setting SET auto_hide_enabled = 1, breaker_per_minute = 30 WHERE channel_id = ?").run(channel.channelId);
+    database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES (?, 'strong', '커스텀', 'm', 0)").run(channel.channelId);
     store.clearConnection();
     expect(store.loadChannel()).toBeNull();
     expect(store.loadCredential()).toBeNull();
-    expect(database.prepare("SELECT COUNT(*) AS count FROM setting").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT auto_hide_enabled, breaker_per_minute FROM setting").all()).toEqual([{ auto_hide_enabled: 0, breaker_per_minute: 30 }]);
+    expect(database.prepare("SELECT pattern FROM rule_entry").all()).toEqual([{ pattern: "커스텀" }]);
+  });
+
+  it("다시 연결해도 남아 있던 설정 값을 덮어쓰지 않는다(F3)", () => {
+    const { database, store } = createStore();
+    store.saveConnection(channel, credential);
+    database.prepare("UPDATE setting SET breaker_per_minute = 30 WHERE channel_id = ?").run(channel.channelId);
+    store.clearConnection();
+    store.saveConnection(channel, credential);
+    expect(database.prepare("SELECT auto_hide_enabled, breaker_per_minute FROM setting").all()).toEqual([{ auto_hide_enabled: 0, breaker_per_minute: 30 }]);
   });
 });

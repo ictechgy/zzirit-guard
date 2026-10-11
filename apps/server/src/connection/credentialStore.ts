@@ -38,7 +38,10 @@ export interface CredentialStore {
   saveConnection(channel: ConnectedChannel, credential: StoredCredential): void;
   /** 갱신된 토큰만 교체한다. 채널 정보와 설정은 건드리지 않는다. */
   saveCredential(credential: StoredCredential): void;
-  /** 채널을 지운다. 외래키 cascade로 토큰과 설정도 함께 지워진다. */
+  /**
+   * 채널을 지운다. 외래키 cascade로 토큰은 함께 지워지지만, 설정·규칙은 상시 보관이라 남긴다(스펙 11장).
+   * 자동 숨김 스위치는 끈다. 다시 연결했을 때 예전 스위치 상태로 곧바로 숨기기 시작하지 않게 하려는 것이다.
+   */
   clearConnection(): void;
 }
 
@@ -61,8 +64,15 @@ export function createCredentialStore(database: Database, cipher: TokenCipher, c
     loadCredential: () => loadCredential(database, cipher),
     saveConnection: (channel, credential) => database.transaction(() => saveConnection(database, cipher, clock, channel, credential))(),
     saveCredential: (credential) => writeCredential(database, cipher, clock, credential),
-    clearConnection: () => void database.prepare("DELETE FROM channel").run(),
+    clearConnection: () => database.transaction(() => clearConnection(database))(),
   };
+}
+
+/** 스위치를 끄고 채널 행을 지운다(토큰은 cascade). 설정·규칙 행은 그대로 둔다. */
+function clearConnection(database: Database): void {
+  const channel = loadChannel(database);
+  if (channel) database.prepare("UPDATE setting SET auto_hide_enabled = 0 WHERE channel_id = ?").run(channel.channelId);
+  database.prepare("DELETE FROM channel").run();
 }
 
 /** 연결된 채널을 읽는다(없으면 null). */
