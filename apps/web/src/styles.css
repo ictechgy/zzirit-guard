@@ -28,6 +28,9 @@ button:disabled { opacity: 0.4; }
 .toggle-on { background: var(--accent); color: #17171f; font-weight: 700; }
 .error { color: var(--danger); }
 .feedback { color: var(--ok); }
+/* 시스템이 자동 숨김을 껐다는 안내(F8). 닫기 버튼과 한 줄에 둔다. */
+.system-notice { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--danger); border-radius: 10px; }
+.system-notice p { margin: 0; flex: 1; }
 .hint, .notice, .empty { color: var(--muted); font-size: 13px; }
 .card { background: var(--surface); border-radius: 12px; padding: 10px; }
 .card-care { border-left: 4px solid var(--care); }

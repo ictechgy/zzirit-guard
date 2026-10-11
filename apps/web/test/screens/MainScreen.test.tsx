@@ -1,3 +1,4 @@
+import type { ServerStatus } from "@zzirit-guard/shared";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,12 @@ vi.mock("../../src/state/useServerState", () => ({
 
 /** 채팅 운영자 내 정보. */
 const me = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER" as const, permissions: [] };
+/** 자동 숨김을 끌 수 있는 채팅 운영자. */
+const switchManager = { ...me, permissions: ["disable_auto_hide" as const] };
+/** 정상 서버 상태(자동 숨김 켜짐). */
+const enabledStatus: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: true, lastChatAt: null, pendingActions: 0 };
+/** 시스템이 자동 숨김을 껐을 때의 안내(F8). */
+const SYSTEM_DISABLED_TEXT = "자동 숨김이 꺼졌습니다(1분 한도 초과 또는 치지직 호출 실패 증가). 기록·설정 → 감사 기록에서 이유를 확인하세요.";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -76,5 +83,39 @@ describe("MainScreen", () => {
     expect(count("/api/rules")).toBe(rulesAfterFirstVisit * 3);
     expect(count("/api/chat-settings")).toBe(1);
     expect(document.querySelector(".settings")).not.toBeNull();
+  });
+});
+
+describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8, 스모크 S2)", () => {
+  it("상태가 켜짐→꺼짐으로 바뀌었는데 이 기기가 끄지 않았으면 후보 화면에 이유 확인 안내를 띄우고, 닫으면 사라진다", async () => {
+    stubFetch({});
+    hookState.current = { ...initialServerState, status: enabledStatus };
+    const onSignedOut = vi.fn();
+    const { rerender } = render(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
+    rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    expect(screen.getByRole("alert").textContent).toContain(SYSTEM_DISABLED_TEXT);
+    await userEvent.click(screen.getByRole("button", { name: "닫기" }));
+    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
+  });
+
+  it("이 기기에서 끈 것이면 안내를 띄우지 않는다", async () => {
+    const fetchMock = stubFetch({ "POST /api/auto-hide": () => json(200, { enabled: false }) });
+    hookState.current = { ...initialServerState, status: enabledStatus };
+    const onSignedOut = vi.fn();
+    const { rerender } = render(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
+    rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
+  });
+
+  it("처음 받은 상태가 꺼짐이면 안내를 띄우지 않는다", () => {
+    stubFetch({});
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
+    render(<MainScreen me={switchManager} onSignedOut={vi.fn()} />);
+    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
   });
 });

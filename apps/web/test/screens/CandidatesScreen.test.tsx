@@ -13,6 +13,8 @@ const chatManager: MeDto = { channelId: "m1", channelName: "매니저1", role: "
 const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 };
 /** 기준 시각. */
 const NOW = 1_000_000;
+/** 시스템 꺼짐 안내를 띄우지 않는 속성(F8 안내는 MainScreen 테스트가 다룬다). */
+const noNotice = { isSystemDisableNoticeVisible: false, onDismissSystemDisableNotice: () => undefined };
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
@@ -38,7 +40,7 @@ afterEach(() => {
 function renderLive(verdicts: VerdictDto[]) {
   const actions = fakeActions();
   const onReload = vi.fn();
-  const screenFor = (next: VerdictDto[]) => <CandidatesScreen me={chatManager} status={status} sections={buildSections(next, NOW)} realtimeConnected actions={actions} onReload={onReload} />;
+  const screenFor = (next: VerdictDto[]) => <CandidatesScreen me={chatManager} status={status} sections={buildSections(next, NOW)} realtimeConnected actions={actions} onReload={onReload} {...noNotice} />;
   const { rerender } = render(screenFor(verdicts));
   return { update: (next: VerdictDto[]) => rerender(screenFor(next)) };
 }
@@ -56,7 +58,7 @@ function listElement(): HTMLElement {
 /** 화면을 그린다. status를 null로 넘기면 서버 상태를 아직 모르는 경우다. */
 function renderScreen(verdicts: VerdictDto[], actions = fakeActions(), currentStatus: ServerStatus | null = status) {
   const onReload = vi.fn();
-  render(<CandidatesScreen me={chatManager} status={currentStatus} sections={buildSections(verdicts, NOW)} realtimeConnected actions={actions} onReload={onReload} />);
+  render(<CandidatesScreen me={chatManager} status={currentStatus} sections={buildSections(verdicts, NOW)} realtimeConnected actions={actions} onReload={onReload} {...noNotice} />);
   return { actions, onReload };
 }
 
@@ -180,7 +182,7 @@ describe("CandidatesScreen", () => {
   it("자동 숨김 켜기는 확인 후 setAutoHide(true), 취소하면 부르지 않는다", async () => {
     const admin: MeDto = { ...chatManager, permissions: ["enable_auto_hide", "disable_auto_hide"] };
     const actions = fakeActions();
-    render(<CandidatesScreen me={admin} status={status} sections={buildSections([], NOW)} realtimeConnected actions={actions} onReload={vi.fn()} />);
+    render(<CandidatesScreen me={admin} status={status} sections={buildSections([], NOW)} realtimeConnected actions={actions} onReload={vi.fn()} {...noNotice} />);
     const confirm = vi.spyOn(window, "confirm");
     confirm.mockReturnValueOnce(false);
     await userEvent.click(screen.getByRole("button", { name: /자동 숨김: 꺼짐/ }));
@@ -228,11 +230,11 @@ describe("CandidatesScreen", () => {
   });
 
   it("쓰기가 잠겨도 채팅 운영자의 배너에는 '채널 다시 연결' 링크가 없고, 스트리머에게는 있다(F1)", () => {
-    const { unmount } = render(<CandidatesScreen me={chatManager} status={{ ...status, writeLocked: true }} sections={buildSections([], NOW)} realtimeConnected actions={fakeActions()} onReload={vi.fn()} />);
+    const { unmount } = render(<CandidatesScreen me={chatManager} status={{ ...status, writeLocked: true }} sections={buildSections([], NOW)} realtimeConnected actions={fakeActions()} onReload={vi.fn()} {...noNotice} />);
     expect(screen.queryByRole("link", { name: "채널 다시 연결" })).toBeNull();
     unmount();
     const owner: MeDto = { ...chatManager, role: "STREAMING_CHANNEL_OWNER", permissions: [...chatManager.permissions, "connect_channel"] };
-    render(<CandidatesScreen me={owner} status={{ ...status, writeLocked: true }} sections={buildSections([], NOW)} realtimeConnected actions={fakeActions()} onReload={vi.fn()} />);
+    render(<CandidatesScreen me={owner} status={{ ...status, writeLocked: true }} sections={buildSections([], NOW)} realtimeConnected actions={fakeActions()} onReload={vi.fn()} {...noNotice} />);
     expect(within(screen.getByRole("status", { name: "서버 상태" })).getByRole("link", { name: "채널 다시 연결" })).toBeTruthy();
   });
 

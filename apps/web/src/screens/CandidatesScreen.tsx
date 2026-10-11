@@ -43,7 +43,14 @@ export interface CandidatesScreenProps {
   actions: CandidateActions;
   /** 서버에서 상태·후보를 다시 읽는다(iOS 홈 화면 앱에는 새로고침이 없다). */
   onReload(): void;
+  /** 시스템(1분 한도·실패율)이 자동 숨김을 껐다는 안내를 보여 줄지(F8). MainScreen이 상태 변화를 보고 정한다. */
+  isSystemDisableNoticeVisible: boolean;
+  /** 그 안내를 닫는다. memo가 깨지지 않게 렌더마다 같은 함수여야 한다. */
+  onDismissSystemDisableNotice(): void;
 }
+
+/** 시스템이 자동 숨김을 껐을 때의 안내. 상태에는 이유가 없어 두 이유를 함께 적고 감사 기록을 보게 한다. */
+const SYSTEM_DISABLE_MESSAGE = "자동 숨김이 꺼졌습니다(1분 한도 초과 또는 치지직 호출 실패 증가). 기록·설정 → 감사 기록에서 이유를 확인하세요.";
 
 /** 화면에 남기는 동작 결과. */
 type Feedback = { kind: "ok" | "error"; message: string } | null;
@@ -97,7 +104,7 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  * 감싸지 않으면 판정 수천 건의 목록을 초당 4번 다시 그려 휴대폰이 멈춘다(F4). 속성은 MainScreen이 useMemo·useCallback으로 고정한다.
  * 목록을 만지는 동안에는 구역을 고정해 줄이 손가락 밑에서 움직이지 않게 한다(useStableSections, 스모크 S1).
  */
-export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload }: CandidatesScreenProps) {
+export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, isSystemDisableNoticeVisible, onDismissSystemDisableNotice }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const locks = useActionLocks();
   const run = createRunner(setFeedback, onReload, locks);
@@ -111,6 +118,12 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   return (
     <section className="screen">
       <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
+      {isSystemDisableNoticeVisible && (
+        <div className="system-notice error" role="alert">
+          <p>{SYSTEM_DISABLE_MESSAGE}</p>
+          <button type="button" onClick={onDismissSystemDisableNotice}>닫기</button>
+        </div>
+      )}
       <div className="toolbar">
         <AutoHideToggle enabled={autoHideEnabled} canEnable={me.permissions.includes("enable_auto_hide")}
           canDisable={me.permissions.includes("disable_auto_hide")} isBusy={autoHideEnabled !== null && lockedKeys.has(autoHideLockKey(!autoHideEnabled))}
