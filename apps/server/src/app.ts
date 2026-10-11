@@ -59,6 +59,8 @@ const INTERVALS = {
 };
 /** 시스템 행위자. */
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
+/** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
+const SESSION_EXPIRED_REASON = "세션이 만료되었습니다. 다시 로그인하세요";
 
 /** 모든 구성 요소를 만들고 이벤트를 연결한다. */
 export async function createApp(config: AppConfig, options: AppOptions): Promise<App> {
@@ -245,14 +247,22 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       logger.error("정리·백업 실패 — 디스크 공간과 데이터 디렉터리 권한을 확인하세요", { error: describeError(error) });
     }
   };
-  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인·보관 기한 정리와 백업. */
+  /**
+   * 활성 세션의 역할을 다시 확인한 뒤, 활성 목록에 없는 세션(12시간 만료 등)의 소켓을 닫는다.
+   * 왜: 세션 만료는 DB에서만 일어나 허브가 모르므로, 재확인 주기마다 맞추지 않으면 만료된 화면이 판정·채팅을 계속 받는다(스펙 7장, F2).
+   */
+  const recheckRolesAndCloseExpired = async (): Promise<void> => {
+    await recheckSessionRoles({
+      sessions, roleVerifier, logger,
+      onRevoked: (ids) => hub.closeSessions(ids, "치지직에서 매니저 권한이 해제되었습니다"),
+    });
+    hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
+  };
+  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업. */
   const startTimers = (): void => {
     intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenQuietly), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
-    intervalTimers.push(setInterval(guarded("역할 재확인 실패", () => recheckSessionRoles({
-      sessions, roleVerifier, logger,
-      onRevoked: (ids) => hub.closeSessions(ids, "치지직에서 매니저 권한이 해제되었습니다"),
-    })), INTERVALS.roleRecheckMs));
+    intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesAndCloseExpired), INTERVALS.roleRecheckMs));
     timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenance), INTERVALS.firstMaintenanceDelayMs));
     intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenance), INTERVALS.maintenanceMs));
   };

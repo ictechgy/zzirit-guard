@@ -15,6 +15,13 @@ export interface SocketSink {
 export interface RealtimeHub extends Broadcaster {
   attach(socket: SocketSink, session: ManagerSession): void;
   closeSessions(sessionIds: readonly string[], reason: string): void;
+  /**
+   * 활성 목록에 없는 세션의 소켓을 closeSessions와 같은 방식(session_ended 전송 후 4001)으로 닫는다.
+   * 왜: 세션 만료(12시간)는 DB에서 조용히 일어나 허브가 알 수 없으므로, 주기적으로 활성 목록과 맞춰 끊긴 매니저의 소켓을 닫는다(스펙 7장).
+   * @param activeSessionIds 지금 유효한 세션 ID 집합
+   * @param reason 화면에 보여 줄 종료 이유
+   */
+  closeSessionsExcept(activeSessionIds: ReadonlySet<string>, reason: string): void;
   connectionCount(): number;
   flush(): void;
   stop(): void;
@@ -88,7 +95,11 @@ export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): Realt
       connections.set(socket, session.id);
       socket.on("close", () => connections.delete(socket));
     },
-    closeSessions: (sessionIds, reason) => closeMatching(connections, new Set(sessionIds), reason),
+    closeSessions: (sessionIds, reason) => {
+      const targets = new Set(sessionIds);
+      closeMatching(connections, (sessionId) => targets.has(sessionId), reason);
+    },
+    closeSessionsExcept: (activeSessionIds, reason) => closeMatching(connections, (sessionId) => !activeSessionIds.has(sessionId), reason),
     connectionCount: () => connections.size,
     flush,
     stop() {
@@ -104,15 +115,16 @@ export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): Realt
 }
 
 /**
- * 지정한 세션의 소켓에 종료 이유를 보내고 닫는다.
+ * 조건에 맞는 세션의 소켓에 종료 이유를 보내고 닫는다.
  * 왜: 권한을 잃은 세션은 화면에 이유를 알린 뒤 전용 코드로 닫아야 재연결 루프에 빠지지 않는다.
  * 소켓은 닫기 전에 목록에서 먼저 빼서, 닫기가 실패해도 목록에 남지 않게 한다.
  * 전송이 실패한 소켓은 sendToSocket이 이미 1011로 닫았으므로 4001 닫기는 건너뛴다.
+ * @param shouldClose 세션 ID를 받아 닫을지 정하는 함수. closeSessions(목록 안)와 closeSessionsExcept(목록 밖)가 같은 절차를 쓰게 한다.
  */
-function closeMatching(connections: Map<SocketSink, string>, sessionIds: ReadonlySet<string>, reason: string): void {
+function closeMatching(connections: Map<SocketSink, string>, shouldClose: (sessionId: string) => boolean, reason: string): void {
   const message = JSON.stringify({ type: "session_ended", reason } satisfies RealtimeEvent);
   for (const [socket, sessionId] of connections) {
-    if (!sessionIds.has(sessionId)) continue;
+    if (!shouldClose(sessionId)) continue;
     connections.delete(socket);
     if (socket.readyState === OPEN && !sendToSocket(connections, socket, message)) continue;
     closeSocketSafely(socket, SESSION_ENDED_CLOSE_CODE, "session ended");

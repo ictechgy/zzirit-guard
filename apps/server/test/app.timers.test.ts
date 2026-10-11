@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RealtimeEvent } from "@zzirit-guard/shared";
 import type { Database } from "../src/db/database.js";
+import type { RealtimeHub, SocketSink } from "../src/realtime/hub.js";
 
 /** 목으로 제어하는 실패 스위치와 열린 DB 기록. vi.hoisted로 목 팩토리보다 먼저 만든다. */
 const control = vi.hoisted(() => ({
@@ -7,6 +9,7 @@ const control = vi.hoisted(() => ({
   recheckError: null as Error | null,
   loadChannelError: null as Error | null,
   database: null as Database | null,
+  hub: null as RealtimeHub | null,
 }));
 
 vi.mock("../src/records/minuteStats.js", async (importOriginal) => {
@@ -40,6 +43,11 @@ vi.mock("../src/managers/roleRecheck.js", () => ({
 vi.mock("../src/db/database.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/db/database.js")>();
   return { ...original, openDatabase: (path: string) => (control.database = original.openDatabase(path)) };
+});
+// 앱이 만든 실제 허브를 붙잡아, 테스트에서 가짜 소켓을 붙이고 역할 재확인 주기 뒤의 종료를 확인한다.
+vi.mock("../src/realtime/hub.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/realtime/hub.js")>();
+  return { ...original, createRealtimeHub: (...args: Parameters<typeof original.createRealtimeHub>) => (control.hub = original.createRealtimeHub(...args)) };
 });
 
 const { createApp } = await import("../src/app.js");
@@ -89,6 +97,34 @@ describe("주기 작업 오류는 프로세스를 죽이지 않고 로그로 남
     control.recheckError = new Error("치지직 장애");
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(errorLines.filter((line) => line.message === "역할 재확인 실패")).toEqual([{ message: "역할 재확인 실패", details: { error: "Error: 치지직 장애" } }]);
+  });
+});
+
+/** 받은 이벤트와 닫기 코드를 모으는 가짜 소켓. */
+function recordingSocket() {
+  const socket: SocketSink & { sent: RealtimeEvent[]; closedWith: number | null } = {
+    readyState: 1, sent: [], closedWith: null,
+    send: (data) => void socket.sent.push(JSON.parse(data) as RealtimeEvent),
+    close: (code) => void (socket.closedWith = code ?? null),
+    on: () => undefined,
+  };
+  return socket;
+}
+
+describe("만료된 세션의 소켓 종료(F2)", () => {
+  it("역할 재확인 주기마다 활성 목록에 없는 세션의 소켓을 닫고, 활성 세션의 소켓은 둔다", async () => {
+    const hub = control.hub as RealtimeHub;
+    control.database?.prepare("INSERT INTO manager_session (id, manager_channel_id, manager_channel_name, role, expires_at, last_role_check_at) VALUES ('active', 'm1', '매니저', 'STREAMING_CHAT_MANAGER', ?, 0)").run(Date.now() + 60 * 60_000);
+    const expired = recordingSocket();
+    const active = recordingSocket();
+    hub.attach(expired, { id: "expired", managerChannelId: "m2", managerChannelName: "매니저2", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    hub.attach(active, { id: "active", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(expired.closedWith).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(expired.sent).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
+    expect(expired.closedWith).toBe(4001);
+    expect(active.closedWith).toBeNull();
   });
 });
 

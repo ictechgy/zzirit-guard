@@ -63,6 +63,37 @@ describe("RealtimeHub", () => {
     expect(other.closedWith).toBeNull();
   });
 
+  it("closeSessionsExcept는 목록에 없는 세션의 소켓만 이유를 보낸 뒤 4001로 닫는다(F2)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    const expired = fakeSocket();
+    const active = fakeSocket();
+    const alsoExpired = fakeSocket();
+    hub.attach(expired, session("s1"));
+    hub.attach(active, session("s2"));
+    hub.attach(alsoExpired, session("s3"));
+    hub.closeSessionsExcept(new Set(["s2"]), "세션이 만료되었습니다. 다시 로그인하세요");
+    expect(expired.sent).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
+    expect([expired.closedWith, alsoExpired.closedWith]).toEqual([4001, 4001]);
+    expect(active.sent).toEqual([]);
+    expect(active.closedWith).toBeNull();
+    expect(hub.connectionCount()).toBe(1);
+  });
+
+  it("closeSessionsExcept 중 send가 throw한 소켓은 1011로 닫히고 나머지 종료는 계속된다(F2)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    const broken = fakeSocket();
+    broken.send = () => {
+      throw new Error("소켓 깨짐");
+    };
+    const expired = fakeSocket();
+    hub.attach(broken, session("s1"));
+    hub.attach(expired, session("s2"));
+    hub.closeSessionsExcept(new Set(), "세션이 만료되었습니다. 다시 로그인하세요");
+    expect(broken.closedWith).toBe(1011);
+    expect(expired.closedWith).toBe(4001);
+    expect(hub.connectionCount()).toBe(0);
+  });
+
   it("한 소켓의 send가 throw해도 나머지 소켓은 받고, 실패한 소켓은 목록에서 뺀다", () => {
     hub = createRealtimeHub({ flushIntervalMs: 60_000 });
     const broken = fakeSocket();
