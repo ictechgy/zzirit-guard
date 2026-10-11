@@ -61,4 +61,24 @@ describe("AccountSection", () => {
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("연결 해제가 401이면 세션 만료를 알리고 해제됐다고 말하지 않는다", async () => {
+    stubFetch({ "POST /api/channel/disconnect": () => json(401, { error: "unauthorized", message: "세션이 끝났습니다." }) });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const onSignedOut = vi.fn();
+    const owner: MeDto = { ...chatManager, permissions: [...chatManager.permissions, "connect_channel"] };
+    render(<AccountSection me={owner} onSignedOut={onSignedOut} />);
+    await userEvent.click(screen.getByRole("button", { name: "채널 연결 해제" }));
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalledWith("세션이 만료되어 로그아웃했습니다. 채널 연결 해제는 처리되지 않았을 수 있으니, 다시 로그인해 연결 상태를 확인하세요."));
+  });
+
+  it("연결 해제가 no_channel이면 이미 연결된 채널이 없다고 알린다", async () => {
+    stubFetch({ "POST /api/channel/disconnect": () => json(409, { error: "no_channel", message: "채널이 없습니다." }) });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const onSignedOut = vi.fn();
+    const owner: MeDto = { ...chatManager, permissions: [...chatManager.permissions, "connect_channel"] };
+    render(<AccountSection me={owner} onSignedOut={onSignedOut} />);
+    await userEvent.click(screen.getByRole("button", { name: "채널 연결 해제" }));
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalledWith("이미 연결된 채널이 없습니다."));
+  });
 });
