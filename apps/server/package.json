@@ -1,0 +1,33 @@
+{
+  "name": "@zzirit-guard/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "replay": "node dist/tools/replayLoad.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.3",
+    "@fastify/static": "10.1.6",
+    "@fastify/websocket": "11.3.4",
+    "@zzirit-guard/shared": "*",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.12.5",
+    "socket.io-client": "2.0.3",
+    "web-push": "3.6.7",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/socket.io": "2.1.13",
+    "@types/socket.io-client": "1.4.36",
+    "@types/web-push": "3.6.4",
+    "@types/ws": "8.18.2",
+    "socket.io": "2.5.1",
+    "vitest": "5.0.3",
+    "ws": "8.22.0"
+  }
+}
