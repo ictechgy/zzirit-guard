@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 찌리릿 가드 서버 LaunchAgent 템플릿. install-launchd.sh가 __표시__를 실제 경로로 바꿔 설치한다. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.zzirit-guard.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>--env-file=__ENV_FILE__</string>
+    <string>__REPO__/apps/server/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__/apps/server</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__LOG_DIR__/server.log</string>
+  <key>StandardErrorPath</key><string>__LOG_DIR__/server.err.log</string>
+</dict>
+</plist>
