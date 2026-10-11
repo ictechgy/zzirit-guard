@@ -41,6 +41,9 @@ function decryptText(key: Buffer, cipherText: string): string {
     throw new Error("알 수 없는 암호문 형식입니다. DB가 다른 버전에서 만들어졌는지 확인하세요.");
   }
   const raw = Buffer.from(cipherText.slice(CIPHER_PREFIX.length), "base64");
+  if (raw.length < IV_LENGTH + TAG_LENGTH) {
+    throw new Error("저장된 토큰 값이 손상되었거나 잘렸습니다(길이 부족). 스트리머가 채널을 다시 연결하면 새 토큰이 저장됩니다.");
+  }
   const decipher = createDecipheriv("aes-256-gcm", key, raw.subarray(0, IV_LENGTH));
   decipher.setAuthTag(raw.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH));
   return Buffer.concat([decipher.update(raw.subarray(IV_LENGTH + TAG_LENGTH)), decipher.final()]).toString("utf8");
