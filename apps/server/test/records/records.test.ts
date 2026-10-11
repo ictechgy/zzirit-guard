@@ -58,3 +58,31 @@ describe("MinuteStats", () => {
     ]);
   });
 });
+
+describe("MinuteStats 저장 실패", () => {
+  it("저장이 실패하면 누적값을 잃지 않고, 다음 flush에 정확히 한 번 저장한다", () => {
+    let now = 61_000;
+    const database = openDatabase(":memory:");
+    const stats = createMinuteStats(database, () => now);
+    stats.increment("c1", "received", 2);
+    database.exec("DROP TABLE minute_stat");
+    expect(() => stats.flush()).toThrow();
+    database.exec(
+      `CREATE TABLE minute_stat (
+        channel_id TEXT NOT NULL, minute INTEGER NOT NULL,
+        received INTEGER NOT NULL DEFAULT 0, skipped INTEGER NOT NULL DEFAULT 0,
+        deduplicated INTEGER NOT NULL DEFAULT 0, stage1_forwarded INTEGER NOT NULL DEFAULT 0,
+        stage2_done INTEGER NOT NULL DEFAULT 0, stage2_dropped INTEGER NOT NULL DEFAULT 0,
+        candidates INTEGER NOT NULL DEFAULT 0, auto_hidden INTEGER NOT NULL DEFAULT 0,
+        shadow INTEGER NOT NULL DEFAULT 0, invalid_events INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (channel_id, minute)
+      )`,
+    );
+    stats.increment("c1", "received");
+    now = 125_000;
+    stats.flush();
+    expect(stats.recent("c1", 0)).toEqual([
+      expect.objectContaining({ minute: 60_000, received: 3 }),
+    ]);
+  });
+});
