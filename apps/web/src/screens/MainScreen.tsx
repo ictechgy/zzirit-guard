@@ -115,6 +115,7 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
   };
   const { state, reload, reconnect } = useServerState();
   const now = useNow(NOW_REFRESH_MS);
+  // 이 기기가 자동 숨김 끄기를 요청했는지. 상태가 꺼짐으로 바뀌었을 때 시스템이 끈 것과 가르는 데 쓴다(F8).
   const ownDisableRef = useRef(false);
   const actions = useMemo(() => createCandidateActions(onSignedOut, ownDisableRef), [onSignedOut]);
   const systemDisableNotice = useSystemDisableNotice(state.status?.autoHideEnabled ?? null, ownDisableRef);

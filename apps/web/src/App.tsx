@@ -55,6 +55,7 @@ export function App() {
       },
     );
   }, [signOut, attempt]);
+  // '다시 시도': 불러오는 중으로 돌리고 내 정보를 다시 읽는다. 자식에게 넘기므로 렌더마다 같은 함수로 둔다.
   const retry = useCallback(() => {
     setMeState({ kind: "loading" });
     setAttempt((value) => value + 1);

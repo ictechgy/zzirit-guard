@@ -25,6 +25,7 @@ function reloadPage(): void {
  * 오류 내용은 개발자 도구에만 남기고 화면에는 보이지 않는다.
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  /** 처음에는 오류 없음. 자식이 던지면 getDerivedStateFromError가 바꾼다. */
   override state: ErrorBoundaryState = { hasError: false };
 
   /** 자식의 오류를 받으면 대체 화면으로 바꾼다. */

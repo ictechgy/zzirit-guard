@@ -104,15 +104,18 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  */
 export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, isSystemDisableNoticeVisible, onDismissSystemDisableNotice }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<ActionFeedback>(null);
+  // 알림 닫기. ActionToast가 4초 타이머의 의존성으로 쓰므로 렌더마다 같은 함수여야 한다(아니면 타이머가 다시 시작된다).
   const dismissFeedback = useCallback(() => setFeedback(null), []);
   const locks = useActionLocks();
   const run = createRunner(setFeedback, onReload, locks);
   const { lockedKeys } = locks;
   const canHide = me.permissions.includes("hide_message");
   const autoHideEnabled = status?.autoHideEnabled ?? null;
+  // 목록 영역: 이 안을 누르는 동안 구역을 고정한다(스위치·다시 불러오기는 바깥이라 고정하지 않는다).
   const listRef = useRef<HTMLDivElement>(null);
   const stable = useStableSections(sections, listRef);
   const shown = stable.sections;
+  // 자동 숨김 목록 세 개가 함께 쓰는 속성.
   const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions };
   return (
     <section className="screen">
