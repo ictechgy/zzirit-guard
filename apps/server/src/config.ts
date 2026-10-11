@@ -29,7 +29,8 @@ export class ConfigError extends Error {
 /** 환경 변수 검증 규칙. 비밀값은 ops/env.example을 복사한 .env에서 읽는다. */
 const environmentSchema = z.object({
   ZG_PORT: z.coerce.number().int().min(1).max(65535).default(8710),
-  ZG_PUBLIC_ORIGIN: z.url(),
+  /** 공개 출처는 http·https만 허용한다. mailto 등은 origin이 "null"이 되어 Origin 비교를 우회시킬 수 있다. */
+  ZG_PUBLIC_ORIGIN: z.url({ protocol: /^https?$/ }),
   ZG_CHANNEL_ID: z.string().min(1),
   ZG_CHZZK_CLIENT_ID: z.string().min(1),
   ZG_CHZZK_CLIENT_SECRET: z.string().min(1),

@@ -31,6 +31,11 @@ describe("loadConfig", () => {
     expect(() => loadConfig(partial)).toThrow(/ZG_CHZZK_CLIENT_SECRET.*ZG_DATA_DIR|ZG_DATA_DIR.*ZG_CHZZK_CLIENT_SECRET/s);
   });
 
+  it("http·https가 아닌 공개 출처를 거부한다", () => {
+    expect(() => loadConfig({ ...validEnvironment, ZG_PUBLIC_ORIGIN: "mailto:owner@example.com" })).toThrow(ConfigError);
+    expect(() => loadConfig({ ...validEnvironment, ZG_PUBLIC_ORIGIN: "mailto:owner@example.com" })).toThrow(/ZG_PUBLIC_ORIGIN/);
+  });
+
   it("mailto가 아닌 VAPID subject를 거부한다", () => {
     expect(() => loadConfig({ ...validEnvironment, ZG_VAPID_SUBJECT: "owner@example.com" })).toThrow(/ZG_VAPID_SUBJECT/);
   });
