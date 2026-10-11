@@ -28,5 +28,5 @@ export function hasPermission(role: ManagerRole, permission: Permission): boolea
 
 /** 치지직 userRole 문자열을 앱 역할로 바꾼다. 정산 관리자·모르는 역할은 null(접근 불가). */
 export function toManagerRole(userRole: string): ManagerRole | null {
-  return userRole in ROLE_PERMISSIONS ? (userRole as ManagerRole) : null;
+  return Object.hasOwn(ROLE_PERMISSIONS, userRole) ? (userRole as ManagerRole) : null;
 }

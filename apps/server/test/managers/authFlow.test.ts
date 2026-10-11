@@ -20,13 +20,15 @@ let sessions: SessionStore;
 let rules: RuleRepository;
 let roleVerifier: RoleVerifier;
 let connectedCount: number;
+let api: ReturnType<typeof createChzzkApi>;
+let tokenManager: ReturnType<typeof createTokenManager>;
 
 beforeEach(async () => {
   fake = await startFakeChzzk();
   const database = openDatabase(":memory:");
-  const api = createChzzkApi({ apiBase: fake.baseUrl, clientId: "test-client", clientSecret: "test-secret" });
+  api = createChzzkApi({ apiBase: fake.baseUrl, clientId: "test-client", clientSecret: "test-secret" });
   credentialStore = createCredentialStore(database, createTokenCipher(randomBytes(32)), Date.now);
-  const tokenManager = createTokenManager({ store: credentialStore, api, clock: Date.now });
+  tokenManager = createTokenManager({ store: credentialStore, api, clock: Date.now });
   sessions = createSessionStore(database, Date.now);
   rules = createRuleRepository(database, Date.now);
   roleVerifier = createRoleVerifier({ api, tokenManager, credentialStore, clock: Date.now, logger: silentLogger });
@@ -103,12 +105,32 @@ describe("AuthFlow", () => {
     expect(sessions.getById(session.id)).toBeNull();
   });
 
-  it("대기 중인 state는 상한을 넘으면 가장 오래된 것부터 버린다(R20)", async () => {
-    const oldest = stateFor("connect");
-    const states = Array.from({ length: MAX_PENDING_STATES - 1 }, () => stateFor("connect"));
-    const newest = stateFor("connect");
-    await expect(authFlow.complete(fake.grantCode(fake.owner), oldest)).rejects.toBeInstanceOf(AuthError);
-    await expect(authFlow.complete(fake.grantCode(fake.owner), newest)).resolves.toBeDefined();
-    expect(states).toHaveLength(MAX_PENDING_STATES - 1);
+  it("대기 중인 state는 상한을 넘으면 가장 오래된 것 하나만 버린다(R20)", async () => {
+    const states = Array.from({ length: MAX_PENDING_STATES + 1 }, () => stateFor("connect"));
+    await expect(authFlow.complete(fake.grantCode(fake.owner), states[0] as string)).rejects.toBeInstanceOf(AuthError);
+    await expect(authFlow.complete(fake.grantCode(fake.owner), states[1] as string)).resolves.toBeDefined();
+    await expect(authFlow.complete(fake.grantCode(fake.owner), states[MAX_PENDING_STATES] as string)).resolves.toBeDefined();
+  });
+
+  it("다시 로그인·연결해도 지운 기본 규칙은 되살아나지 않는다", async () => {
+    await authFlow.complete(fake.grantCode(fake.owner), stateFor("connect"));
+    const [first] = rules.list(fake.owner.channelId);
+    const total = rules.list(fake.owner.channelId).length;
+    rules.remove(fake.owner.channelId, (first as { id: number }).id);
+    await authFlow.complete(fake.grantCode(fake.owner), stateFor("login"));
+    await authFlow.complete(fake.grantCode(fake.owner), stateFor("connect"));
+    expect(rules.list(fake.owner.channelId)).toHaveLength(total - 1);
+  });
+
+  it("토큰 저장 오류는 AuthError로 감싸지 않고 그대로 던진다", async () => {
+    const failure = new Error("disk full");
+    const failing = createAuthFlow({
+      config: { chzzkClientId: "test-client", chzzkAuthorizeUrl: "https://chzzk.example/account-interlock", publicOrigin: "https://guard.example", channelId: fake.owner.channelId },
+      api, tokenManager: { ...tokenManager, adoptCredential: () => { throw failure; } }, credentialStore, roleVerifier, sessions, rules, clock: Date.now, onChannelConnected: () => undefined,
+    });
+    const state = new URL(failing.authorizeUrl("connect")).searchParams.get("state") as string;
+    const error = await failing.complete(fake.grantCode(fake.owner), state).catch((caught: unknown) => caught);
+    expect(error).toBe(failure);
+    expect(error).not.toBeInstanceOf(AuthError);
   });
 });

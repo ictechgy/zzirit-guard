@@ -25,19 +25,26 @@ export interface RoleVerifierDeps {
 /** 관리자 목록 캐시 기본값(5분, 스펙 7장). */
 const DEFAULT_CACHE_MS = 5 * 60 * 1000;
 
+/**
+ * 갱신에 실패했을 때 이전 관리자 목록을 믿어 줄 최대 시간(30분).
+ * 쓰기가 잠겨 토큰을 못 얻는 동안 무기한으로 옛 목록을 쓰면, 치지직에서 해임된 매니저가
+ * 며칠씩 로그인과 세션을 유지할 수 있다. 일시 장애는 견디되 해임 반영이 이 시간을 넘지 않게 한다.
+ */
+export const MAX_STALE_ROLES_MS = 30 * 60 * 1000;
+
 /** 역할 확인기를 만든다. */
 export function createRoleVerifier(deps: RoleVerifierDeps): RoleVerifier {
   let cache: { fetchedAt: number; roles: StreamingRole[] } | null = null;
   const cacheMs = deps.cacheMs ?? DEFAULT_CACHE_MS;
 
-  /** 캐시가 신선하면 쓰고, 아니면 스트리머 토큰으로 다시 받는다. 받기에 실패하면 오래된 캐시라도 쓴다. */
+  /** 캐시가 신선하면 쓰고, 아니면 스트리머 토큰으로 다시 받는다. 받기에 실패하면 MAX_STALE_ROLES_MS 안의 캐시만 쓴다. */
   async function loadRoles(): Promise<StreamingRole[]> {
     if (cache && deps.clock() - cache.fetchedAt < cacheMs) return cache.roles;
     try {
       cache = { fetchedAt: deps.clock(), roles: await deps.api.getStreamingRoles(await deps.tokenManager.getAccessToken()) };
       return cache.roles;
     } catch (error) {
-      if (!cache) throw new Error(`치지직 관리자 목록을 확인하지 못했습니다(${describeError(error)}). 잠시 뒤 다시 시도하세요.`, { cause: error });
+      if (!cache || deps.clock() - cache.fetchedAt > MAX_STALE_ROLES_MS) throw new Error(`치지직 관리자 목록을 확인하지 못했습니다(${describeError(error)}). 잠시 뒤 다시 시도하세요.`, { cause: error });
       deps.logger.warn("관리자 목록 갱신 실패, 이전 목록을 씁니다", { error: describeError(error) });
       return cache.roles;
     }

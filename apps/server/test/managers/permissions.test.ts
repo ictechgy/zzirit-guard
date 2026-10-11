@@ -12,6 +12,9 @@ describe("permissions", () => {
   it("정산 관리자와 모르는 역할은 접근할 수 없다", () => {
     expect(toManagerRole("STREAMING_SETTLEMENT_MANAGER")).toBeNull();
     expect(toManagerRole("SOMETHING_NEW")).toBeNull();
+    expect(toManagerRole("constructor")).toBeNull();
+    expect(toManagerRole("toString")).toBeNull();
+    expect(toManagerRole("__proto__")).toBeNull();
     expect(toManagerRole("STREAMING_CHAT_MANAGER")).toBe("STREAMING_CHAT_MANAGER");
   });
 });

@@ -94,7 +94,8 @@ function connectChannel(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet) {
     throw new AuthError(`이 서버에 연결할 수 있는 채널이 아닙니다(${user.channelName}). 운영자가 설정한 스트리머 계정으로 로그인하세요.`);
   }
   adoptTokens(deps, user, tokens);
-  deps.rules.seedDefaults(user.channelId);
+  // 규칙이 하나도 없을 때만 기본 규칙을 넣는다. 로그인마다 넣으면 매니저가 일부러 지운 기본 규칙이 되살아난다.
+  if (deps.rules.list(user.channelId).length === 0) deps.rules.seedDefaults(user.channelId);
   return deps.sessions.create({ channelId: user.channelId, channelName: user.channelName, role: "STREAMING_CHANNEL_OWNER" });
 }
 
@@ -108,16 +109,15 @@ async function login(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet) {
   return deps.sessions.create({ channelId: user.channelId, channelName: user.channelName, role });
 }
 
-/** 새 토큰을 채널 연결로 저장하고, 수신기 재시작 등을 알린다. */
+/**
+ * 새 토큰을 채널 연결로 저장하고, 수신기 재시작 등을 알린다.
+ * 저장 오류(DB·암호화 등)는 감싸지 않고 그대로 던진다. AuthError 메시지는 공개 URL로 나가므로 내부 오류를 섞지 않기 위해서다.
+ */
 function adoptTokens(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet): void {
-  try {
-    deps.tokenManager.adoptCredential(
-      { channelId: user.channelId, channelName: user.channelName },
-      { channelId: user.channelId, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, accessExpiresAt: deps.clock() + tokens.expiresInSeconds * 1000 },
-    );
-  } catch (error) {
-    throw new AuthError(error instanceof Error ? error.message : String(error));
-  }
+  deps.tokenManager.adoptCredential(
+    { channelId: user.channelId, channelName: user.channelName },
+    { channelId: user.channelId, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, accessExpiresAt: deps.clock() + tokens.expiresInSeconds * 1000 },
+  );
   deps.roleVerifier.invalidate();
   deps.onChannelConnected();
 }
