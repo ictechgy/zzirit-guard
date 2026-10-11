@@ -118,7 +118,7 @@ export function CandidatesScreen({ me, status, sections, realtimeConnected, acti
   const canHide = me.permissions.includes("hide_message");
   return (
     <section className="screen">
-      <StatusBanner status={status} realtimeConnected={realtimeConnected} />
+      <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
       <div className="toolbar">
         <AutoHideToggle enabled={status?.autoHideEnabled ?? null} canEnable={me.permissions.includes("enable_auto_hide")}
           canDisable={me.permissions.includes("disable_auto_hide")} isBusy={isBusy} onChange={(enabled) => run(() => actions.setAutoHide(enabled))} />

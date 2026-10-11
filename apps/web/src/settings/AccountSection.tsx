@@ -1,6 +1,6 @@
 import type { MeDto } from "@zzirit-guard/shared";
 import { useState } from "react";
-import { ApiError, apiSend, describeApiError, requiresSignIn } from "../api/client";
+import { API_BASE, ApiError, apiSend, describeApiError, requiresSignIn } from "../api/client";
 import { useBusyTask } from "../api/useBusyTask";
 import { ApiNotice } from "../components/ApiNotice";
 import { disablePush, enablePush } from "../push/pushSubscription";
@@ -35,7 +35,10 @@ function describeDisconnectSignInLoss(error: ApiError): string {
     : "세션이 만료되어 로그아웃했습니다. 채널 연결 해제는 처리되지 않았을 수 있으니, 다시 로그인해 연결 상태를 확인하세요.";
 }
 
-/** 계정·장애 알림·로그아웃·(스트리머) 채널 연결 해제. */
+/**
+ * 계정·장애 알림·로그아웃·(스트리머) 채널 다시 연결과 연결 해제.
+ * '채널 다시 연결'은 로그인한 채로 치지직 동의를 다시 받는 링크다. 로그아웃하지 않으므로 장애 알림 구독과 스트리머 한도 예외(B10)가 남는다(F1).
+ */
 export function AccountSection({ me, onSignedOut }: { me: MeDto; onSignedOut(message: string | null): void }) {
   const [message, setMessage] = useState<string | null>(null);
   const busy = useBusyTask();
@@ -58,7 +61,12 @@ export function AccountSection({ me, onSignedOut }: { me: MeDto; onSignedOut(mes
       <p>{me.channelName} · {ROLE_LABELS[me.role]}</p>
       <button type="button" disabled={busy.isBusy} onClick={() => void enableAlerts()}>장애 알림 받기</button>
       <button type="button" disabled={busy.isBusy} onClick={logout}>로그아웃</button>
-      {me.permissions.includes("connect_channel") && <button type="button" className="danger" disabled={busy.isBusy} onClick={disconnect}>채널 연결 해제</button>}
+      {me.permissions.includes("connect_channel") && (
+        <>
+          <a className="button" href={`${API_BASE}/auth/connect`}>채널 다시 연결</a>
+          <button type="button" className="danger" disabled={busy.isBusy} onClick={disconnect}>채널 연결 해제</button>
+        </>
+      )}
       {message && <p role="status">{message}</p>}
       <ApiNotice />
     </section>

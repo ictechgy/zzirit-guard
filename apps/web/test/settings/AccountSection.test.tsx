@@ -35,6 +35,19 @@ describe("AccountSection", () => {
     warn.mockRestore();
   });
 
+  it("스트리머는 로그아웃하지 않고 '채널 다시 연결'로 재연결할 수 있다(F1)", () => {
+    stubFetch({});
+    const owner: MeDto = { ...chatManager, role: "STREAMING_CHANNEL_OWNER", permissions: [...chatManager.permissions, "connect_channel"] };
+    render(<AccountSection me={owner} onSignedOut={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "채널 다시 연결" }).getAttribute("href")).toBe("/auth/connect");
+  });
+
+  it("채팅 운영자에게는 '채널 다시 연결' 링크가 없다(F1)", () => {
+    stubFetch({});
+    render(<AccountSection me={chatManager} onSignedOut={vi.fn()} />);
+    expect(screen.queryByRole("link", { name: "채널 다시 연결" })).toBeNull();
+  });
+
   it("연결 해제 확인을 취소하면 아무 요청도 보내지 않는다", async () => {
     const fetchMock = stubFetch({});
     vi.stubGlobal("confirm", vi.fn(() => false));

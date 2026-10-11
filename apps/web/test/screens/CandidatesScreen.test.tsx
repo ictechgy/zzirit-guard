@@ -179,6 +179,15 @@ describe("CandidatesScreen", () => {
     expect(within(screen.getByRole("status", { name: "서버 상태" })).getByText("정상 동작 중")).toBeTruthy();
   });
 
+  it("쓰기가 잠겨도 채팅 운영자의 배너에는 '채널 다시 연결' 링크가 없고, 스트리머에게는 있다(F1)", () => {
+    const { unmount } = render(<CandidatesScreen me={chatManager} status={{ ...status, writeLocked: true }} sections={buildSections([], NOW)} realtimeConnected actions={fakeActions()} onReload={vi.fn()} />);
+    expect(screen.queryByRole("link", { name: "채널 다시 연결" })).toBeNull();
+    unmount();
+    const owner: MeDto = { ...chatManager, role: "STREAMING_CHANNEL_OWNER", permissions: [...chatManager.permissions, "connect_channel"] };
+    render(<CandidatesScreen me={owner} status={{ ...status, writeLocked: true }} sections={buildSections([], NOW)} realtimeConnected actions={fakeActions()} onReload={vi.fn()} />);
+    expect(within(screen.getByRole("status", { name: "서버 상태" })).getByRole("link", { name: "채널 다시 연결" })).toBeTruthy();
+  });
+
   it("후보가 없으면 안내 문구", () => {
     renderScreen([]);
     expect(screen.getByText(/지금 확인할 후보가 없습니다/)).toBeTruthy();
