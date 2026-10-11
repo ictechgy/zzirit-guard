@@ -12,6 +12,10 @@ export interface DetectionResult {
   decision: "auto_hide" | "candidate" | "pass";
   reason: string;
   ref: MessageRef;
+  /**
+   * 이번 메시지로 떼도배가 막 발동했을 때, 앞선 비권한자 메시지들. 이 메시지의 자체 판정과 무관하게
+   * 소비자가 숨긴다. 떼도배 발동은 한 번뿐이라, 다른 규칙이 이겨도 여기서 빠지면 영영 숨겨지지 않는다.
+   */
   earlierFloodRefs: MessageRef[];
   trivial: boolean;
   duplicate: boolean;
@@ -60,7 +64,7 @@ function evaluate(deps: DetectionPipelineDeps, event: ChatEvent): DetectionResul
   const context = buildContext(deps, event, normalized, flood.triggered);
   const outcome = decide(deps, context);
   const traits = { trivial: isTrivialMessage(normalized), duplicate: deps.duplicates.seen(normalized, event.receivedAt) };
-  const earlierFloodRefs = outcome.reason === "rule:group_flood" ? flood.earlierRefs.filter((item) => !item.privileged) : [];
+  const earlierFloodRefs = flood.triggered ? flood.earlierRefs.filter((item) => !item.privileged) : [];
   return applyPrivilege({ ...outcome, ref, earlierFloodRefs, ...traits });
 }
 
@@ -109,10 +113,14 @@ function isWatched(deps: DetectionPipelineDeps, event: ChatEvent): boolean {
   return deps.auditLog.hasEnforcedAction(event.channelId, event.senderChannelId, event.receivedAt - WATCH_WINDOW_MS);
 }
 
-/** 스트리머·매니저 메시지는 자동 숨김 대신 후보로 낮춘다(Global Constraints). */
+/**
+ * 스트리머·매니저 본인 메시지만 자동 숨김 대신 후보로 낮춘다(Global Constraints).
+ * 앞선 떼도배 메시지는 다른 시청자의 도배이므로 earlierFloodRefs를 그대로 둔다.
+ * 권한자 보호는 권한자 본인 메시지에만 적용되기 때문이다.
+ */
 function applyPrivilege(result: DetectionResult): DetectionResult {
   if (result.decision !== "auto_hide" || !result.ref.privileged) return result;
-  return { ...result, decision: "candidate", reason: `${result.reason}:privileged`, earlierFloodRefs: [] };
+  return { ...result, decision: "candidate", reason: `${result.reason}:privileged` };
 }
 
 /** 채팅 이벤트에서 숨기기·표시에 필요한 값만 뽑는다. */

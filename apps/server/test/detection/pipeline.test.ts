@@ -74,6 +74,23 @@ describe("DetectionPipeline", () => {
     expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["user-1", "user-2", "user-3"]);
   });
 
+  it("권한자가 다섯 번째여도 앞선 시청자 도배는 숨김 대상으로 남는다", () => {
+    const text = "구독하면 선물 드려요 진짜로";
+    for (let user = 1; user <= 4; user += 1) pipeline.evaluate(chat(text, { senderChannelId: `viewer-${user}` }));
+    const fifth = pipeline.evaluate(chat(text, { senderChannelId: "manager-1", userRoleCode: "streaming_channel_manager" }));
+    expect(fifth).toMatchObject({ decision: "candidate", reason: "rule:group_flood:privileged" });
+    expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["viewer-1", "viewer-2", "viewer-3", "viewer-4"]);
+  });
+
+  it("떼도배 발동 메시지가 금칙어 강에 걸려도 앞선 시청자 메시지는 숨김 대상으로 남는다", () => {
+    const text = "구독하면 선물 드려요 진짜로";
+    for (let user = 1; user <= 4; user += 1) pipeline.evaluate(chat(text, { senderChannelId: `viewer-${user}` }));
+    rules.add("c1", "strong", "선물", "m");
+    const fifth = pipeline.evaluate(chat(text, { senderChannelId: "viewer-5" }));
+    expect(fifth.reason).toMatch(/^rule:strong:\d+$/);
+    expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["viewer-1", "viewer-2", "viewer-3", "viewer-4"]);
+  });
+
   it("개인 도배는 다섯 번째부터 후보", () => {
     const decisions = [1, 2, 3, 4, 5].map((index) => pipeline.evaluate(chat(`그냥 말 ${index}`)).decision);
     expect(decisions).toEqual(["pass", "pass", "pass", "pass", "candidate"]);
