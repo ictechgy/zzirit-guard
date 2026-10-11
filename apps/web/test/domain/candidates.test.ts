@@ -75,4 +75,10 @@ describe("판정 목록 갱신", () => {
     expect(pruneVerdicts([verdict(1, { createdAt: 4_000 }), verdict(3, { createdAt: 5_000 }), newest]).map((item) => item.id)).toEqual([3, 2]);
     expect(pruneVerdicts([])).toEqual([]);
   });
+
+  it("판정이 아주 많아도(20만 건) 인자 개수 한도로 실패하지 않는다(F4, Math.max 펼치기 금지)", () => {
+    // 10ms 간격 20만 건: 가장 새 판정(1,999,990ms)에서 VERDICT_KEEP_MS(660,000ms) 안의 66,001건만 남는다.
+    const many = Array.from({ length: 200_000 }, (_unused, index) => verdict(index, { createdAt: index * 10 }));
+    expect(pruneVerdicts(many)).toHaveLength(66_001);
+  });
 });

@@ -1,4 +1,5 @@
 import type { VerdictDto } from "@zzirit-guard/shared";
+import { MAX_LISTED_ROWS } from "../domain/candidates";
 import { formatClockTime } from "../domain/timeFormat";
 import { describeReason } from "../domain/verdictReason";
 import type { ActionRunner, CandidateActions } from "../screens/CandidatesScreen";
@@ -54,26 +55,36 @@ export function AutoHidePendingList({ verdicts, canHide, run, lockedKeys, action
   );
 }
 
-/** 최근 10분 동안 실제로 숨겨진 자동 숨김. 잘못 숨겼으면 오판으로 신고해 규칙을 검토하게 한다(스펙 5.5). */
+/**
+ * 목록이 MAX_LISTED_ROWS를 넘었을 때 그리지 않은 건수를 알린다. 넘지 않으면 그리지 않는다.
+ * @param total 전체 건수
+ */
+function OmittedCount({ total }: { total: number }) {
+  if (total <= MAX_LISTED_ROWS) return null;
+  return <p className="hint">외 {total - MAX_LISTED_ROWS}건</p>;
+}
+
+/** 최근 10분 동안 실제로 숨겨진 자동 숨김(최근 MAX_LISTED_ROWS건만 그린다). 잘못 숨겼으면 오판으로 신고해 규칙을 검토하게 한다(스펙 5.5). */
 export function AutoHiddenList({ verdicts, canHide, run, lockedKeys, actions }: AutoHideListProps) {
   if (verdicts.length === 0) return null;
   return (
     <details className="section section-auto">
       <summary>자동 숨김됨(최근 10분, {verdicts.length}건)</summary>
       <ul className="messages">
-        {verdicts.map((verdict) => (
+        {verdicts.slice(0, MAX_LISTED_ROWS).map((verdict) => (
           <li key={verdict.id} className="message">
             <VerdictSummary verdict={verdict} />
             <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={!canHide || lockedKeys.has(verdictLockKey(verdict.id))} onClick={() => run(verdictLockKey(verdict.id), () => actions.reportFalsePositive(verdict))}>오판</button>
           </li>
         ))}
       </ul>
+      <OmittedCount total={verdicts.length} />
     </details>
   );
 }
 
 /**
- * 자동 숨김 판정인데 보낸 사람이 임시 제한된 것. 메시지가 숨겨졌는지는 알 수 없다(서버가 hidden을 restricted로 덮어쓴다).
+ * 자동 숨김 판정인데 보낸 사람이 임시 제한된 것(최근 MAX_LISTED_ROWS건만 그린다). 메시지가 숨겨졌는지는 알 수 없다(서버가 hidden을 restricted로 덮어쓴다).
  * 숨기기 버튼은 없다: 서버가 restricted 판정의 숨기기를 409로 거절한다. 오판 신고만 둔다.
  */
 export function RestrictedAutoHideList({ verdicts, canHide, run, lockedKeys, actions }: AutoHideListProps) {
@@ -82,13 +93,14 @@ export function RestrictedAutoHideList({ verdicts, canHide, run, lockedKeys, act
     <details className="section section-auto-restricted">
       <summary>사용자 제한됨 (메시지는 아직 보일 수 있음) {verdicts.length}건</summary>
       <ul className="messages">
-        {verdicts.map((verdict) => (
+        {verdicts.slice(0, MAX_LISTED_ROWS).map((verdict) => (
           <li key={verdict.id} className="message">
             <VerdictSummary verdict={verdict} />
             <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={!canHide || lockedKeys.has(verdictLockKey(verdict.id))} onClick={() => run(verdictLockKey(verdict.id), () => actions.reportFalsePositive(verdict))}>오판</button>
           </li>
         ))}
       </ul>
+      <OmittedCount total={verdicts.length} />
     </details>
   );
 }

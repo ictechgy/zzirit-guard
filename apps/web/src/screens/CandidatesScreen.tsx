@@ -1,11 +1,11 @@
 import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
 import { StatusBanner } from "../components/StatusBanner";
-import { countActionable, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { countActionable, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
 
 /** 후보 화면이 부르는 동작. 성공하면 화면에 보여 줄 안내(없으면 null)를 돌려준다. MainScreen이 API로 채우고, 테스트는 가짜를 넘긴다. */
@@ -47,11 +47,14 @@ export interface CandidatesScreenProps {
 /** 화면에 남기는 동작 결과. */
 type Feedback = { kind: "ok" | "error"; message: string } | null;
 
-/** 사람 단위 구역의 제목과 종류. 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위). */
-const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kind: GroupKind; title: string }> = [
-  { key: "care", kind: "care", title: "도움 필요(자해·자살 신호)" },
-  { key: "shadow", kind: "shadow", title: "켜져 있었으면 숨겼을 메시지" },
-  { key: "candidates", kind: "candidate", title: "후보" },
+/**
+ * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수(null이면 모두). 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
+ * 섀도만 줄이는 이유: 처리하지 않아도 되는 정보라 떼도배 때 수백 명이 쌓여도 다 그릴 필요가 없다(F4). 도움 필요·후보는 매니저가 처리해야 해서 모두 그린다.
+ */
+const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kind: GroupKind; title: string; limit: number | null }> = [
+  { key: "care", kind: "care", title: "도움 필요(자해·자살 신호)", limit: null },
+  { key: "shadow", kind: "shadow", title: "켜져 있었으면 숨겼을 메시지", limit: MAX_LISTED_ROWS },
+  { key: "candidates", kind: "candidate", title: "후보", limit: null },
 ];
 
 /**
@@ -87,8 +90,12 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
   }
 }
 
-/** 후보 화면(스펙 6장 ①): 상태 배너·스위치·구역별 사람 단위 묶음·자동 숨김 목록. */
-export function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload }: CandidatesScreenProps) {
+/**
+ * 후보 화면(스펙 6장 ①): 상태 배너·스위치·구역별 사람 단위 묶음·자동 숨김 목록.
+ * 왜 memo인가: MainScreen은 채팅 묶음(chat_batch)이 올 때마다(초당 최대 4번) 다시 그려지는데, 후보 화면의 속성은 그때 바뀌지 않는다.
+ * 감싸지 않으면 판정 수천 건의 목록을 초당 4번 다시 그려 휴대폰이 멈춘다(F4). 속성은 MainScreen이 useMemo·useCallback으로 고정한다.
+ */
+export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const locks = useActionLocks();
   const run = createRunner(setFeedback, onReload, locks);
@@ -105,8 +112,8 @@ export function CandidatesScreen({ me, status, sections, realtimeConnected, acti
         <button type="button" onClick={onReload}>다시 불러오기</button>
       </div>
       <FeedbackLine feedback={feedback} />
-      {GROUP_SECTIONS.map(({ key, kind, title }) => (
-        <GroupSection key={key} title={title} groups={sections[key]} kind={kind} me={me} run={run} lockedKeys={lockedKeys} actions={actions} />
+      {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
+        <GroupSection key={key} title={title} groups={sections[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} actions={actions} />
       ))}
       {countActionable(sections) === 0 && <p className="empty">지금 확인할 후보가 없습니다.</p>}
       <AutoHidePendingList verdicts={sections.autoHidePending} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
@@ -114,7 +121,7 @@ export function CandidatesScreen({ me, status, sections, realtimeConnected, acti
       <RestrictedAutoHideList verdicts={sections.restrictedAfterAutoHide} canHide={canHide} run={run} lockedKeys={lockedKeys} actions={actions} />
     </section>
   );
-}
+});
 
 /** 동작 결과 한 줄. 오류는 alert, 안내는 status로 읽어 준다. */
 function FeedbackLine({ feedback }: { feedback: Feedback }) {
@@ -128,6 +135,8 @@ interface GroupSectionProps {
   title: string;
   /** 이 구역의 사람 묶음. */
   groups: readonly SenderGroup[];
+  /** 그릴 최대 묶음 수. null이면 모두 그린다. 넘친 묶음은 "외 N명"으로 알린다. */
+  limit: number | null;
   /** 카드 종류. */
   kind: GroupKind;
   /** 로그인한 매니저. */
@@ -141,14 +150,16 @@ interface GroupSectionProps {
 }
 
 /** 구역 하나. 비어 있으면 그리지 않는다. */
-function GroupSection({ title, groups, kind, me, run, lockedKeys, actions }: GroupSectionProps) {
+function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, actions }: GroupSectionProps) {
   if (groups.length === 0) return null;
+  const shown = limit === null ? groups : groups.slice(0, limit);
   return (
     <section className={`section section-${kind}`}>
       <h2>{title}</h2>
-      {groups.map((group) => (
+      {shown.map((group) => (
         <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} actions={actions} />
       ))}
+      {groups.length > shown.length && <p className="hint">외 {groups.length - shown.length}명</p>}
     </section>
   );
 }

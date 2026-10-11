@@ -208,6 +208,28 @@ describe("CandidatesScreen", () => {
     expect(within(screen.getByRole("status", { name: "서버 상태" })).getByRole("link", { name: "채널 다시 연결" })).toBeTruthy();
   });
 
+  it("자동 숨김됨·사용자 제한됨 목록은 최근 50건만 그리고 나머지는 '외 N건'으로 줄인다(F4)", () => {
+    const hidden = Array.from({ length: 60 }, (_unused, index) => verdict(index + 1, { decision: "auto_hide", status: "hidden" }));
+    const restricted = Array.from({ length: 55 }, (_unused, index) => verdict(index + 101, { decision: "auto_hide", status: "restricted", createdAt: NOW - index * 10 - 5 }));
+    renderScreen([...hidden, ...restricted]);
+    const hiddenDetails = screen.getByText(/자동 숨김됨\(최근 10분, 60건\)/).closest("details") as HTMLElement;
+    expect(within(hiddenDetails).getAllByRole("listitem")).toHaveLength(50);
+    expect(within(hiddenDetails).getByText("외 10건")).toBeTruthy();
+    expect(within(hiddenDetails).getByText(/나쁜 말 1$/)).toBeTruthy();
+    const restrictedDetails = screen.getByText(/사용자 제한됨/).closest("details") as HTMLElement;
+    expect(within(restrictedDetails).getAllByRole("listitem")).toHaveLength(50);
+    expect(within(restrictedDetails).getByText("외 5건")).toBeTruthy();
+  });
+
+  it("섀도 구역은 최근 50명만 그리고 나머지는 '외 N명'으로 줄인다(F4)", () => {
+    const shadows = Array.from({ length: 53 }, (_unused, index) => verdict(index + 1, { decision: "shadow", senderChannelId: `s${index}`, senderNickname: `도배러${index}` }));
+    renderScreen(shadows);
+    const section = screen.getByRole("heading", { name: /켜져 있었으면 숨겼을 메시지/ }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("article")).toHaveLength(50);
+    expect(within(section).getByText("외 3명")).toBeTruthy();
+    expect(within(section).getByText("도배러0")).toBeTruthy();
+  });
+
   it("후보가 없으면 안내 문구", () => {
     renderScreen([]);
     expect(screen.getByText(/지금 확인할 후보가 없습니다/)).toBeTruthy();

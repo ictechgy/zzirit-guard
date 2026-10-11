@@ -1,5 +1,5 @@
 import type { Decision } from "@zzirit-guard/shared";
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { ChatLineEntry } from "../state/serverReducer";
 
 /** 판정 표시 이름. 통과는 표시하지 않는다. */
@@ -13,8 +13,11 @@ export interface LiveChatScreenProps {
   lines: readonly ChatLineEntry[];
 }
 
-/** 실시간 채팅 화면(스펙 6장 ②): 위험 메시지 강조, 위험한 것만 보기. 최신 줄이 위로 온다. */
-export function LiveChatScreen({ lines }: LiveChatScreenProps) {
+/**
+ * 실시간 채팅 화면(스펙 6장 ②): 위험 메시지 강조, 위험한 것만 보기. 최신 줄이 위로 온다.
+ * 왜 memo인가: 판정·상태 이벤트로 MainScreen이 다시 그려져도 채팅 줄이 그대로면 300줄을 다시 그리지 않게 한다(F4).
+ */
+export const LiveChatScreen = memo(function LiveChatScreen({ lines }: LiveChatScreenProps) {
   const [riskyOnly, setRiskyOnly] = useState(false);
   const visible = (riskyOnly ? lines.filter((line) => line.decision !== "pass") : lines).slice().reverse();
   return (
@@ -35,4 +38,4 @@ export function LiveChatScreen({ lines }: LiveChatScreenProps) {
       </ol>
     </section>
   );
-}
+});

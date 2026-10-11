@@ -7,9 +7,9 @@ const TOTAL_FIELDS: ReadonlyArray<[keyof Omit<MinuteStatDto, "minute">, string]>
   ["shadow", "섀도"], ["auto_hidden", "자동 숨김"], ["invalid_events", "형식 오류 이벤트"],
 ];
 
-/** 가장 바빴던 1분의 초당 채팅 수. */
+/** 가장 바빴던 1분의 초당 채팅 수. reduce로 구한다(Math.max 펼치기는 행이 많으면 인자 개수 한도로 실패한다, F4). */
 function peakPerSecond(rows: readonly MinuteStatDto[]): number {
-  return Math.max(0, ...rows.map((row) => row.received)) / 60;
+  return rows.reduce((peak, row) => Math.max(peak, row.received), 0) / 60;
 }
 
 /** 최근 1시간 통계. 1단계의 핵심 측정값(초당 채팅량·건너뛰기·중복 비율)을 보여 준다(스펙 15장). */

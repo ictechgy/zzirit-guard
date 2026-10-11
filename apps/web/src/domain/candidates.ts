@@ -49,6 +49,12 @@ export interface CandidateSections {
   restrictedAfterAutoHide: VerdictDto[];
 }
 
+/**
+ * 처리를 기다리지 않는 정보 목록(자동 숨김됨·사용자 제한됨·섀도)에 그릴 최대 행 수(최근 50).
+ * 왜: 떼도배 한 번에 수천 건이 쌓이면 이 목록들을 그리는 데만 휴대폰에서 수백 ms가 걸린다(F4). 나머지는 "외 N건"으로 줄인다.
+ */
+export const MAX_LISTED_ROWS = 50;
+
 /** 판정 목록을 화면 구역으로 나눈다. now보다 CANDIDATE_WINDOW_MS 넘게 지난 판정은 뺀다. */
 export function buildSections(verdicts: readonly VerdictDto[], now: number): CandidateSections {
   const recent = verdicts.filter((verdict) => verdict.createdAt >= now - CANDIDATE_WINDOW_MS);
@@ -98,7 +104,9 @@ export function applyVerdictStatus(verdicts: readonly VerdictDto[], verdictId: n
  */
 export function pruneVerdicts(verdicts: readonly VerdictDto[]): VerdictDto[] {
   if (verdicts.length === 0) return [];
-  const cutoff = Math.max(...verdicts.map((verdict) => verdict.createdAt)) - VERDICT_KEEP_MS;
+  // 왜 reduce인가: Math.max(...배열)은 원소마다 인자를 하나씩 넘겨, 판정이 많으면 인자 개수 한도(iOS JavaScriptCore는 특히 작다)로 실패한다(F4).
+  const newestAt = verdicts.reduce((newest, verdict) => Math.max(newest, verdict.createdAt), Number.NEGATIVE_INFINITY);
+  const cutoff = newestAt - VERDICT_KEEP_MS;
   return verdicts.filter((verdict) => verdict.createdAt >= cutoff);
 }
 
