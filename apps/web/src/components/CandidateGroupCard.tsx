@@ -71,11 +71,11 @@ function MessageRow({ verdict, kind, canHide, run, isBusy, actions }: MessageRow
       <span className="content">{verdict.content}</span>
       <span className="reason">{describeReason(verdict.reason)}</span>
       <span className="buttons">
-        <button type="button" aria-label={`${verdict.senderNickname}의 메시지 숨기기`} disabled={!canHide || isBusy} onClick={() => run(() => actions.hide(verdict))}>숨기기</button>
+        <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 숨기기`} disabled={!canHide || isBusy} onClick={() => run(() => actions.hide(verdict))}>숨기기</button>
         {kind === "shadow" ? (
-          <button type="button" aria-label={`${verdict.senderNickname}의 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
+          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
         ) : (
-          <button type="button" aria-label={`${verdict.senderNickname}의 메시지 무시`} disabled={!canHide || isBusy} onClick={() => run(() => actions.ignore(verdict))}>무시</button>
+          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 무시`} disabled={!canHide || isBusy} onClick={() => run(() => actions.ignore(verdict))}>무시</button>
         )}
       </span>
     </li>

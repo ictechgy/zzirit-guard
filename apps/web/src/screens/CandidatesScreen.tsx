@@ -58,7 +58,7 @@ function createRunner(setFeedback: (feedback: Feedback) => void, onReload: () =>
   return (task) => {
     if (!busy.tryStart()) return;
     setFeedback(null);
-    task().then(
+    startTask(task).then(
       (message) => setFeedback(message ? { kind: "ok", message } : null),
       (error: unknown) => {
         setFeedback({ kind: "error", message: describeApiError(error) });
@@ -66,6 +66,18 @@ function createRunner(setFeedback: (feedback: Feedback) => void, onReload: () =>
       },
     ).finally(busy.finish);
   };
+}
+
+/**
+ * 동작을 바로 시작하되, 동기 예외도 거절된 Promise로 바꿔 돌려준다.
+ * 왜 필요한가: task가 동기로 던지면 .finally에 닿지 못해 진행 중 잠금이 풀리지 않고 오류도 화면에 남지 않는다.
+ */
+function startTask(task: () => Promise<string | null>): Promise<string | null> {
+  try {
+    return task();
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 /** 동작 진행 여부 관문. 같은 요청이 두 번 가지 않게 막는다. */

@@ -43,8 +43,8 @@ export function AutoHidePendingList({ verdicts, canHide, run, isBusy, actions }:
           <li key={verdict.id} className="message">
             <VerdictSummary verdict={verdict} />
             <span className="buttons">
-              <button type="button" aria-label={`${verdict.senderNickname}의 메시지 숨기기`} disabled={!canHide || isBusy} onClick={() => run(() => actions.hide(verdict))}>숨기기</button>
-              <button type="button" aria-label={`${verdict.senderNickname}의 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
+              <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 숨기기`} disabled={!canHide || isBusy} onClick={() => run(() => actions.hide(verdict))}>숨기기</button>
+              <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
             </span>
           </li>
         ))}
@@ -63,7 +63,7 @@ export function AutoHiddenList({ verdicts, canHide, run, isBusy, actions }: Auto
         {verdicts.map((verdict) => (
           <li key={verdict.id} className="message">
             <VerdictSummary verdict={verdict} />
-            <button type="button" aria-label={`${verdict.senderNickname}의 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
+            <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
           </li>
         ))}
       </ul>
@@ -84,7 +84,7 @@ export function RestrictedAutoHideList({ verdicts, canHide, run, isBusy, actions
         {verdicts.map((verdict) => (
           <li key={verdict.id} className="message">
             <VerdictSummary verdict={verdict} />
-            <button type="button" aria-label={`${verdict.senderNickname}의 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
+            <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
           </li>
         ))}
       </ul>
