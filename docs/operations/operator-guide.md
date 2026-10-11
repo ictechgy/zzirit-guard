@@ -43,7 +43,7 @@ mkdir -p ~/Library/Application\ Support/zzirit-guard
 cp ops/env.example ~/Library/Application\ Support/zzirit-guard/.env
 chmod 600 ~/Library/Application\ Support/zzirit-guard/.env
 ```
-`.env`를 채운다: `ZG_PUBLIC_ORIGIN`(Funnel 주소), `ZG_CHANNEL_ID`(스트리머 채널 ID: 채널 주소 `chzzk.naver.com/<채널ID>`의 끝부분), Client ID·Secret, `ZG_DATA_DIR`, `ZG_WEB_DIST`(`<설치 경로>/apps/web/dist`), VAPID 키 3개.
+`.env`를 채운다(**`ZG_DATA_DIR`·`ZG_WEB_DIST`는 `~` 없는 절대 경로**여야 한다. `--env-file`은 `~`를 풀지 않는다): `ZG_PUBLIC_ORIGIN`(Funnel 주소), `ZG_CHANNEL_ID`(스트리머 채널 ID: 채널 주소 `chzzk.naver.com/<채널ID>`의 끝부분), Client ID·Secret, `ZG_DATA_DIR`, `ZG_WEB_DIST`(`<설치 경로>/apps/web/dist`), VAPID 키 3개.
 
 ## 7. 서버 시작·잠자기·재부팅
 ```bash
@@ -55,15 +55,17 @@ sudo pmset -a autorestart 1           # 정전 뒤 전기가 들어오면 켜지
 - **FileVault를 켜면 macOS는 자동 로그인을 쓸 수 없다.** 그래서 정전·재부팅 뒤에는 맥 미니가 FileVault 잠금 화면에서 멈추고, 누군가 맥 미니 앞에서 암호를 넣어 로그인해야 Tailscale과 서버가 뜬다. 원격으로는 풀 수 없다.
   - 계획한 재시작(macOS 업데이트 등)은 `sudo fdesetup authrestart`로 하면 다음 한 번의 재시작에서 잠금을 건너뛴다. 이 맥이 지원하는지 먼저 `man fdesetup`으로 확인한다.
   - 방송 전 점검(11장)에서 화면이 열리는지 꼭 확인한다. 정전이 잦은 곳이면 무정전 전원 장치(UPS)를 고려한다.
+- `install-launchd.sh`는 root(sudo)로 실행하면 거절한다. 서버를 돌릴 사용자로 실행한다. 로그 폴더는 700, 로그 파일은 600으로 만든다. node 경로가 버전 관리자 shim이면 경고를 낸다.
 - 재시작: `launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server`
 
 ## 8. 로그
-- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`. 채팅 원문은 남지 않는다(식별자만).
+- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`. 채팅 원문은 남지 않는다(식별자만). 다만 **로그에는 매니저 채널 ID가 남으므로 소유자만 읽을 수 있게(폴더 700, 파일 600) 둔다.**
 - **newsyslog 같은 자동 회전은 쓰지 않는다.** launchd는 로그 파일을 서버를 띄울 때 한 번만 열고 서버도 파일을 다시 열지 않는다. 그래서 회전 도구가 파일을 옮기면 서버는 옮겨진 옛 파일에 계속 쓰고, 압축 회전이 옛 파일을 지우면 그 뒤 로그가 사라진다.
 - 가끔 `ls -lh ~/Library/Logs/zzirit-guard`로 크기를 보고, 커졌으면 서버를 멈추고 옮긴 뒤 다시 띄운다.
 ```bash
 launchctl bootout gui/$(id -u)/com.zzirit-guard.server
 cd ~/Library/Logs/zzirit-guard && for name in server server.err; do [[ -f $name.log ]] && mv $name.log $name-$(date +%Y%m%d).log; done
+chmod 600 server*.log   # 옮긴 파일도 소유자만 읽게(새 파일은 install-launchd.sh가 600으로 만든다)
 <설치 경로>/ops/scripts/install-launchd.sh
 ```
 
@@ -76,10 +78,11 @@ cd ~/Library/Logs/zzirit-guard && for name in server server.err; do [[ -f $name.
 ## 10. 매니저 안내
 1. 치지직에서 채널 관리자 또는 채팅 운영자로 등록돼 있어야 한다. **방금 등록한 매니저는 최대 5분 동안 로그인이 거부될 수 있다**(서버가 관리자 목록을 5분 동안 캐시한다). 5분 뒤 다시 시도한다.
    치지직 호출 오류가 30분을 넘게 이어지면 캐시도 쓰지 않아 매니저 로그인이 거절된다.
-2. 치지직에서 매니저를 해제하면, 서버가 5분마다 역할을 다시 확인하고 목록 캐시도 최대 5분이라 **최대 약 10분 안에** 그 사람의 화면이 로그인 화면으로 돌아간다.
+2. 치지직에서 매니저를 해제하면, 서버가 5분마다 역할을 다시 확인하고 목록 캐시도 최대 5분이라 **치지직 API가 응답하는 동안에는 최대 약 10분 안에** 그 사람의 화면이 로그인 화면으로 돌아간다. 치지직 API가 장애이면 확인이 실패해도 세션을 유지하므로, 해임된 매니저는 API가 회복되거나 세션 만료(12시간) 전까지 기존 세션을 쓸 수 있다. 30분이 넘으면 막히는 것은 새 로그인뿐이다. 로그에 `역할 재확인 실패`가 보이면 이 상황이다.
 3. 휴대폰으로 Funnel 주소 → "매니저 로그인".
 4. iPhone: Safari 공유 → "홈 화면에 추가" 후 그 앱에서 "기록·설정 → 계정 → 장애 알림 받기"(iOS 16.4 이상). 홈 화면 앱 안에서 치지직 로그인이 끝나는지는 아직 실기기로 확인하지 않았다(실기기 점검표). 확인한 결과와, 안 될 때의 방법을 이 장에 적는다.
-5. 로그아웃하면 그 기기의 장애 알림 구독도 해지된다.
+5. 푸시 알림은 Funnel HTTPS 주소에서만 구독할 수 있고, 서버는 FCM·Mozilla autopush·`*.push.apple.com`·`*.notify.windows.com` 구독만 받는다.
+6. 로그아웃하면 그 기기의 장애 알림 구독도 해지된다.
 
 ## 11. 방송 전 점검(기록·설정 → 상태 점검)
 - 이 표는 15초마다 서버에서 다시 읽는다.
@@ -96,6 +99,7 @@ cd ~/Library/Logs/zzirit-guard && for name in server server.err; do [[ -f $name.
 | 로그인 화면에 "요청이 너무 많습니다" | 잠시 기다렸다 다시 한다. 계속되면 누군가 로그인 주소를 반복해서 부르는 것이므로 로그를 본다. 이미 로그인한 스트리머는 재연결할 수 있다(18장) |
 | 자동 숨김이 저절로 꺼짐 | 기록·설정 → 감사 기록에서 이유("1분 한도 초과"·"치지직 호출 실패 증가")를 확인하고 규칙을 고친다 |
 | 후보 화면 "숨김 대기·실패"에 항목이 남음 | 스위치가 꺼져 취소됐거나 치지직 호출이 실패한 자동 숨김이다. 필요하면 '숨기기'로 직접 숨긴다 |
+| 서버가 계속 재시작됨(설정 오류) | 설정 오류면 서버가 종료되고 launchd가 다시 띄우는 일을 되풀이한다(실패 종료일 때만 재시작, 10초 간격). `server.err.log`를 보고 `.env`를 고친다. 멈추려면 `launchctl bootout gui/$(id -u)/com.zzirit-guard.server` |
 | 웹을 다시 빌드한 뒤 화면이 비어 있음 | 서버를 재시작한다(14장) |
 
 ## 13. 백업과 복원
@@ -109,6 +113,7 @@ cp backups/zzirit-guard-YYYYMMDD-HHMMSS.sqlite zzirit-guard.sqlite
 chmod 600 zzirit-guard.sqlite
 <설치 경로>/ops/scripts/install-launchd.sh
 ```
+- 복원한 DB에서 보관 기간이 지난 내용은 다음 매일 정리(서버 시작 5분 뒤, 그 뒤 매일)가 돌 때까지 남아 있다.
 - 같은 맥(같은 키체인 키)에서만 토큰을 읽을 수 있다.
 
 ### 보관 기간

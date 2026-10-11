@@ -12,7 +12,7 @@
   </array>
   <key>WorkingDirectory</key><string>__REPO__/apps/server</string>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>StandardOutPath</key><string>__LOG_DIR__/server.log</string>
   <key>StandardErrorPath</key><string>__LOG_DIR__/server.err.log</string>
