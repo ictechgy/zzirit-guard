@@ -47,4 +47,25 @@ describe("MainScreen", () => {
     await userEvent.click(screen.getByRole("button", { name: /실시간 채팅/ }));
     expect((screen.getByRole("checkbox", { name: "위험한 것만 보기" }) as HTMLInputElement).checked).toBe(true);
   });
+
+  it("처음 열 때까지 설정 화면을 마운트하지 않아 설정 API를 부르지 않는다", () => {
+    const fetchMock = stubFetch({});
+    hookState.current = { ...initialServerState };
+    render(<MainScreen me={me} onSignedOut={() => undefined} />);
+    const paths = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(paths.filter((path) => /chat-settings|audit|rules|settings|stats|false-positives/.test(path))).toEqual([]);
+  });
+
+  it("설정 탭을 한 번 연 뒤에는 다른 탭으로 가도 마운트를 유지해 다시 읽지 않는다", async () => {
+    const fetchMock = stubFetch({});
+    hookState.current = { ...initialServerState };
+    render(<MainScreen me={me} onSignedOut={() => undefined} />);
+    await userEvent.click(screen.getByRole("button", { name: "기록·설정" }));
+    const callsAfterFirstVisit = fetchMock.mock.calls.length;
+    expect(callsAfterFirstVisit).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: /^후보/ }));
+    await userEvent.click(screen.getByRole("button", { name: "기록·설정" }));
+    expect(fetchMock.mock.calls).toHaveLength(callsAfterFirstVisit);
+    expect(document.querySelector(".settings")).not.toBeNull();
+  });
 });

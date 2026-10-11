@@ -55,6 +55,12 @@ function createCandidateActions(onSignedOut: (message: string | null) => void): 
 /** 로그인 뒤 본 화면: 탭 3개(스펙 6장). 세션이 끝나면 로그인 화면으로 돌아간다. */
 export function MainScreen({ me, onSignedOut }: MainScreenProps) {
   const [tab, setTab] = useState<Tab>("candidates");
+  // 왜 처음 방문 때 마운트하나: 설정 화면은 마운트되자마자 감사 기록·규칙·통계와 치지직 API를 직접 부르는 /api/chat-settings를 읽고 15초 상태 갱신을 시작한다. 설정을 열지 않는 매니저에게는 필요 없는 호출이다.
+  const [hasVisitedSettings, setHasVisitedSettings] = useState(false);
+  const changeTab = (next: Tab) => {
+    if (next === "settings") setHasVisitedSettings(true);
+    setTab(next);
+  };
   const { state, reload, reconnect } = useServerState();
   const now = useNow(NOW_REFRESH_MS);
   const actions = useMemo(() => createCandidateActions(onSignedOut), [onSignedOut]);
@@ -67,17 +73,19 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
     <div className="app">
       {state.loadError && <p className="error" role="alert">{state.loadError}</p>}
       {state.realtimeRejected && <RealtimeRejectedNotice onRetry={reconnect} onSignedOut={onSignedOut} />}
-      {/* 세 화면을 모두 마운트해 두고 숨기기만 한다: 탭을 오가도 진행 중인 요청 결과·처리 중 잠금·채팅 필터가 사라지지 않는다. */}
+      {/* 후보·채팅은 처음부터, 설정은 처음 열 때 마운트하고 이후에는 숨기기만 한다: 탭을 오가도 진행 중인 요청 결과·처리 중 잠금·채팅 필터가 사라지지 않는다. */}
       <div hidden={tab !== "candidates"}>
         <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected} actions={actions} onReload={reload} />
       </div>
       <div hidden={tab !== "chat"}>
         <LiveChatScreen lines={state.chatLines} />
       </div>
-      <div hidden={tab !== "settings"}>
-        <SettingsScreen me={me} onSignedOut={onSignedOut} />
-      </div>
-      <TabBar active={tab} onChange={setTab} pendingCount={countActionable(sections)} />
+      {hasVisitedSettings && (
+        <div hidden={tab !== "settings"}>
+          <SettingsScreen me={me} onSignedOut={onSignedOut} />
+        </div>
+      )}
+      <TabBar active={tab} onChange={changeTab} pendingCount={countActionable(sections)} />
     </div>
   );
 }

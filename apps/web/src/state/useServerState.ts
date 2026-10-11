@@ -55,7 +55,7 @@ export function useServerState(): ServerConnection {
 
 /**
  * 조회기와 실시간 연결을 만든다. 모든 콜백은 이 묶음이 살아 있을 때만 상태를 바꾼다.
- * 왜 mounted 깃발인가: stop()이 정리 중에 onConnectionChange(false)를 동기로 부르는데, 그때는 이미 화면이 사라졌거나 다음 effect가 새 묶음을 만든 뒤라 옛 묶음이 상태를 건드리면 안 된다.
+ * 왜 isMounted 깃발인가: stop()이 정리 중에 onConnectionChange(false)를 동기로 부르는데, 그때는 이미 화면이 사라졌거나 다음 effect가 새 묶음을 만든 뒤라 옛 묶음이 상태를 건드리면 안 된다.
  * @param dispatch 리듀서 디스패치
  * @returns 조회기·연결·닫기 함수
  */
