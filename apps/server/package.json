@@ -9,9 +9,11 @@
   },
   "dependencies": {
     "@zzirit-guard/shared": "*",
+    "better-sqlite3": "13.0.3",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "vitest": "5.0.3"
   }
 }
