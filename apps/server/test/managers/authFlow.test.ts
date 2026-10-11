@@ -61,12 +61,12 @@ describe("AuthFlow", () => {
   });
 
   it("설정한 채널이 아니면 연결을 거부한다(공개 주소 가로채기 방지)", async () => {
-    await expect(authFlow.complete(fake.grantCode(managerUser), stateFor("connect"))).rejects.toThrow(/연결할 수 있는 채널이 아닙니다/);
+    await expect(authFlow.complete(fake.grantCode(managerUser), stateFor("connect"))).rejects.toMatchObject({ code: "not_allowed_channel", message: expect.stringMatching(/연결할 수 있는 채널이 아닙니다/) });
     expect(credentialStore.loadChannel()).toBeNull();
   });
 
   it("연결 전에는 로그인할 수 없다", async () => {
-    await expect(authFlow.complete(fake.grantCode(managerUser), stateFor("login"))).rejects.toThrow(/스트리머가 먼저/);
+    await expect(authFlow.complete(fake.grantCode(managerUser), stateFor("login"))).rejects.toMatchObject({ code: "no_channel", message: expect.stringMatching(/스트리머가 먼저/) });
   });
 
   it("관리자 목록에 있는 매니저는 그 역할로, 없으면 거부한다", async () => {
@@ -76,13 +76,14 @@ describe("AuthFlow", () => {
     const { session } = await authFlow.complete(fake.grantCode(managerUser), stateFor("login"));
     expect(session.role).toBe("STREAMING_CHAT_MANAGER");
     const stranger = { channelId: "stranger", channelName: "모르는 사람" };
-    await expect(authFlow.complete(fake.grantCode(stranger), stateFor("login"))).rejects.toThrow(/매니저가 아닙니다/);
+    await expect(authFlow.complete(fake.grantCode(stranger), stateFor("login"))).rejects.toMatchObject({ code: "not_manager", message: expect.stringMatching(/매니저가 아닙니다/) });
   });
 
   it("state는 한 번만 쓸 수 있다", async () => {
     const state = stateFor("connect");
     await authFlow.complete(fake.grantCode(fake.owner), state);
     await expect(authFlow.complete(fake.grantCode(fake.owner), state)).rejects.toBeInstanceOf(AuthError);
+    await expect(authFlow.complete(fake.grantCode(fake.owner), state)).rejects.toMatchObject({ code: "state_mismatch" });
   });
 
   it("스트리머가 로그인하면 새 토큰으로 바꿔 둔다", async () => {

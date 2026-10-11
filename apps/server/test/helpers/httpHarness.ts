@@ -62,7 +62,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     authorizeUrl: (purpose) => `https://chzzk.example/account-interlock?purpose=${purpose}&state=test-state`,
     /** 기본 가짜 흐름은 authorizeUrl이 내준 state(test-state)만 대기 중으로 본다. */
     hasPendingState: (state) => state === "test-state",
-    complete: async () => { throw new AuthError("이 채널의 매니저가 아닙니다."); },
+    complete: async () => { throw new AuthError("이 채널의 매니저가 아닙니다.", "not_manager"); },
     ...authFlowOverrides,
   };
   const app = await buildHttpServer({ config: { publicOrigin: ORIGIN, webDistDirectory: options.webDistDirectory ?? "/nonexistent-web-dist" }, sessions, authFlow, hub, services, logger: silentLogger });

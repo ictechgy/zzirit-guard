@@ -1,15 +1,20 @@
 import type { MeDto } from "@zzirit-guard/shared";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, apiGet, describeApiError } from "./api/client";
+import { describeLoginError } from "./domain/loginError";
 import { LoginScreen } from "./screens/LoginScreen";
 import { MainScreen } from "./screens/MainScreen";
 
 /** 로그인 상태. signedOut의 message는 로그인 화면에 보여 줄 안내(세션 종료 이유, 409 no_channel 문구 등)다. */
 type MeState = { kind: "loading" } | { kind: "signedOut"; message: string | null } | { kind: "signedIn"; me: MeDto };
 
-/** 주소의 loginError(서버 콜백·한도 초과가 넣은 로그인 실패 이유)를 읽는다. */
+/**
+ * 주소의 loginError(서버 콜백·한도 초과가 넣은 로그인 실패 이유 코드)를 읽어 정해진 문구로 바꾼다. 없으면 null.
+ * 주소의 글을 그대로 보여 주지 않는다: 모르는 값은 일반 실패 문구가 된다(F10).
+ */
 function readLoginError(search: string): string | null {
-  return new URLSearchParams(search).get("loginError");
+  const code = new URLSearchParams(search).get("loginError");
+  return code === null ? null : describeLoginError(code);
 }
 
 /** 주소에서 loginError만 지운다(다른 쿼리·해시는 그대로). 주소 표시줄과 기록에 낡은 실패 이유가 남지 않게 한다. */

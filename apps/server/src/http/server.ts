@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
-import type { RealtimeEvent } from "@zzirit-guard/shared";
+import type { LoginErrorCode, RealtimeEvent } from "@zzirit-guard/shared";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import { z } from "zod";
@@ -108,8 +108,6 @@ const AUTH_START_LIMIT_PER_MINUTE = 30;
 const AUTH_CALLBACK_LIMIT_PER_MINUTE = 60;
 /** 한도를 다시 채우는 기준 시간(1분). 이 시간 동안 한도만큼 연속으로 채워진다. */
 const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
-/** 한도를 넘었을 때의 안내 문구. */
-const RATE_LIMITED_MESSAGE = "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.";
 /**
  * 로그인 시작 한도를 쓰는 라우트 주소. 원본 URL이 아니라 Fastify가 맞춘 라우트 주소(request.routeOptions.url)로 비교한다.
  * 왜: "/auth/%6Cogin"·"/auth/login?x"처럼 모양이 달라도 같은 라우트로 들어오는 요청이 같은 버킷을 쓰게 하려는 것이다.
@@ -162,9 +160,9 @@ function createAuthLimiters(clock: Clock): AuthLimiters {
  */
 async function rejectOverAuthLimit(deps: HttpDeps, limiters: AuthLimiters, request: FastifyRequest, reply: FastifyReply) {
   const isGlobalExempt = Boolean(request.manager) || hasIssuedCallbackState(deps, request);
-  if (!isGlobalExempt && !limiters.global.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+  if (!isGlobalExempt && !limiters.global.tryTake()) return redirectWithLoginError(reply, "rate_limited");
   if (isOwnerSession(request)) return;
-  if (AUTH_START_ROUTES.has(request.routeOptions.url ?? "") && !limiters.start.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+  if (AUTH_START_ROUTES.has(request.routeOptions.url ?? "") && !limiters.start.tryTake()) return redirectWithLoginError(reply, "rate_limited");
 }
 
 /**
@@ -191,23 +189,20 @@ function hasIssuedCallbackState(deps: HttpDeps, request: FastifyRequest): boolea
 }
 
 /**
- * 이유를 쿼리에 담아 첫 화면으로 보낸다. 화면(LoginScreen)이 loginError를 읽어 보여 준다.
+ * 이유 코드를 쿼리에 담아 첫 화면으로 보낸다. 화면(App)이 코드를 정해진 한국어 문구로 바꿔 보여 준다.
  * 왜 JSON 오류가 아닌가: /auth/*는 브라우저가 최상위로 여는 주소라, JSON을 보내면 사용자에게 원문이 그대로 보인다(R-8).
+ * 왜 문구가 아니라 코드인가: 화면이 주소의 문구를 그대로 보여 주면 누구나 공식 주소에 임의의 글을 띄울 수 있다(F10).
  * @param reply 응답
- * @param message 사용자에게 보여 줄 이유
+ * @param code 로그인 실패 이유 코드
  */
-function redirectWithLoginError(reply: FastifyReply, message: string) {
-  return reply.redirect(`/?loginError=${encodeURIComponent(message)}`);
+function redirectWithLoginError(reply: FastifyReply, code: LoginErrorCode) {
+  return reply.redirect(`/?loginError=${code}`);
 }
 
 /** state 쿠키 수명(10분). 인증 페이지에서 머무는 시간보다 넉넉하다. */
 const OAUTH_STATE_COOKIE_MAX_AGE_SECONDS = 600;
 /** state 쿠키 범위. 인증 경로에서만 보낸다. */
 const OAUTH_STATE_COOKIE_PATH = "/auth";
-/** state 쿠키가 없거나 다를 때의 안내 문구. */
-const STATE_MISMATCH_MESSAGE = "로그인 요청이 만료되었거나 다른 브라우저에서 시작되었습니다. 처음부터 다시 시도하세요.";
-/** 콜백에 code·state가 없을 때의 안내 문구. */
-const MISSING_CALLBACK_VALUES_MESSAGE = "치지직에서 돌아온 값이 없습니다. 다시 시도하세요.";
 
 /** 인증 URL의 state를 이 브라우저의 쿠키에 묶고 치지직으로 보낸다(로그인 CSRF 방지). */
 function startAuthorization(deps: HttpDeps, reply: FastifyReply, purpose: "connect" | "login") {
@@ -224,20 +219,21 @@ function startAuthorization(deps: HttpDeps, reply: FastifyReply, purpose: "conne
 async function completeLogin(deps: HttpDeps, callbackBucket: TokenBucket, request: FastifyRequest, reply: FastifyReply) {
   const verified = verifyCallbackState(deps, request, reply);
   if (typeof verified === "string") return redirectWithLoginError(reply, verified);
-  if (!isOwnerSession(request) && !callbackBucket.tryTake()) return redirectWithLoginError(reply, RATE_LIMITED_MESSAGE);
+  if (!isOwnerSession(request) && !callbackBucket.tryTake()) return redirectWithLoginError(reply, "rate_limited");
   return exchangeCodeForSession(deps, request, reply, verified);
 }
 
 /**
  * 콜백 쿼리와 state 쿠키를 확인하고, 서버가 발급한 대기 중 state인지도 본다. 쿼리가 있으면 쿠키는 결과와 관계없이 지운다(일회용).
- * @returns 통과하면 code·state, 아니면 사용자에게 보여 줄 이유
+ * code·state가 없으면(치지직 동의를 취소했을 때 등) failed, state가 맞지 않으면 state_mismatch다.
+ * @returns 통과하면 code·state, 아니면 로그인 실패 이유 코드
  */
-function verifyCallbackState(deps: HttpDeps, request: FastifyRequest, reply: FastifyReply): { code: string; state: string } | string {
+function verifyCallbackState(deps: HttpDeps, request: FastifyRequest, reply: FastifyReply): { code: string; state: string } | LoginErrorCode {
   const query = callbackQuerySchema.safeParse(request.query);
-  if (!query.success) return MISSING_CALLBACK_VALUES_MESSAGE;
+  if (!query.success) return "failed";
   const boundState = request.cookies[OAUTH_STATE_COOKIE];
   reply.clearCookie(OAUTH_STATE_COOKIE, { path: OAUTH_STATE_COOKIE_PATH });
-  return boundState && boundState === query.data.state && deps.authFlow.hasPendingState(query.data.state) ? query.data : STATE_MISMATCH_MESSAGE;
+  return boundState && boundState === query.data.state && deps.authFlow.hasPendingState(query.data.state) ? query.data : "state_mismatch";
 }
 
 /** code를 토큰으로 바꿔 세션을 만든다. 성공하면 세션 쿠키를 주고 첫 화면으로, 실패하면 이유를 담아 첫 화면으로 보낸다. */
@@ -249,8 +245,7 @@ async function exchangeCodeForSession(deps: HttpDeps, request: FastifyRequest, r
     return reply.redirect("/");
   } catch (error) {
     if (!(error instanceof AuthError)) deps.logger.error("로그인 처리 실패", { error: describeError(error) });
-    const message = error instanceof AuthError ? error.message : "로그인 중 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.";
-    return redirectWithLoginError(reply, message);
+    return redirectWithLoginError(reply, error instanceof AuthError ? error.code : "failed");
   }
 }
 

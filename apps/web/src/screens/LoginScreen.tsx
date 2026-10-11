@@ -3,7 +3,7 @@ import { ApiNotice } from "../components/ApiNotice";
 
 /** 로그인 화면 속성. */
 export interface LoginScreenProps {
-  /** 서버 콜백이 주소에 넣은 로그인 실패 이유(?loginError=). 한도 초과도 여기로 온다(R-8). */
+  /** 서버 콜백이 주소에 넣은 로그인 실패 이유 코드(?loginError=)를 정해진 문구로 바꾼 것(describeLoginError). 한도 초과도 여기로 온다(R-8). */
   loginError: string | null;
   /** 세션 종료 이유 같은 안내. */
   message: string | null;

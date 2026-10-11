@@ -157,7 +157,21 @@ describe("로그인 콜백", () => {
   it("실패하면 이유를 담아 첫 화면으로 보낸다", async () => {
     const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=test-state", headers: { cookie: "zg_oauth_state=test-state" } });
     expect(response.statusCode).toBe(302);
-    expect(decodeURIComponent(response.headers.location as string)).toBe("/?loginError=이 채널의 매니저가 아닙니다.");
+    expect(response.headers.location).toBe("/?loginError=not_manager");
+  });
+
+  it("주소에는 정해진 코드만 싣는다: 코드 없는 AuthError와 그 밖의 오류는 failed이고 문구는 싣지 않는다(F10)", async () => {
+    for (const thrown of [new AuthError("<a href=//evil>여기서 다시 로그인</a>"), new Error("내부 오류 상세")]) {
+      await harness.close();
+      harness = await createHttpHarness({ complete: async () => { throw thrown; } });
+      const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=test-state", headers: { cookie: "zg_oauth_state=test-state" } });
+      expect(response.headers.location).toBe("/?loginError=failed");
+    }
+  });
+
+  it("치지직에서 code·state 없이 돌아오면 failed 코드로 보낸다(F10)", async () => {
+    const response = await harness.app.inject({ method: "GET", url: "/auth/callback", headers: { cookie: "zg_oauth_state=test-state" } });
+    expect(response.headers.location).toBe("/?loginError=failed");
   });
 
   it("성공하면 HttpOnly·Secure·SameSite=Lax 쿠키를 준다", async () => {
@@ -177,9 +191,9 @@ describe("로그인 콜백", () => {
 
 describe("인증 경로 요청 한도(F6·S3·g)", () => {
   /** 한도를 넘었을 때 첫 화면으로 보내는 주소(디코딩한 값). */
-  const RATE_LIMITED_LOCATION = "/?loginError=요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.";
+  const RATE_LIMITED_LOCATION = "/?loginError=rate_limited";
   /** complete가 던지는 AuthError가 만드는 주소(디코딩한 값). 토큰 교환까지 갔다는 표시다. */
-  const NOT_MANAGER_LOCATION = "/?loginError=이 채널의 매니저가 아닙니다.";
+  const NOT_MANAGER_LOCATION = "/?loginError=not_manager";
 
   /** 리다이렉트 주소를 사람이 읽는 형태로 바꾼다. */
   function locationOf(response: { headers: Record<string, unknown> }): string {
@@ -191,7 +205,7 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
     await harness.close();
     const clock = { now: 1_000_000 };
     const complete = vi.fn(async () => {
-      throw new AuthError("이 채널의 매니저가 아닙니다.");
+      throw new AuthError("이 채널의 매니저가 아닙니다.", "not_manager");
     });
     harness = await createHttpHarness({ complete }, { clock: () => clock.now });
     return { clock, complete };
@@ -247,7 +261,7 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
 
   it("state 확인을 통과하지 못한 콜백은 콜백 한도를 쓰지 않는다(S3)", async () => {
     const { complete } = await useControlledClock();
-    for (let index = 0; index < 100; index += 1) expect(locationOf(await send("/auth/callback?code=c&state=s"))).toMatch(/로그인 요청이 만료되었거나/);
+    for (let index = 0; index < 100; index += 1) expect(locationOf(await send("/auth/callback?code=c&state=s"))).toBe("/?loginError=state_mismatch");
     expect(locationOf(await validCallback())).toBe(NOT_MANAGER_LOCATION);
     expect(complete).toHaveBeenCalledTimes(1);
   });
@@ -265,7 +279,7 @@ describe("인증 경로 요청 한도(F6·S3·g)", () => {
   it("서버가 발급하지 않은 state를 쿠키와 쿼리에 맞춰 보낸 위조 콜백은 콜백 한도를 쓰지 않아 뒤따르는 진짜 콜백을 막지 못한다(B9-1)", async () => {
     const { complete } = await useControlledClock();
     for (let index = 0; index < 70; index += 1) {
-      expect(locationOf(await send("/auth/callback?code=c&state=forged", "GET", "zg_oauth_state=forged"))).toMatch(/로그인 요청이 만료되었거나/);
+      expect(locationOf(await send("/auth/callback?code=c&state=forged", "GET", "zg_oauth_state=forged"))).toBe("/?loginError=state_mismatch");
     }
     expect(locationOf(await validCallback())).toBe(NOT_MANAGER_LOCATION);
     expect(complete).toHaveBeenCalledTimes(1);
@@ -435,7 +449,7 @@ describe("로그인 state 묶기", () => {
     harness = await createHttpHarness({ complete });
     for (const headers of [{}, { cookie: "zg_oauth_state=other" }]) {
       const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers });
-      expect(decodeURIComponent(response.headers.location as string)).toBe("/?loginError=로그인 요청이 만료되었거나 다른 브라우저에서 시작되었습니다. 처음부터 다시 시도하세요.");
+      expect(response.headers.location).toBe("/?loginError=state_mismatch");
     }
     expect(complete).not.toHaveBeenCalled();
   });

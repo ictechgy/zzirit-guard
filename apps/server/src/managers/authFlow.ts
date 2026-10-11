@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { LoginErrorCode } from "@zzirit-guard/shared";
 import type { ChzzkApi, ChzzkUser, TokenSet } from "../chzzk/apiClient.js";
 import type { AppConfig } from "../config.js";
 import type { CredentialStore } from "../connection/credentialStore.js";
@@ -8,9 +9,23 @@ import type { Clock } from "../time.js";
 import type { RoleVerifier } from "./roleVerifier.js";
 import type { ManagerSession, SessionStore } from "./sessionStore.js";
 
-/** 로그인·연결 실패. 메시지를 로그인 화면에 그대로 보여 준다. */
+/**
+ * 로그인·연결 실패. 화면에는 메시지가 아니라 code만 보낸다(주소에 임의 문구를 싣지 않으려고, F10). 메시지는 개발자용 설명이다.
+ * code를 생략하면 failed(일반 실패)다.
+ */
 export class AuthError extends Error {
   override readonly name = "AuthError";
+  /** 로그인 화면이 정해진 문구로 바꿀 이유 코드. */
+  readonly code: LoginErrorCode;
+
+  /**
+   * @param message 개발자용 설명(화면·주소에는 싣지 않는다)
+   * @param code 로그인 화면에 보낼 이유 코드(기본 failed)
+   */
+  constructor(message: string, code: LoginErrorCode = "failed") {
+    super(message);
+    this.code = code;
+  }
 }
 
 /** connect: 스트리머 채널 연결, login: 매니저(또는 스트리머) 로그인. */
@@ -95,14 +110,14 @@ function buildAuthorizeUrl(deps: AuthFlowDeps, states: Map<string, { purpose: Au
 function takeState(states: Map<string, { purpose: AuthPurpose; createdAt: number }>, state: string, now: number): AuthPurpose {
   const entry = states.get(state);
   states.delete(state);
-  if (!entry || now - entry.createdAt > STATE_TTL_MS) throw new AuthError("로그인 요청이 만료되었거나 잘못되었습니다. 처음부터 다시 시도하세요.");
+  if (!entry || now - entry.createdAt > STATE_TTL_MS) throw new AuthError("로그인 요청이 만료되었거나 잘못되었습니다. 처음부터 다시 시도하세요.", "state_mismatch");
   return entry.purpose;
 }
 
 /** 스트리머 채널 연결: 설정한 채널만 허용하고, 토큰 저장·기본 규칙·소유자 세션까지 만든다. */
 function connectChannel(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet) {
   if (user.channelId !== deps.config.channelId) {
-    throw new AuthError(`이 서버에 연결할 수 있는 채널이 아닙니다(${user.channelName}). 운영자가 설정한 스트리머 계정으로 로그인하세요.`);
+    throw new AuthError(`이 서버에 연결할 수 있는 채널이 아닙니다(${user.channelName}). 운영자가 설정한 스트리머 계정으로 로그인하세요.`, "not_allowed_channel");
   }
   adoptTokens(deps, user, tokens);
   // 규칙이 하나도 없을 때만 기본 규칙을 넣는다. 로그인마다 넣으면 매니저가 일부러 지운 기본 규칙이 되살아난다.
@@ -113,16 +128,16 @@ function connectChannel(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet) {
 /** 로그인: 스트리머 본인이면 토큰을 새것으로 바꾸고, 아니면 관리자 목록으로 역할을 확인한다. 매니저 토큰은 버린다(revoke 금지). */
 async function login(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet) {
   const channel = deps.credentialStore.loadChannel();
-  if (!channel) throw new AuthError("아직 연결된 채널이 없습니다. 스트리머가 먼저 '채널 연결'을 해야 합니다.");
+  if (!channel) throw new AuthError("아직 연결된 채널이 없습니다. 스트리머가 먼저 '채널 연결'을 해야 합니다.", "no_channel");
   if (user.channelId === channel.channelId) return connectChannel(deps, user, tokens);
   const role = await deps.roleVerifier.roleOf(user.channelId);
-  if (!role) throw new AuthError("이 채널의 매니저가 아닙니다. 치지직에서 채널 관리자나 채팅 운영자로 등록돼 있어야 합니다.");
+  if (!role) throw new AuthError("이 채널의 매니저가 아닙니다. 치지직에서 채널 관리자나 채팅 운영자로 등록돼 있어야 합니다.", "not_manager");
   return deps.sessions.create({ channelId: user.channelId, channelName: user.channelName, role });
 }
 
 /**
  * 새 토큰을 채널 연결로 저장하고, 수신기 재시작 등을 알린다.
- * 저장 오류(DB·암호화 등)는 감싸지 않고 그대로 던진다. AuthError 메시지는 공개 URL로 나가므로 내부 오류를 섞지 않기 위해서다.
+ * 저장 오류(DB·암호화 등)는 감싸지 않고 그대로 던진다. 서버가 AuthError가 아닌 오류를 따로 기록하고 화면에는 failed만 보내게 하려는 것이다.
  */
 function adoptTokens(deps: AuthFlowDeps, user: ChzzkUser, tokens: TokenSet): void {
   deps.tokenManager.adoptCredential(

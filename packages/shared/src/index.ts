@@ -160,3 +160,11 @@ export interface ApiErrorBody {
   error: string;
   message: string;
 }
+
+/**
+ * 로그인 실패 이유 코드. 서버는 /auth/* 실패를 "/?loginError=<코드>"로 첫 화면에 보내고, 화면이 코드를 정해진 한국어 문구로 바꾼다.
+ * 왜 문구가 아니라 코드인가: 주소의 문구를 그대로 보여 주면 누구나 공식 주소에 임의의 글(피싱 안내 등)을 띄울 수 있다(F10).
+ * state_mismatch: 로그인 요청이 만료·위조됨, rate_limited: 요청 한도 초과, not_manager: 매니저가 아님,
+ * not_allowed_channel: 설정한 스트리머 채널이 아님, no_channel: 아직 연결된 채널이 없음, failed: 그 밖의 실패(모르는 코드도 이것으로 본다).
+ */
+export type LoginErrorCode = "state_mismatch" | "rate_limited" | "not_manager" | "not_allowed_channel" | "no_channel" | "failed";

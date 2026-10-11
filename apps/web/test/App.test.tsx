@@ -10,6 +10,10 @@ afterEach(() => {
 
 /** 정상 서버 상태. */
 const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 };
+/** not_manager 코드의 문구. */
+const NOT_MANAGER_TEXT = "이 채널의 매니저가 아닙니다. 치지직에서 채널 관리자나 채팅 운영자로 등록돼 있어야 합니다.";
+/** 일반 실패(failed·모르는 코드)의 문구. */
+const FAILED_TEXT = "로그인 중 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.";
 /** 채팅 운영자 내 정보. */
 const me = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER", permissions: ["disable_auto_hide", "hide_message", "temporary_restrict"] };
 
@@ -26,23 +30,44 @@ class FakeWebSocket {
 }
 
 describe("App", () => {
-  it("로그인하지 않았으면 로그인 화면과 실패 이유를 보여 준다", async () => {
-    window.history.pushState({}, "", `/?loginError=${encodeURIComponent("이 채널의 매니저가 아닙니다.")}`);
+  it("로그인하지 않았으면 로그인 화면과, 이유 코드에 맞는 정해진 실패 문구를 보여 준다", async () => {
+    window.history.pushState({}, "", "/?loginError=not_manager");
     stubFetch({ "GET /api/me": () => json(401, { error: "unauthorized", message: "로그인이 필요합니다." }) });
     render(<App />);
     expect(await screen.findByRole("link", { name: "매니저 로그인" })).toBeTruthy();
-    expect(screen.getByText("이 채널의 매니저가 아닙니다.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe(NOT_MANAGER_TEXT);
+  });
+
+  it.each([
+    ["rate_limited", "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요."],
+    ["state_mismatch", "로그인 요청이 만료되었거나 다른 브라우저에서 시작되었습니다. 처음부터 다시 시도하세요."],
+    ["not_allowed_channel", "이 서버에 연결할 수 있는 채널이 아닙니다. 운영자가 설정한 스트리머 계정으로 로그인하세요."],
+    ["no_channel", "아직 연결된 채널이 없습니다. 스트리머가 먼저 '채널 연결'을 해야 합니다."],
+    ["failed", FAILED_TEXT],
+  ])("이유 코드 %s는 정해진 문구로 보여 준다(F10)", async (code, text) => {
+    window.history.pushState({}, "", `/?loginError=${code}`);
+    stubFetch({ "GET /api/me": () => json(401, { error: "unauthorized", message: "로그인이 필요합니다." }) });
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toBe(text);
+  });
+
+  it("모르는 코드나 주소에 넣은 임의 문구는 보여 주지 않고 일반 실패 문구로 바꾼다(피싱 문구 방지, F10)", async () => {
+    window.history.pushState({}, "", `/?loginError=${encodeURIComponent("보안 점검: evil.example에서 다시 로그인하세요")}`);
+    stubFetch({ "GET /api/me": () => json(401, { error: "unauthorized", message: "로그인이 필요합니다." }) });
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toBe(FAILED_TEXT);
+    expect(screen.queryByText(/evil\.example/)).toBeNull();
   });
 
   it("loginError는 한 번만 읽고 주소에서 지운다: 다시 그려도 낡은 이유가 되살아나지 않는다", async () => {
-    window.history.pushState({}, "", `/?loginError=${encodeURIComponent("이 채널의 매니저가 아닙니다.")}&keep=1#top`);
+    window.history.pushState({}, "", "/?loginError=not_manager&keep=1#top");
     stubFetch({ "GET /api/me": () => json(401, { error: "unauthorized", message: "로그인이 필요합니다." }) });
     const { rerender } = render(<App />);
-    expect(await screen.findByText("이 채널의 매니저가 아닙니다.")).toBeTruthy();
+    expect(await screen.findByText(NOT_MANAGER_TEXT)).toBeTruthy();
     expect(window.location.search).toBe("?keep=1");
     expect(window.location.hash).toBe("#top");
     rerender(<App />);
-    expect(screen.getByText("이 채널의 매니저가 아닙니다.")).toBeTruthy();
+    expect(screen.getByText(NOT_MANAGER_TEXT)).toBeTruthy();
     expect(window.location.search).not.toContain("loginError");
   });
 
