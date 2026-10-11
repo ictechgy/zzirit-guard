@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { toSocketSink } from "../../src/http/server.js";
+import { AuthError } from "../../src/managers/authFlow.js";
 import { createHttpHarness, mutatingHeaders, ORIGIN } from "../helpers/httpHarness.js";
 
 let harness: Awaited<ReturnType<typeof createHttpHarness>>;
@@ -170,27 +171,112 @@ describe("로그인 콜백", () => {
   });
 });
 
-describe("인증 경로 요청 한도(F6)", () => {
-  it("/auth/connect·login·callback을 합쳐 1분에 30번까지 받고, 31번째는 429이며, 시간이 지나면 다시 받는다", async () => {
+describe("인증 경로 요청 한도(F6·S3·g)", () => {
+  /** 한도를 넘었을 때 첫 화면으로 보내는 주소(디코딩한 값). */
+  const RATE_LIMITED_LOCATION = "/?loginError=요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.";
+  /** complete가 던지는 AuthError가 만드는 주소(디코딩한 값). 토큰 교환까지 갔다는 표시다. */
+  const NOT_MANAGER_LOCATION = "/?loginError=이 채널의 매니저가 아닙니다.";
+
+  /** 리다이렉트 주소를 사람이 읽는 형태로 바꾼다. */
+  function locationOf(response: { headers: Record<string, unknown> }): string {
+    return decodeURIComponent(String(response.headers.location));
+  }
+
+  /** 시계를 직접 움직이는 하네스로 바꾼다. complete는 매니저가 아니라는 AuthError를 던지고 호출 횟수를 센다. */
+  async function useControlledClock() {
     await harness.close();
-    let now = 1_000_000;
-    harness = await createHttpHarness({}, { clock: () => now });
-    const paths = ["/auth/connect", "/auth/login", "/auth/callback"];
+    const clock = { now: 1_000_000 };
+    const complete = vi.fn(async () => {
+      throw new AuthError("이 채널의 매니저가 아닙니다.");
+    });
+    harness = await createHttpHarness({ complete }, { clock: () => clock.now });
+    return { clock, complete };
+  }
+
+  /** 요청을 보낸다. */
+  function send(url: string, method: "GET" | "HEAD" = "GET", cookie?: string) {
+    return harness.app.inject({ method, url, headers: cookie ? { cookie } : {} });
+  }
+
+  /** state 쿠키가 맞는 콜백 요청. */
+  function validCallback() {
+    return send("/auth/callback?code=c&state=s", "GET", "zg_oauth_state=s");
+  }
+
+  it("로그인 시작(connect·login)은 합쳐 1분에 30번까지 받고, 넘으면 JSON이 아니라 첫 화면으로 이유를 보내며, 시간이 지나면 다시 받는다(R-8)", async () => {
+    const { clock } = await useControlledClock();
     for (let index = 0; index < 30; index += 1) {
-      expect((await harness.app.inject({ method: "GET", url: paths[index % paths.length] as string })).statusCode).toBe(302);
+      expect(String((await send(index % 2 === 0 ? "/auth/connect" : "/auth/login")).headers.location)).toMatch(/^https:\/\/chzzk\.example\//);
     }
-    const limited = await harness.app.inject({ method: "GET", url: "/auth/login" });
-    expect(limited.statusCode).toBe(429);
-    expect(limited.json()).toEqual({ error: "rate_limited", message: "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요." });
-    expect((await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: "zg_oauth_state=s" } })).statusCode).toBe(429);
-    now += 2_000;
-    expect((await harness.app.inject({ method: "GET", url: "/auth/connect" })).statusCode).toBe(302);
-    expect((await harness.app.inject({ method: "GET", url: "/auth/connect" })).statusCode).toBe(429);
+    const limited = await send("/auth/login");
+    expect(limited.statusCode).toBe(302);
+    expect(locationOf(limited)).toBe(RATE_LIMITED_LOCATION);
+    clock.now += 2_000;
+    expect(String((await send("/auth/connect")).headers.location)).toMatch(/^https:\/\/chzzk\.example\//);
+    expect(locationOf(await send("/auth/connect"))).toBe(RATE_LIMITED_LOCATION);
+  });
+
+  it("인코딩한 경로로 들어와도 같은 라우트의 한도를 쓴다(g)", async () => {
+    await useControlledClock();
+    for (let index = 0; index < 30; index += 1) await send(index % 2 === 0 ? "/auth/%6Cogin" : "/auth/./login");
+    expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
+    expect(locationOf(await send("/auth/%6Cogin"))).toBe(RATE_LIMITED_LOCATION);
+  });
+
+  it("라우트와 맞지 않는 변형(끝 슬래시·대문자·겹 슬래시)은 핸들러를 실행하지 않는다(g)", async () => {
+    for (const url of ["/auth/login/", "/AUTH/login", "/auth//login"]) {
+      const response = await send(url);
+      expect(response.statusCode).toBe(404);
+      expect(response.headers["set-cookie"]).toBeUndefined();
+    }
+  });
+
+  it("HEAD는 /auth 핸들러를 실행하지 않아 state 쿠키를 쓰지도, 토큰 교환을 하지도 않는다(g)", async () => {
+    const { complete } = await useControlledClock();
+    for (const url of ["/auth/login", "/auth/connect", "/auth/callback?code=c&state=s"]) {
+      const response = await send(url, "HEAD", "zg_oauth_state=s");
+      expect(response.statusCode).toBe(404);
+      expect(response.headers["set-cookie"]).toBeUndefined();
+    }
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("state 확인을 통과하지 못한 콜백은 콜백 한도를 쓰지 않는다(S3)", async () => {
+    const { complete } = await useControlledClock();
+    for (let index = 0; index < 100; index += 1) expect(locationOf(await send("/auth/callback?code=c&state=s"))).toMatch(/로그인 요청이 만료되었거나/);
+    expect(locationOf(await validCallback())).toBe(NOT_MANAGER_LOCATION);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("state를 통과한 콜백은 1분에 60번까지 토큰 교환을 하고, 넘으면 교환하지 않고 첫 화면으로 이유를 보낸다(S3)", async () => {
+    const { clock, complete } = await useControlledClock();
+    for (let index = 0; index < 60; index += 1) expect(locationOf(await validCallback())).toBe(NOT_MANAGER_LOCATION);
+    expect(locationOf(await validCallback())).toBe(RATE_LIMITED_LOCATION);
+    expect(complete).toHaveBeenCalledTimes(60);
+    clock.now += 1_000;
+    await validCallback();
+    expect(complete).toHaveBeenCalledTimes(61);
+  });
+
+  it("모든 /auth 요청은 합쳐 1분에 120번까지만 받는다(값싼 바깥 상한, g)", async () => {
+    const { complete } = await useControlledClock();
+    for (let index = 0; index < 120; index += 1) await send("/auth/callback?code=c&state=wrong", "GET", "zg_oauth_state=s");
+    expect(locationOf(await validCallback())).toBe(RATE_LIMITED_LOCATION);
+    expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("로그인 시작 한도를 다 써도 콜백은 따로 센다", async () => {
+    const { complete } = await useControlledClock();
+    for (let index = 0; index < 31; index += 1) await send("/auth/login");
+    expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
+    await validCallback();
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it("인증 경로가 아닌 요청은 한도에 영향을 주지도 받지도 않는다", async () => {
-    for (let index = 0; index < 31; index += 1) await harness.app.inject({ method: "GET", url: "/auth/login" });
-    expect((await harness.app.inject({ method: "GET", url: "/auth/login" })).statusCode).toBe(429);
+    for (let index = 0; index < 31; index += 1) await send("/auth/login");
+    expect(locationOf(await send("/auth/login"))).toBe(RATE_LIMITED_LOCATION);
     const rawId = harness.login("STREAMING_CHAT_MANAGER");
     expect((await harness.app.inject({ method: "GET", url: "/api/me", headers: { cookie: `zg_session=${rawId}` } })).statusCode).toBe(200);
   });
