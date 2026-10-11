@@ -128,6 +128,21 @@ describe("Executor", () => {
     expect(auditLog.list("c1", 10, null)[0]).toMatchObject({ action: "hide", result: "error", error: "자동 숨김이 꺼져 보내지 않았습니다", verdictId: verdict.id });
   });
 
+  it("재시도를 기다리는 동안 스위치가 꺼지면 다시 부르지 않고 취소로 끝낸다(F9.1)", async () => {
+    const blindMessage = failingThenOk([new ChzzkApiError(500, "INTERNAL_SERVER_ERROR", "/x")]);
+    const getAccessToken = vi.fn(async () => "owner-token");
+    const { executor, verdicts, auditLog, sleeps, statusEvents, verdict, hide } = setup({ blindMessage }, { getAccessToken });
+    // 첫 시도의 5xx 뒤 백오프(sleep)에 들어가는 순간 스위치가 꺼진 상황을 흉내 낸다.
+    const outcome = await executor.submit("c1", hide, manager, { shouldRun: () => sleeps.length === 0 });
+    expect(outcome).toEqual({ ok: false, message: "자동 숨김이 꺼져 보내지 않았습니다" });
+    expect(blindMessage).toHaveBeenCalledTimes(1);
+    expect(getAccessToken).toHaveBeenCalledTimes(1);
+    expect(sleeps).toEqual([1000]);
+    expect(verdicts.get(verdict.id)?.status).toBe("pending");
+    expect(statusEvents).toEqual([]);
+    expect(auditLog.list("c1", 10, null)).toEqual([expect.objectContaining({ action: "hide", result: "error", error: "자동 숨김이 꺼져 보내지 않았습니다" })]);
+  });
+
   it("취소가 12건 쌓여도 실패율 알림은 울리지 않는다", async () => {
     const blindMessage = vi.fn(async () => undefined);
     const { executor, hide } = setup({ blindMessage });

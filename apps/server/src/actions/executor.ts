@@ -24,8 +24,8 @@ export interface Actor {
 export type ActionOutcome = { ok: true; note: string | null } | { ok: false; message: string };
 
 /**
- * submit 추가 옵션. shouldRun은 대기열에서 차례가 왔을 때, 치지직을 부르기 직전에 한 번 확인한다.
- * 이유: 자동 숨김은 되돌릴 수 없으므로, 대기 중에 스위치가 꺼졌다면 이미 쌓인 숨김도 보내지 않아야 한다.
+ * submit 추가 옵션. shouldRun은 치지직을 부르는 시도마다(첫 시도와 재시도 직전, 토큰을 받기 전) 확인한다.
+ * 이유: 자동 숨김은 되돌릴 수 없으므로, 대기 중이거나 재시도를 기다리는 중에 스위치가 꺼졌다면 더 보내지 않아야 한다(F9.1).
  */
 export interface SubmitOptions {
   shouldRun?: () => boolean;
@@ -111,20 +111,24 @@ class SerialExecutor implements Executor {
    * 기록이 실패해도 치지직 호출은 이미 끝난 되돌릴 수 없는 일이므로 실제 결과를 그대로 돌려준다.
    */
   private async execute(channelId: string, request: ActionRequest, actor: Actor, options?: SubmitOptions): Promise<ActionOutcome> {
-    if (options?.shouldRun?.() === false) {
-      // 취소는 치지직 호출이 아니므로 판정 상태·실패율에는 넣지 않고 감사 기록만 남긴다.
+    const outcome = await this.performWithRetry(request, options);
+    if (outcome === null) {
+      // 취소는 치지직 호출 결과가 아니므로 판정 상태·실패율에는 넣지 않고 감사 기록만 남긴다.
       const cancelled: ActionOutcome = { ok: false, message: CANCELLED_MESSAGE };
       this.recordAudit(channelId, request, actor, cancelled);
       return cancelled;
     }
-    const outcome = await this.performWithRetry(request);
     this.recordOutcome(channelId, request, actor, outcome);
     return outcome;
   }
 
-  /** 성공하거나 끝내기로 결정할 때까지 시도한다. */
-  private async performWithRetry(request: ActionRequest): Promise<ActionOutcome> {
+  /**
+   * 성공하거나 끝내기로 결정할 때까지 시도한다. 시도마다 직전에 shouldRun을 확인한다.
+   * @returns 시도 결과. shouldRun이 false여서 더 시도하지 않고 멈췄으면 null(취소)
+   */
+  private async performWithRetry(request: ActionRequest, options?: SubmitOptions): Promise<ActionOutcome | null> {
     for (let attempt = 0; ; attempt += 1) {
+      if (options?.shouldRun?.() === false) return null;
       try {
         await performRequest(this.options.api, await this.options.tokenManager.getAccessToken(), request);
         return { ok: true, note: null };
