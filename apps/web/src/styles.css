@@ -1,0 +1,62 @@
+/* 모바일 우선 스타일. 어두운 바탕에 노란 강조(로고 색). */
+:root {
+  --background: #17171f;
+  --surface: #23232e;
+  --text: #f2f2f5;
+  --muted: #a0a0b0;
+  --accent: #ffd21f;
+  --danger: #ff5c5c;
+  --care: #6ec1ff;
+  --ok: #7ad99a;
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  background: var(--background);
+  color: var(--text);
+}
+body { margin: 0; }
+button, .button { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #3a3a48; background: var(--surface); color: var(--text); font-size: 15px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+button:disabled { opacity: 0.4; }
+.button.primary { background: var(--accent); color: #17171f; border-color: var(--accent); font-weight: 700; }
+.danger { border-color: var(--danger); color: var(--danger); }
+.app { padding: 12px 12px 76px; }
+.screen { display: flex; flex-direction: column; gap: 12px; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.banner { margin: 0; padding: 10px 12px; border-radius: 10px; list-style: none; }
+.banner-ok { background: #1f3a2a; }
+.banner-warning { background: #4a2a1a; }
+.toggle-on { background: var(--accent); color: #17171f; font-weight: 700; }
+.error { color: var(--danger); }
+.feedback { color: var(--ok); }
+.hint, .notice, .empty { color: var(--muted); font-size: 13px; }
+.card { background: var(--surface); border-radius: 12px; padding: 10px; }
+.card-care { border-left: 4px solid var(--care); }
+.card-shadow { border-left: 4px solid var(--accent); }
+.card-header { display: flex; align-items: center; gap: 8px; }
+.card-header .count { color: var(--muted); margin-right: auto; }
+.messages { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.message { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; }
+.message .buttons { grid-column: 1 / -1; display: flex; gap: 8px; }
+.message .time { color: var(--muted); font-size: 12px; }
+.message .reason { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.section-auto-pending { border: 1px solid var(--danger); border-radius: 12px; padding: 10px; }
+.content { overflow-wrap: anywhere; }
+.chat-lines { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-line { padding: 4px 6px; border-radius: 6px; }
+.chat-candidate, .chat-shadow { background: #3a3220; }
+.chat-auto_hide { background: #3a2020; text-decoration: line-through; }
+.chat-needs_care { background: #1f2f3f; }
+.chat-line .nickname { color: var(--muted); margin-right: 6px; }
+.chat-line .tag { margin-left: 6px; font-size: 12px; color: var(--accent); }
+.tab-bar { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--surface); padding-bottom: env(safe-area-inset-bottom); }
+.tab-bar button { border: none; border-radius: 0; background: transparent; }
+.tab-bar button[aria-pressed="true"] { color: var(--accent); font-weight: 700; }
+.badge { margin-left: 6px; background: var(--danger); color: white; border-radius: 999px; padding: 0 6px; font-size: 12px; }
+.login { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; text-align: center; }
+.login .button { width: 100%; max-width: 320px; }
+.rows div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #2c2c38; }
+.rows dt { color: var(--muted); }
+.rows dd { margin: 0; }
+.false-positive-counts { padding-left: 18px; }
+.field, .rule-form label { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+input, select { min-height: 40px; border-radius: 8px; border: 1px solid #3a3a48; background: #101018; color: var(--text); padding: 0 8px; font-size: 15px; }
+.splash { padding: 48px; text-align: center; color: var(--muted); }
