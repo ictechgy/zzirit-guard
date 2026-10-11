@@ -129,9 +129,30 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
     await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
     expect(expired.closedWith).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
-    expect(expired.sent).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
+    // 주기 상태 방송(status)도 함께 오므로 종류로 걸러 본다.
+    expect(expired.sent.filter((event) => event.type === "session_ended")).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
     expect(expired.closedWith).toBe(4001);
     expect(active.closedWith).toBeNull();
+  });
+});
+
+describe("주기 상태 방송(B19-2)", () => {
+  it("20초마다 열린 화면에 status를 보내, 채팅이 없는 조용한 채널도 살아 있는 연결로 보이게 한다", async () => {
+    const hub = control.hub as RealtimeHub;
+    const socket = recordingSocket();
+    hub.attach(socket, { id: "s1", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(2);
+  });
+
+  it("stop()이 방송 타이머도 지워, 닫힌 DB로 상태를 계산하려다 실패하지 않는다", async () => {
+    await app.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(errorLines.filter((line) => line.message === "상태 방송 실패")).toEqual([]);
   });
 });
 

@@ -57,6 +57,12 @@ const INTERVALS = {
   maintenanceMs: 24 * 60 * 60 * 1000,
   firstMaintenanceDelayMs: 5 * 60 * 1000,
 };
+/**
+ * 열린 매니저 화면에 현재 상태(status)를 다시 보내는 간격(20초, B19-2).
+ * 왜: 화면은 45초 동안 메시지가 없으면 연결이 조용히 죽었다고 보고 다시 연결한다(useServerState STALE_CONNECTION_MS).
+ * 채팅이 없는 조용한 채널은 보낼 것이 없어 살아 있는 연결도 죽은 것처럼 보였다. 이미 있는 status 메시지를 주기적으로 보내므로 프로토콜은 바뀌지 않는다.
+ */
+const STATUS_BROADCAST_MS = 20_000;
 /** 시스템 행위자. */
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
 /** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
@@ -285,8 +291,9 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     await recheckSessionRoles({ sessions, roleVerifier, logger, onRevoked: handleRevokedSessions });
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
-  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업. */
+  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
   const startTimers = (): void => {
+    intervalTimers.push(setInterval(guarded("상태 방송 실패", broadcastStatus), STATUS_BROADCAST_MS));
     intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenQuietly), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
     intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesAndCloseExpired), INTERVALS.roleRecheckMs));
