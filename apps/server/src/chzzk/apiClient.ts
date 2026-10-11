@@ -68,11 +68,11 @@ export interface ChzzkApiOptions {
   timeoutMs?: number;
 }
 
-/** 토큰 응답. 문서에 expiresIn이 String으로 적혀 있어 숫자·문자 모두 받는다. */
+/** 토큰 응답. 문서에 expiresIn이 String으로 적혀 있어 숫자·문자 모두 받되, NaN·0·음수는 거부한다. */
 const tokenSchema = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
-  expiresIn: z.union([z.string(), z.number()]).transform(Number),
+  expiresIn: z.union([z.string(), z.number()]).transform(Number).pipe(z.number().finite().positive()),
 });
 /** 사용자 정보 응답. */
 const userSchema = z.object({ channelId: z.string(), channelName: z.string() });
@@ -108,18 +108,33 @@ export function createChzzkApi(options: ChzzkApiOptions): ChzzkApi {
   return {
     exchangeCode: (code, state) => requestTokens(call, options, { grantType: "authorization_code", code, state }),
     refreshToken: (refreshToken) => requestTokens(call, options, { grantType: "refresh_token", refreshToken }),
-    getMe: async (token) => userSchema.parse(await call("GET", "/open/v1/users/me", { token })),
-    getStreamingRoles: async (token) => rolesSchema.parse(await call("GET", "/open/v1/channels/streaming-roles", { token })).data,
-    createSessionUrl: async (token) => sessionSchema.parse(await call("GET", "/open/v1/sessions/auth", { token })).url,
+    getMe: async (token) => callParsed(call, userSchema, "GET", "/open/v1/users/me", { token }),
+    getStreamingRoles: async (token) => (await callParsed(call, rolesSchema, "GET", "/open/v1/channels/streaming-roles", { token })).data,
+    createSessionUrl: async (token) => (await callParsed(call, sessionSchema, "GET", "/open/v1/sessions/auth", { token })).url,
     subscribeChat: (token, sessionKey) => discard(call("POST", `/open/v1/sessions/events/subscribe/chat?sessionKey=${encodeURIComponent(sessionKey)}`, { token })),
     blindMessage: (token, target) => discard(call("POST", "/open/v1/chats/blind-message", { token, body: target })),
     addTemporaryRestriction: (token, targetChannelId, chatChannelId) =>
       discard(call("POST", "/open/v1/temporary-restrict-channels", { token, body: { targetChannelId, chatChannelId } })),
     addRestriction: (token, targetChannelId) => discard(call("POST", "/open/v1/restrict-channels", { token, body: { targetChannelId } })),
     removeRestriction: (token, targetChannelId) => discard(call("DELETE", "/open/v1/restrict-channels", { token, body: { targetChannelId } })),
-    getChatSettings: async (token) => chatSettingsSchema.parse(await call("GET", "/open/v1/chats/settings", { token })),
+    getChatSettings: async (token) => callParsed(call, chatSettingsSchema, "GET", "/open/v1/chats/settings", { token }),
     updateChatSettings: (token, settings) => discard(call("PUT", "/open/v1/chats/settings", { token, body: settings })),
   };
+}
+
+/**
+ * 호출 후 content를 스키마로 검증한다. 형식이 다르면 raw ZodError 대신 502 ChzzkApiError를 던진다.
+ * 호출자가 ChzzkApiError.status만으로 실패를 분류할 수 있게 하려는 것이다.
+ */
+async function callParsed<T>(call: Caller, schema: z.ZodType<T>, method: HttpMethod, path: string, callOptions: CallOptions): Promise<T> {
+  const result = schema.safeParse(await call(method, path, callOptions));
+  if (!result.success) throw new ChzzkApiError(502, `UNEXPECTED_RESPONSE: ${summarizeIssues(result.error)}`, path);
+  return result.data;
+}
+
+/** zod 오류를 "필드: 사유" 목록으로 줄인다. 입력 값(토큰 등)은 넣지 않는다. */
+function summarizeIssues(error: z.ZodError): string {
+  return error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`).join("; ");
 }
 
 /** 결과 값이 필요 없는 호출을 Promise<void>로 바꾼다. */
@@ -129,8 +144,8 @@ async function discard(promise: Promise<unknown>): Promise<void> {
 
 /** 토큰 발급·갱신 공통 처리. clientId·clientSecret은 본문으로 보낸다(문서 규격). */
 async function requestTokens(call: Caller, options: ChzzkApiOptions, grant: Record<string, string>): Promise<TokenSet> {
-  const content = await call("POST", "/auth/v1/token", { body: { ...grant, clientId: options.clientId, clientSecret: options.clientSecret } });
-  const parsed = tokenSchema.parse(content);
+  const body = { ...grant, clientId: options.clientId, clientSecret: options.clientSecret };
+  const parsed = await callParsed(call, tokenSchema, "POST", "/auth/v1/token", { body });
   return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, expiresInSeconds: parsed.expiresIn };
 }
 
@@ -154,7 +169,7 @@ function buildRequestInit(method: HttpMethod, callOptions: CallOptions, timeoutM
 
 /** 응답 봉투를 해석한다. 실패면 ChzzkApiError를 던지고, 성공이면 content를 돌려준다(없으면 undefined). */
 async function unwrapEnvelope(response: Response, path: string): Promise<unknown> {
-  const envelope = parseJsonOrNull(await response.text());
+  const envelope = parseJsonOrNull(await response.text(), path, response.ok);
   const bodyCode = isRecord(envelope) && typeof envelope.code === "number" ? envelope.code : response.status;
   if (!response.ok || bodyCode >= 400) {
     const message = isRecord(envelope) && typeof envelope.message === "string" ? envelope.message : response.statusText;
@@ -163,13 +178,18 @@ async function unwrapEnvelope(response: Response, path: string): Promise<unknown
   return isRecord(envelope) ? envelope.content : undefined;
 }
 
-/** 빈 본문이나 JSON이 아닌 본문은 null로 본다(blind-message는 본문 없이 200을 줄 수 있다). */
-function parseJsonOrNull(text: string): unknown {
+/**
+ * 빈 본문은 null로 본다(blind-message는 본문 없이 200을 줄 수 있다).
+ * 성공 상태인데 JSON이 아니면(예: 프록시의 HTML 페이지) 성공으로 오인하지 않도록 502로 던진다.
+ */
+function parseJsonOrNull(text: string, path: string, isSuccessStatus: boolean): unknown {
   if (!text) return null;
   try {
     return JSON.parse(text);
   } catch {
-    return null;
+    // 실패 상태(429 등)의 비JSON 본문은 원래 상태 코드를 살려야 하므로 null로 두어 호출부가 status로 오류를 만든다.
+    if (!isSuccessStatus) return null;
+    throw new ChzzkApiError(502, "UNEXPECTED_RESPONSE: JSON이 아닌 응답", path);
   }
 }
 

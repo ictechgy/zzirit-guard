@@ -50,4 +50,58 @@ describe("ChzzkApi", () => {
     await api.updateChatSettings(owner.accessToken, { ...settings, chatSlowModeSec: 5 });
     expect(fake.chatSettings.chatSlowModeSec).toBe(5);
   });
+
+  it("관리자 목록과 세션 URL을 읽는다", async () => {
+    const owner = fake.issueTokens(fake.owner);
+    fake.streamingRoles.push({ managerChannelId: "m1", managerChannelName: "매니저", userRole: "STREAMING_CHAT_MANAGER" });
+    expect(await api.getStreamingRoles(owner.accessToken)).toEqual(fake.streamingRoles);
+    expect(await api.createSessionUrl(owner.accessToken)).toContain("?auth=");
+  });
+
+  it("제한 API 세 개가 올바른 메서드·경로·본문으로 나간다", async () => {
+    const owner = fake.issueTokens(fake.owner);
+    await api.addTemporaryRestriction(owner.accessToken, "t1", "c1");
+    await api.addRestriction(owner.accessToken, "t2");
+    await api.removeRestriction(owner.accessToken, "t3");
+    expect(fake.calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      { method: "POST", path: "/open/v1/temporary-restrict-channels", body: { targetChannelId: "t1", chatChannelId: "c1" } },
+      { method: "POST", path: "/open/v1/restrict-channels", body: { targetChannelId: "t2" } },
+      { method: "DELETE", path: "/open/v1/restrict-channels", body: { targetChannelId: "t3" } },
+    ]);
+  });
+});
+
+describe("ChzzkApi 비정상 응답", () => {
+  /** 고정 본문을 HTTP 200으로 돌려주는 가짜 fetch로 클라이언트를 만든다. */
+  function apiWithBody(body: string): ChzzkApi {
+    const fetchFunction: typeof fetch = async () => new Response(body, { status: 200 });
+    return createChzzkApi({ apiBase: "http://stub", clientId: "c", clientSecret: "s", fetchFunction });
+  }
+
+  it("스키마와 다른 content는 502 ChzzkApiError가 된다", async () => {
+    const stub = apiWithBody(JSON.stringify({ code: 200, message: null, content: { channelId: 1 } }));
+    const error = await stub.getMe("t").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChzzkApiError);
+    expect(error).toMatchObject({ status: 502, path: "/open/v1/users/me" });
+    expect((error as ChzzkApiError).apiMessage).toMatch(/UNEXPECTED_RESPONSE/);
+  });
+
+  it("JSON이 아닌 200 본문은 502 ChzzkApiError가 된다", async () => {
+    const error = await apiWithBody("<html>").blindMessage("t", { chatChannelId: "c", messageTime: 1, senderChannelId: "s" })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChzzkApiError);
+    expect(error).toMatchObject({ status: 502 });
+  });
+
+  it("빈 200 본문은 성공으로 본다", async () => {
+    await expect(apiWithBody("").blindMessage("t", { chatChannelId: "c", messageTime: 1, senderChannelId: "s" })).resolves.toBeUndefined();
+  });
+
+  it("expiresIn이 숫자가 아니면 502 ChzzkApiError가 된다", async () => {
+    const content = { accessToken: "a", refreshToken: "r", expiresIn: "abc" };
+    const error = await apiWithBody(JSON.stringify({ code: 200, message: null, content })).refreshToken("r")
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChzzkApiError);
+    expect(error).toMatchObject({ status: 502 });
+  });
 });
