@@ -28,13 +28,46 @@ interface ServerControls {
   loader: SnapshotLoader;
   /** 실시간 연결. */
   connection: RealtimeConnection;
+  /** 연결됐다고 믿는데 STALE_CONNECTION_MS 넘게 메시지가 없으면 연결을 멈췄다 다시 시작한다. */
+  restartIfStale(): void;
   /** 이 묶음을 닫는다: 조회 결과를 버리고 연결을 닫으며, 닫는 중에 동기로 오는 콜백은 무시한다. */
   dispose(): void;
 }
 
 /**
+ * 연결됐다고 믿는 동안 메시지 없이 이만큼 지나면 연결이 반쯤 끊겼다고(half-open) 보고 다시 연다(45초, F3).
+ * 왜: 휴대폰이 잠들거나 Wi-Fi→LTE로 바뀌면 소켓이 닫힘 알림 없이 죽어, 배너는 "정상 동작 중"인데 목록이 멈춘다.
+ * 주의: 서버는 채팅이 있을 때만 chat_batch를(250ms 묶음), 연결·잠금·스위치가 바뀔 때만 status를 보내고 주기 신호(ping)는 없다.
+ * 그래서 채팅이 없는 조용한 채널에서는 약 45초마다 다시 연결한다. 비용은 티켓 1회·상태·후보 조회 1회이고,
+ * 서버가 새 연결에 곧바로 status를 보내므로 그것이 살아 있다는 확인이 된다.
+ */
+export const STALE_CONNECTION_MS = 45_000;
+/** 위 확인을 하는 간격(5초). 다시 연결까지 최대 50초가 걸린다. */
+const STALE_CHECK_INTERVAL_MS = 5_000;
+
+/** 마지막으로 서버 메시지를 받은 시각을 들고 있다가, 오래됐는지 알려 준다. */
+interface LivenessTracker {
+  /** 지금 메시지를 받았다(또는 연결이 막 열렸다)고 기록한다. */
+  markAlive(): void;
+  /** 마지막 메시지 뒤 STALE_CONNECTION_MS 이상 지났는지. */
+  isStale(): boolean;
+}
+
+/** 마지막 메시지 시각 기록기를 만든다. 시계는 Date.now(테스트의 가짜 시계와 맞춘다). */
+function createLivenessTracker(): LivenessTracker {
+  let lastMessageAt = Date.now();
+  return {
+    markAlive: () => {
+      lastMessageAt = Date.now();
+    },
+    isStale: () => Date.now() - lastMessageAt >= STALE_CONNECTION_MS,
+  };
+}
+
+/**
  * 처음 상태를 REST로 읽고 이후 변화는 WebSocket으로 받는다.
  * 실시간 연결이 (다시) 열릴 때마다 상태·후보를 다시 읽는다. 휴대폰은 화면이 꺼질 때마다 연결이 끊겨, 그동안 생긴 후보를 놓치기 때문이다(R-3).
+ * 화면이 다시 보이거나 네트워크가 돌아오면 다시 읽고, 연결이 오래 조용하면(반쯤 끊긴 소켓) 다시 연다(F3, watchConnectionHealth).
  * 조회·티켓이 로그인이 필요한 오류(401·409 no_channel)면 실시간을 멈추고 세션 종료로 처리해 로그인 화면으로 보낸다(R-12).
  * 연결 콜백은 정리(cleanup) 중에 동기적으로 다시 불리거나 같은 값으로 거듭 불릴 수 있어(StrictMode 포함) 멱등하게, 화면이 사라진 뒤에는 아무것도 하지 않게 둔다.
  */
@@ -46,7 +79,11 @@ export function useServerState(): ServerConnection {
     controls.current = created;
     created.loader.request();
     created.connection.start();
-    return created.dispose;
+    const stopWatching = watchConnectionHealth(created);
+    return () => {
+      stopWatching();
+      created.dispose();
+    };
   }, []);
   const reload = useCallback(() => controls.current?.loader.request(), []);
   const reconnect = useCallback(() => controls.current?.connection.start(), []);
@@ -62,6 +99,7 @@ export function useServerState(): ServerConnection {
 function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
   let isMounted = true;
   let wasConnected = false;
+  const liveness = createLivenessTracker();
   const guarded = (action: ServerAction) => {
     if (isMounted) dispatch(action);
   };
@@ -73,22 +111,59 @@ function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
   };
   const loader = createSnapshotLoader(guarded, endSession);
   const connection = new RealtimeConnection({
-    onEvent: (event) => guarded({ type: "event", event }),
+    onEvent: (event) => {
+      liveness.markAlive();
+      guarded({ type: "event", event });
+    },
     onConnectionChange: (connected) => {
       if (!isMounted || connected === wasConnected) return;
       wasConnected = connected;
       guarded({ type: "connection", connected });
-      if (connected) loader.request();
+      if (!connected) return;
+      liveness.markAlive();
+      loader.request();
     },
     onSessionEnded: endSession,
     onRejected: () => guarded({ type: "realtime_rejected" }),
   });
+  // 연결 중이 아니면(재연결 대기·거절로 멈춤·세션 종료) 건드리지 않는다: 그때는 RealtimeConnection이 스스로 다시 연결하거나 멈춰 있어야 한다.
+  const restartIfStale = () => {
+    if (!isMounted || !wasConnected || !liveness.isStale()) return;
+    connection.stop();
+    connection.start();
+  };
   const dispose = () => {
     isMounted = false;
     loader.cancel();
     connection.stop();
   };
-  return { loader, connection, dispose };
+  return { loader, connection, restartIfStale, dispose };
+}
+
+/**
+ * 화면 깨어남·네트워크 복구·조용히 죽은 연결을 지켜본다(F3).
+ * 화면이 다시 보이거나 online이 오면 상태·후보를 다시 읽고(조회기가 겹친 요청을 합친다) 연결이 오래 조용했으면 다시 연다.
+ * 그 밖에는 STALE_CHECK_INTERVAL_MS마다 연결이 오래 조용한지 확인한다.
+ * 화면이 숨겨진 동안 연결을 일부러 멈추지는 않는다: 휴대폰 OS가 숨긴 화면의 소켓을 어차피 끊고, 다시 보일 때 위 처리가 상태를 되살린다.
+ * @param controls 이번 effect의 조회기·연결
+ * @returns 감시를 멈추는 함수(effect 정리에서 부른다)
+ */
+function watchConnectionHealth(controls: ServerControls): () => void {
+  const refresh = () => {
+    controls.loader.request();
+    controls.restartIfStale();
+  };
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") refresh();
+  };
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("online", refresh);
+  const timer = setInterval(controls.restartIfStale, STALE_CHECK_INTERVAL_MS);
+  return () => {
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("online", refresh);
+    clearInterval(timer);
+  };
 }
 
 /**
