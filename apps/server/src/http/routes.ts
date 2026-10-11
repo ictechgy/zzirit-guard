@@ -34,6 +34,11 @@ export interface RouteServices {
   /** 치지직 관리자 목록으로 지금 역할을 확인한다(5분 캐시). WebSocket 티켓을 줄 때 쓴다(스펙 7장). */
   verifyRole(managerChannelId: string): Promise<ManagerRole | null>;
   disconnectChannel(): void;
+  /**
+   * 세션이 끝났을 때 그 세션으로 열린 WebSocket을 닫는다(허브의 closeSessions에 연결된다).
+   * 왜: 세션 행만 지우면 이미 열린 소켓이 계속 이벤트를 받는다(스펙 7장).
+   */
+  endSessions(sessionIds: readonly string[], reason: string): void;
   clock: Clock;
 }
 
@@ -46,22 +51,29 @@ const PERMISSION_LABELS: Record<Permission, string> = {
 const ALLOWED_FOLLOWER_MINUTES = [0, 5, 10, 30, 60, 1440, 10080, 43200, 86400, 129600, 172800, 216000, 259200];
 /** 치지직이 허용하는 저속 모드(초) 값. */
 const ALLOWED_SLOW_MODE_SECONDS = [0, 3, 5, 10, 30, 60, 120, 300];
+/** 채널 ID 문자열의 최대 길이. */
+const MAX_CHANNEL_ID_LENGTH = 128;
 /** 푸시 구독 주소의 최대 길이. 왜: 저장·로그·전송 비용을 키우는 과대 입력을 막는다(R26). */
 const MAX_PUSH_ENDPOINT_LENGTH = 2048;
 /** 푸시 구독 키(p256dh·auth)의 최대 길이. 실제 값은 100자 안쪽이라 여유를 두고 제한한다(R26). */
 const MAX_PUSH_KEY_LENGTH = 256;
 
-/** 입력 검증 규칙. */
+/** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
-const senderParamSchema = z.object({ senderChannelId: z.string().min(1).max(100) });
+/** 경로의 보낸 사람 채널 ID. 길이를 제한해 과대 입력을 막는다. */
+const senderParamSchema = z.object({ senderChannelId: z.string().min(1).max(MAX_CHANNEL_ID_LENGTH) });
+/** 자동 숨김 스위치 요청 본문. */
 const autoHideBodySchema = z.object({ enabled: z.boolean() });
+/** 규칙 추가 본문. 종류는 허용 목록으로, 패턴은 길이로 제한한다. */
 const ruleBodySchema = z.object({
   kind: z.enum(["strong", "weak", "exception", "allow", "allow_domain", "threat", "keyword_route"]),
   pattern: z.string().min(1).max(100),
 });
+/** 설정 변경 본문. strict로 알 수 없는 키(예: 스위치 상태)를 거부한다. */
 const settingsBodySchema = z
   .object({ breakerPerMinute: z.number().int().optional(), retentionDaysContent: z.number().int().optional(), retentionDaysAudit: z.number().int().optional() })
   .strict();
+/** 채팅 설정 본문. 치지직이 허용하는 값만 통과시켜 쓰기 API 거부를 미리 막는다. */
 const chatSettingsBodySchema = z.object({
   chatAvailableCondition: z.enum(["NONE", "REAL_NAME"]),
   chatAvailableGroup: z.enum(["ALL", "FOLLOWER", "MANAGER", "SUBSCRIBER"]),
@@ -70,14 +82,20 @@ const chatSettingsBodySchema = z.object({
   chatSlowModeSec: z.number().refine((value) => ALLOWED_SLOW_MODE_SECONDS.includes(value), "치지직이 허용하지 않는 값입니다"),
   chatEmojiMode: z.boolean(),
 });
-const temporaryRestrictBodySchema = z.object({ chatChannelId: z.string().min(1), verdictId: z.number().int().nullable().optional() });
+/** 임시 제한 본문. 판정 ID는 선택이며 서버가 보낸 사람과 일치하는지 확인한다. */
+const temporaryRestrictBodySchema = z.object({ chatChannelId: z.string().min(1).max(MAX_CHANNEL_ID_LENGTH), verdictId: z.number().int().nullable().optional() });
+/** 활동 제한 본문(본문 자체도 생략 가능). */
 const restrictBodySchema = z.object({ verdictId: z.number().int().nullable().optional() }).optional();
+/** 푸시 구독 본문. 길이 상한으로 과대 입력을 막는다. */
 const pushSubscriptionSchema = z.object({
   endpoint: z.url().max(MAX_PUSH_ENDPOINT_LENGTH),
   keys: z.object({ p256dh: z.string().min(1).max(MAX_PUSH_KEY_LENGTH), auth: z.string().min(1).max(MAX_PUSH_KEY_LENGTH) }),
 });
+/** 푸시 구독 해제 본문. */
 const pushDeleteSchema = z.object({ endpoint: z.string().min(1).max(MAX_PUSH_ENDPOINT_LENGTH) });
+/** 감사 기록 조회 쿼리(커서와 페이지 크기). */
 const auditQuerySchema = z.object({ beforeId: z.coerce.number().int().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+/** 통계 조회 쿼리(최근 N분, 최대 24시간). */
 const statsQuerySchema = z.object({ sinceMinutes: z.coerce.number().int().min(1).max(1440).default(60) });
 
 /** 권한 확인을 통과한 요청 정보. */
@@ -115,7 +133,9 @@ export function registerApiRoutes(app: FastifyInstance, services: RouteServices,
 function registerSessionRoutes(app: FastifyInstance, services: RouteServices, sessions: SessionStore): void {
   app.post("/api/logout", async (request, reply) => {
     const rawId = request.cookies[SESSION_COOKIE];
+    const session = rawId ? sessions.get(rawId) : null;
     if (rawId) sessions.deleteByRawId(rawId);
+    if (session) services.endSessions([session.id], "로그아웃했습니다");
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { ok: true };
   });
@@ -153,7 +173,8 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
     guarded(services, "temporary_restrict", async ({ request, reply, manager, channelId }) => {
       const { senderChannelId } = senderParamSchema.parse(request.params);
       const body = temporaryRestrictBodySchema.parse(request.body);
-      const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: body.chatChannelId, verdictId: body.verdictId ?? null };
+      const verdictId = resolveVerdictId(services, body.verdictId, senderChannelId, channelId);
+      const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: body.chatChannelId, verdictId };
       return sendOutcome(reply, await services.executor.submit(channelId, action, actorOf(manager)));
     }),
   );
@@ -161,7 +182,7 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
     "/api/senders/:senderChannelId/restrict",
     guarded(services, "restrict", async ({ request, reply, manager, channelId }) => {
       const { senderChannelId } = senderParamSchema.parse(request.params);
-      const verdictId = restrictBodySchema.parse(request.body)?.verdictId ?? null;
+      const verdictId = resolveVerdictId(services, restrictBodySchema.parse(request.body)?.verdictId, senderChannelId, channelId);
       return sendOutcome(reply, await services.executor.submit(channelId, { kind: "restrict", targetChannelId: senderChannelId, verdictId }, actorOf(manager)));
     }),
   );
@@ -229,6 +250,7 @@ async function issueTicketAfterRoleCheck(services: RouteServices, sessions: Sess
   const role = await services.verifyRole(manager.managerChannelId);
   if (!role) {
     sessions.deleteById(manager.id);
+    services.endSessions([manager.id], "매니저 권한이 해제되었습니다");
     throw new RouteError(401, "unauthorized", "치지직에서 매니저 권한이 해제되었습니다. 다시 로그인하세요.");
   }
   if (role !== manager.role) sessions.updateRole(manager.id, role);
@@ -278,6 +300,17 @@ function findVerdict(services: RouteServices, params: unknown, channelId: string
   const verdict = services.verdicts.get(id);
   if (!verdict || verdict.channelId !== channelId) throw new RouteError(404, "not_found", "해당 판정을 찾을 수 없습니다. 보관 기간이 지났을 수 있습니다.");
   return verdict;
+}
+
+/**
+ * 본문의 판정 ID가 이 채널의 것이고 대상 사용자의 판정인지 확인한다.
+ * 왜: 실행기는 판정 상태를 그대로 바꾸고 방송하므로, 다른 사용자·채널의 판정을 가리키면 엉뚱한 기록이 바뀐다.
+ */
+function resolveVerdictId(services: RouteServices, verdictId: number | null | undefined, senderChannelId: string, channelId: string): number | null {
+  if (verdictId === null || verdictId === undefined) return null;
+  const verdict = findVerdict(services, { id: verdictId }, channelId);
+  if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. 화면을 새로고침한 뒤 다시 시도하세요.");
+  return verdict.id;
 }
 
 /** 무시·오판으로 표시하고 기록·방송한다. 오판은 해당 규칙을 검토할 근거가 된다. */

@@ -50,9 +50,10 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     /** login()이 만든 채널 ID("<역할>-id")에서 역할을 그대로 돌려준다. 해임을 흉내 내려면 테스트에서 덮어쓴다. */
     verifyRole: async (managerChannelId) => managerChannelId.replace(/-id$/, "") as ManagerRole,
     disconnectChannel: vi.fn(),
+    endSessions: vi.fn<RouteServices["endSessions"]>(),
   };
   const authFlow: AuthFlow = {
-    authorizeUrl: (purpose) => `https://chzzk.example/account-interlock?purpose=${purpose}`,
+    authorizeUrl: (purpose) => `https://chzzk.example/account-interlock?purpose=${purpose}&state=test-state`,
     complete: async () => { throw new AuthError("이 채널의 매니저가 아닙니다."); },
     ...authFlowOverrides,
   };

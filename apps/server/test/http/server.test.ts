@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { toSocketSink } from "../../src/http/server.js";
 import { createHttpHarness, mutatingHeaders, ORIGIN } from "../helpers/httpHarness.js";
@@ -108,7 +108,7 @@ describe("규칙·감사 기록", () => {
 
 describe("로그인 콜백", () => {
   it("실패하면 이유를 담아 첫 화면으로 보낸다", async () => {
-    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s" });
+    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: "zg_oauth_state=s" } });
     expect(response.statusCode).toBe(302);
     expect(decodeURIComponent(response.headers.location as string)).toBe("/?loginError=이 채널의 매니저가 아닙니다.");
   });
@@ -118,10 +118,12 @@ describe("로그인 콜백", () => {
     harness = await createHttpHarness({
       complete: async () => ({ rawId: "raw-session", session: { id: "h", managerChannelId: "m", managerChannelName: "m", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 } }),
     });
-    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s" });
+    const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: "zg_oauth_state=s" } });
     expect(response.headers.location).toBe("/");
-    const cookie = String(response.headers["set-cookie"]);
+    const cookies = [response.headers["set-cookie"]].flat().map(String);
+    const cookie = cookies.find((value) => value.startsWith("zg_session=")) ?? "";
     expect(cookie).toMatch(/^zg_session=raw-session;/);
+    expect(cookies.find((value) => value.startsWith("zg_oauth_state="))).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/);
     for (const attribute of [/;\s*HttpOnly/i, /;\s*Secure/i, /;\s*SameSite=Lax/i, /;\s*Path=\//i]) expect(cookie).toMatch(attribute);
   });
 });
@@ -156,6 +158,108 @@ describe("WebSocket", () => {
     const socket = new WebSocket(`${address.replace("http", "ws")}/ws?ticket=wrong`, { headers: { origin: ORIGIN } });
     const code = await new Promise<number>((resolve) => socket.on("close", (closeCode) => resolve(closeCode)));
     expect(code).toBe(4003);
+  });
+});
+
+describe("CSRF 경로 우회", () => {
+  it("인코딩된 경로로도 표식 없는 상태 변경은 403", async () => {
+    const verdict = insertCandidate();
+    const headers = { cookie: `zg_session=${harness.login("STREAMING_CHANNEL_OWNER")}`, origin: "https://evil.example" };
+    const hide = await harness.app.inject({ method: "POST", url: `/%61pi/verdicts/${verdict.id}/hide`, headers });
+    const disconnect = await harness.app.inject({ method: "POST", url: "/%61pi/channel/disconnect", headers });
+    const logout = await harness.app.inject({ method: "POST", url: "/%61pi/logout", headers });
+    expect([hide.statusCode, disconnect.statusCode, logout.statusCode]).toEqual([403, 403, 403]);
+    expect(harness.submit).not.toHaveBeenCalled();
+    expect(harness.services.disconnectChannel).not.toHaveBeenCalled();
+  });
+});
+
+describe("세션 종료와 소켓", () => {
+  it("로그아웃하면 그 세션의 소켓을 닫도록 알린다", async () => {
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    const sessionId = harness.sessions.get(rawId)?.id;
+    await harness.app.inject({ method: "POST", url: "/api/logout", headers: mutatingHeaders(rawId) });
+    expect(harness.services.endSessions).toHaveBeenCalledWith([sessionId], "로그아웃했습니다");
+    expect(harness.sessions.get(rawId)).toBeNull();
+  });
+
+  it("권한이 해제된 매니저의 티켓 요청은 소켓 종료를 알린다", async () => {
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    const sessionId = harness.sessions.get(rawId)?.id;
+    harness.services.verifyRole = async () => null;
+    const response = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(rawId) });
+    expect(response.statusCode).toBe(401);
+    expect(harness.services.endSessions).toHaveBeenCalledWith([sessionId], "매니저 권한이 해제되었습니다");
+  });
+});
+
+describe("로그인 state 묶기", () => {
+  it("로그인 시작 시 state를 HttpOnly 쿠키로 묶는다", async () => {
+    const response = await harness.app.inject({ method: "GET", url: "/auth/login" });
+    expect(response.statusCode).toBe(302);
+    const cookie = String(response.headers["set-cookie"]);
+    expect(cookie).toMatch(/^zg_oauth_state=test-state;/);
+    for (const attribute of [/;\s*HttpOnly/i, /;\s*Secure/i, /;\s*SameSite=Lax/i, /;\s*Path=\/auth/i, /;\s*Max-Age=600/i]) expect(cookie).toMatch(attribute);
+  });
+
+  it("쿠키가 없거나 다르면 complete를 부르지 않고 안내한다", async () => {
+    await harness.close();
+    const complete = vi.fn();
+    harness = await createHttpHarness({ complete });
+    for (const headers of [{}, { cookie: "zg_oauth_state=other" }]) {
+      const response = await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers });
+      expect(decodeURIComponent(response.headers.location as string)).toBe("/?loginError=로그인 요청이 만료되었거나 다른 브라우저에서 시작되었습니다. 처음부터 다시 시도하세요.");
+    }
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("기존 세션 쿠키가 있으면 로그인 성공 때 그 세션을 지운다", async () => {
+    await harness.close();
+    harness = await createHttpHarness({
+      complete: async () => ({ rawId: "new-session", session: { id: "h", managerChannelId: "m", managerChannelName: "m", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 } }),
+    });
+    const oldRawId = harness.login("STREAMING_CHAT_MANAGER");
+    const oldId = harness.sessions.get(oldRawId)?.id;
+    await harness.app.inject({ method: "GET", url: "/auth/callback?code=c&state=s", headers: { cookie: `zg_oauth_state=s; zg_session=${oldRawId}` } });
+    expect(harness.sessions.get(oldRawId)).toBeNull();
+    expect(harness.services.endSessions).toHaveBeenCalledWith([oldId], "새로 로그인했습니다");
+  });
+});
+
+describe("판정 ID 검증", () => {
+  const restrictUrl = "/api/senders/bad/restrict";
+
+  it("다른 사용자의 판정이면 400이고 실행하지 않는다", async () => {
+    const other = harness.verdicts.insert({ channelId: "c1", chatChannelId: "chat-1", messageTime: 6, senderChannelId: "other", senderNickname: "다른이", content: "x", decision: "candidate", reason: "rule:weak:1" });
+    const headers = mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER"));
+    const restrict = await harness.app.inject({ method: "POST", url: restrictUrl, headers, payload: { verdictId: other.id } });
+    const temporary = await harness.app.inject({ method: "POST", url: "/api/senders/bad/temporary-restrict", headers, payload: { chatChannelId: "chat-1", verdictId: other.id } });
+    expect([restrict.statusCode, temporary.statusCode]).toEqual([400, 400]);
+    expect(restrict.json().error).toBe("verdict_mismatch");
+    expect(harness.submit).not.toHaveBeenCalled();
+  });
+
+  it("없는 판정이면 404", async () => {
+    const response = await harness.app.inject({ method: "POST", url: restrictUrl, headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")), payload: { verdictId: 999 } });
+    expect(response.statusCode).toBe(404);
+    expect(harness.submit).not.toHaveBeenCalled();
+  });
+
+  it("보낸 사람이 같은 판정이면 실행기로 넘긴다", async () => {
+    const verdict = insertCandidate();
+    const response = await harness.app.inject({ method: "POST", url: restrictUrl, headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")), payload: { verdictId: verdict.id } });
+    expect(response.statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledWith("c1", { kind: "restrict", targetChannelId: "bad", verdictId: verdict.id }, expect.anything());
+  });
+});
+
+describe("오류 가림과 정적 폴백", () => {
+  it("5xx 예외의 메시지는 사용자에게 보이지 않는다", async () => {
+    harness.services.getChatSettings = async () => { throw Object.assign(new Error("secret internals"), { statusCode: 503 }); };
+    const response = await harness.app.inject({ method: "GET", url: "/api/chat-settings", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
+    expect(response.statusCode).toBe(503);
+    expect(response.body).not.toContain("secret internals");
+    expect(response.json().message).toBe("서버 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.");
   });
 });
 

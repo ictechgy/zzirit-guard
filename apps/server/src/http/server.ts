@@ -11,7 +11,7 @@ import { describeError, type Logger } from "../logger.js";
 import { AuthError, CALLBACK_PATH, type AuthFlow } from "../managers/authFlow.js";
 import { SESSION_TTL_MS, type ManagerSession, type SessionStore } from "../managers/sessionStore.js";
 import type { RealtimeHub, SocketSink } from "../realtime/hub.js";
-import { REQUEST_MARKER_HEADER, SESSION_COOKIE } from "./constants.js";
+import { OAUTH_STATE_COOKIE, REQUEST_MARKER_HEADER, SESSION_COOKIE } from "./constants.js";
 import { errorBody, sendError } from "./errors.js";
 import { registerApiRoutes, type RouteServices } from "./routes.js";
 
@@ -43,13 +43,14 @@ const callbackQuerySchema = z.object({ code: z.string().min(1), state: z.string(
 export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
   await app.register(fastifyCookie);
-  await app.register(fastifyWebsocket);
+  // 서버는 클라이언트 메시지를 읽지 않으므로 수신 크기를 최소로 제한한다.
+  await app.register(fastifyWebsocket, { options: { maxPayload: 1024 } });
   app.decorateRequest("manager", null);
   app.addHook("onRequest", async (request) => {
     const rawId = request.cookies[SESSION_COOKIE];
     request.manager = rawId ? deps.sessions.get(rawId) : null;
   });
-  app.addHook("preHandler", async (request, reply) => rejectCrossSite(deps.config.publicOrigin, request, reply));
+  app.addHook("onRequest", async (request, reply) => rejectCrossSite(deps.config.publicOrigin, request, reply));
   app.addHook("onSend", async (_request, reply, payload) => applySecurityHeaders(reply, deps.config.publicOrigin, payload));
   app.setErrorHandler((error, _request, reply) => sendError(deps.logger, error, reply));
   registerAuthRoutes(app, deps);
@@ -59,9 +60,13 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
   return app;
 }
 
-/** /api의 상태 변경 요청은 표식 헤더가 있고 출처가 같아야 한다(CSRF 방지, 스펙 8장). */
+/**
+ * 상태 변경 요청은 경로와 상관없이 표식 헤더가 있고 출처가 같아야 한다(CSRF 방지, 스펙 8장).
+ * 왜 경로를 보지 않나: 원본 URL은 "/%61pi/"처럼 인코딩될 수 있어 접두사 검사를 우회하며, /api 밖에는 상태 변경 라우트가 없다.
+ * onRequest에서 검사해 본문 파싱 전에 거절한다.
+ */
 async function rejectCrossSite(publicOrigin: string, request: FastifyRequest, reply: FastifyReply) {
-  if (!request.url.startsWith("/api/") || SAFE_METHODS.has(request.method)) return;
+  if (SAFE_METHODS.has(request.method)) return;
   const origin = request.headers.origin;
   if (request.headers[REQUEST_MARKER_HEADER] === "1" && (origin === undefined || origin === publicOrigin)) return;
   return reply.code(403).send(errorBody("cross_site", "요청 출처를 확인할 수 없습니다. 앱을 새로고침한 뒤 다시 시도하세요."));
@@ -81,17 +86,36 @@ async function applySecurityHeaders(reply: FastifyReply, publicOrigin: string, p
 
 /** 치지직 OAuth 시작·콜백. */
 function registerAuthRoutes(app: FastifyInstance, deps: HttpDeps): void {
-  app.get("/auth/connect", async (_request, reply) => reply.redirect(deps.authFlow.authorizeUrl("connect")));
-  app.get("/auth/login", async (_request, reply) => reply.redirect(deps.authFlow.authorizeUrl("login")));
+  app.get("/auth/connect", async (_request, reply) => startAuthorization(deps, reply, "connect"));
+  app.get("/auth/login", async (_request, reply) => startAuthorization(deps, reply, "login"));
   app.get(CALLBACK_PATH, async (request, reply) => completeLogin(deps, request, reply));
+}
+
+/** state 쿠키 수명(10분). 인증 페이지에서 머무는 시간보다 넉넉하다. */
+const OAUTH_STATE_COOKIE_MAX_AGE_SECONDS = 600;
+/** state 쿠키 범위. 인증 경로에서만 보낸다. */
+const OAUTH_STATE_COOKIE_PATH = "/auth";
+/** state 쿠키가 없거나 다를 때의 안내 문구. */
+const STATE_MISMATCH_MESSAGE = "로그인 요청이 만료되었거나 다른 브라우저에서 시작되었습니다. 처음부터 다시 시도하세요.";
+
+/** 인증 URL의 state를 이 브라우저의 쿠키에 묶고 치지직으로 보낸다(로그인 CSRF 방지). */
+function startAuthorization(deps: HttpDeps, reply: FastifyReply, purpose: "connect" | "login") {
+  const url = deps.authFlow.authorizeUrl(purpose);
+  const state = new URL(url).searchParams.get("state");
+  if (state) reply.setCookie(OAUTH_STATE_COOKIE, state, { httpOnly: true, secure: true, sameSite: "lax", path: OAUTH_STATE_COOKIE_PATH, maxAge: OAUTH_STATE_COOKIE_MAX_AGE_SECONDS });
+  return reply.redirect(url);
 }
 
 /** 콜백 처리: 성공하면 세션 쿠키를 주고 첫 화면으로, 실패하면 이유를 쿼리에 담아 첫 화면으로 보낸다. */
 async function completeLogin(deps: HttpDeps, request: FastifyRequest, reply: FastifyReply) {
   const query = callbackQuerySchema.safeParse(request.query);
   if (!query.success) return reply.redirect(`/?loginError=${encodeURIComponent("치지직에서 돌아온 값이 없습니다. 다시 시도하세요.")}`);
+  const boundState = request.cookies[OAUTH_STATE_COOKIE];
+  reply.clearCookie(OAUTH_STATE_COOKIE, { path: OAUTH_STATE_COOKIE_PATH });
+  if (!boundState || boundState !== query.data.state) return reply.redirect(`/?loginError=${encodeURIComponent(STATE_MISMATCH_MESSAGE)}`);
   try {
     const { rawId } = await deps.authFlow.complete(query.data.code, query.data.state);
+    rotateExistingSession(deps, request);
     reply.setCookie(SESSION_COOKIE, rawId, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: SESSION_TTL_MS / 1000 });
     return reply.redirect("/");
   } catch (error) {
@@ -99,6 +123,15 @@ async function completeLogin(deps: HttpDeps, request: FastifyRequest, reply: Fas
     const message = error instanceof AuthError ? error.message : "로그인 중 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.";
     return reply.redirect(`/?loginError=${encodeURIComponent(message)}`);
   }
+}
+
+/** 로그인 성공 시 이전 세션을 지우고 그 소켓을 닫는다(세션 고정 방지). */
+function rotateExistingSession(deps: HttpDeps, request: FastifyRequest): void {
+  const oldRawId = request.cookies[SESSION_COOKIE];
+  const oldSession = oldRawId ? deps.sessions.get(oldRawId) : null;
+  if (!oldRawId || !oldSession) return;
+  deps.sessions.deleteByRawId(oldRawId);
+  deps.services.endSessions([oldSession.id], "새로 로그인했습니다");
 }
 
 /** WebSocket: 일회용 티켓과 출처를 확인한 뒤 허브에 붙이고 현재 상태를 보낸다. */
@@ -139,7 +172,7 @@ async function registerStatic(app: FastifyInstance, directory: string): Promise<
   if (!existsSync(directory)) return;
   await app.register(fastifyStatic, { root: directory, wildcard: false });
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith("/api/") || request.url.startsWith("/auth/") || request.url.startsWith("/ws")) {
+    if (!["GET", "HEAD"].includes(request.method) || request.url.startsWith("/api/") || request.url.startsWith("/auth/") || request.url.startsWith("/ws")) {
       return reply.code(404).send(errorBody("not_found", "없는 주소입니다."));
     }
     return reply.sendFile("index.html");

@@ -32,8 +32,13 @@ export function errorBody(code: string, message: string): ApiErrorBody {
 export function sendError(logger: Logger, error: unknown, reply: FastifyReply): FastifyReply {
   const status = statusFor(error);
   if (status >= 500) logger.error("요청 처리 실패", { status, error: describeError(error) });
-  const body = status === 500 ? errorBody("internal", "서버 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.") : errorBody(codeFor(error, status), messageFor(error));
+  const body = shouldMask(error, status) ? errorBody("internal", "서버 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.") : errorBody(codeFor(error, status), messageFor(error));
   return reply.code(status).send(body);
+}
+
+/** 5xx는 치지직 오류를 빼고 내부 사정을 감춘다. 왜: 임의 예외 메시지(경로·쿼리 등)가 사용자에게 새지 않게 한다. */
+function shouldMask(error: unknown, status: number): boolean {
+  return status >= 500 && !(error instanceof ChzzkApiError);
 }
 
 /** 예외 종류별 HTTP 상태. */
