@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -44,6 +44,46 @@ describe("runRetention", () => {
     now = 181 * DAY;
     expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ audits: 1, stats: 1 });
   });
+
+  it("채널 설정의 보관 기간(7일)을 따른다", () => {
+    let now = 100 * DAY;
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id, retention_days_content) VALUES ('c1', 7)").run();
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now);
+    const sessions = createSessionStore(database, () => now);
+    const verdict = { channelId: "c1", chatChannelId: "x", messageTime: 0, senderChannelId: "s", senderNickname: "n", content: "c", decision: "candidate" as const, reason: "r" };
+    verdicts.insert(verdict);
+    now = 100 * DAY + 8 * DAY;
+    verdicts.insert(verdict);
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 1 });
+  });
+
+  it("보관 기한과 정확히 같은 시각의 행은 남기고, 1ms 이전 행은 지운다", () => {
+    const now = 400 * DAY;
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
+    const insertVerdictAt = (createdAt: number) =>
+      database.prepare(
+        "INSERT INTO verdict (channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason, created_at) VALUES ('c1', 'x', 0, 's', 'n', 'c', 'candidate', 'r', ?)",
+      ).run(createdAt);
+    const insertAuditAt = (createdAt: number) =>
+      database.prepare(
+        "INSERT INTO audit_log (channel_id, actor_type, action, result, created_at) VALUES ('c1', 'rule', 'hide', 'ok', ?)",
+      ).run(createdAt);
+    insertVerdictAt(now - 30 * DAY);
+    insertVerdictAt(now - 30 * DAY - 1);
+    insertAuditAt(now - 180 * DAY);
+    insertAuditAt(now - 180 * DAY - 1);
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now);
+    const sessions = createSessionStore(database, () => now);
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 1, audits: 1 });
+    expect(database.prepare("SELECT created_at FROM verdict").all()).toEqual([{ created_at: now - 30 * DAY }]);
+    expect(database.prepare("SELECT created_at FROM audit_log").all()).toEqual([{ created_at: now - 180 * DAY }]);
+  });
 });
 
 describe("runBackup", () => {
@@ -65,5 +105,55 @@ describe("runBackup", () => {
     const path = await runBackup(database, directory, () => Date.UTC(2026, 9, 11));
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(directory).mode & 0o777).toBe(0o700);
+  });
+
+  it("백업이 실패하면 백업 이름과 부분 파일을 남기지 않고 원래 오류를 던진다", async () => {
+    const directory = makeTemporaryDirectory();
+    const database = openDatabase(":memory:");
+    database.close();
+    await expect(runBackup(database, directory, () => Date.UTC(2026, 9, 11))).rejects.toThrow();
+    const files = readdirSync(directory);
+    expect(files.filter((name) => name.endsWith(".sqlite"))).toHaveLength(0);
+    expect(files.filter((name) => name.endsWith(".partial"))).toHaveLength(0);
+  });
+
+  it("백업 도중 실패해 부분 파일이 생겨도 남기지 않고 원래 오류를 던진다", async () => {
+    const directory = makeTemporaryDirectory();
+    // 실제 SQLite 백업이 중간에 실패한 상황을 흉내 낸다: 파일을 쓴 뒤 거절한다.
+    const partialWritingDatabase = {
+      backup: async (path: string) => {
+        writeFileSync(path, "partial");
+        throw new Error("디스크 가득 참");
+      },
+    } as unknown as Parameters<typeof runBackup>[0];
+    await expect(runBackup(partialWritingDatabase, directory, () => Date.UTC(2026, 9, 11))).rejects.toThrow("디스크 가득 참");
+    expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it("방금 만든 백업은 보존 개수 정리에서 지우지 않는다(미래 시각 백업이 있어도)", async () => {
+    const directory = makeTemporaryDirectory();
+    writeFileSync(join(directory, "zzirit-guard-20990101-000000.sqlite"), "");
+    writeFileSync(join(directory, "zzirit-guard-20990102-000000.sqlite"), "");
+    const database = openDatabase(":memory:");
+    const path = await runBackup(database, directory, () => Date.UTC(2026, 9, 11), 2);
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it("보존 개수가 0이어도 방금 만든 백업 1개는 남긴다", async () => {
+    const directory = makeTemporaryDirectory();
+    const database = openDatabase(":memory:");
+    const path = await runBackup(database, directory, () => Date.UTC(2026, 9, 11), 0);
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it("백업 형식이 아닌 파일은 정리 때 건드리지 않는다", async () => {
+    const directory = makeTemporaryDirectory();
+    writeFileSync(join(directory, "notes.txt"), "");
+    writeFileSync(join(directory, "zzirit-guard-x.sqlite"), "");
+    const database = openDatabase(":memory:");
+    for (let day = 0; day < 3; day += 1) await runBackup(database, directory, () => Date.UTC(2026, 9, 1 + day), 1);
+    const files = readdirSync(directory).sort();
+    expect(files).toContain("notes.txt");
+    expect(files).toContain("zzirit-guard-x.sqlite");
   });
 });

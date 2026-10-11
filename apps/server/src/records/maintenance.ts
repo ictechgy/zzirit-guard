@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { Database } from "../db/database.js";
 import type { SessionStore } from "../managers/sessionStore.js";
 import type { Clock } from "../time.js";
@@ -31,6 +31,8 @@ const DEFAULT_RETENTION = { content: 30, audit: 180 };
 const DEFAULT_BACKUP_KEEP = 7;
 /** 백업 파일 이름 형식. 이름순 정렬이 곧 시간순이 되게 한다. */
 const BACKUP_PATTERN = /^zzirit-guard-\d{8}-\d{6}\.sqlite$/;
+/** 백업 작성 중 임시 파일 접미사. BACKUP_PATTERN에 맞지 않아 정리 대상이 되지 않는다. */
+const PARTIAL_SUFFIX = ".partial";
 /**
  * 백업 디렉터리 권한(소유자만 접근). 백업에는 암호화된 토큰과 원문이 들어 있어
  * 같은 기기의 다른 사용자가 읽지 못하게 한다.
@@ -71,20 +73,37 @@ function readRetentionDays(database: Database): { content: number; audit: number
  * SQLite 온라인 백업을 만들고 오래된 것을 지운다. 백업에는 암호화된 토큰과 30일 이내 원문이 들어 있어
  * FileVault로 보호되는 데이터 디렉터리 아래에만 둔다.
  * 디렉터리와 파일 권한을 소유자 전용으로 좁히는 이유는 같은 기기의 다른 사용자가 원문과 토큰을 읽지 못하게 하려는 것이다.
+ * 임시 이름으로 쓰고 끝나면 이름을 바꾸는 이유는, 중간에 실패한 부분 파일이 최신 백업으로 잘못 세지거나
+ * 정리 때 좋은 백업을 밀어내지 않게 하려는 것이다.
  * @param database 백업할 서버 SQLite 연결
  * @param backupDirectory 백업을 둘 디렉터리. 없으면 만든다
  * @param clock 파일 이름에 넣을 시각을 정하는 시계
- * @param keep 남길 백업 개수
+ * @param keep 남길 백업 개수. 0 이하여도 방금 만든 백업 1개는 남긴다
  * @returns 만든 백업 파일 경로
  */
 export async function runBackup(database: Database, backupDirectory: string, clock: Clock, keep = DEFAULT_BACKUP_KEEP): Promise<string> {
   prepareBackupDirectory(backupDirectory);
-  const path = join(backupDirectory, `zzirit-guard-${formatTimestamp(clock())}.sqlite`);
-  await database.backup(path);
-  // mkdir의 mode는 이미 있는 디렉터리에 적용되지 않고, 백업 파일은 umask에 따라 넓게 열릴 수 있어 명시적으로 고친다.
-  chmodSync(path, BACKUP_FILE_MODE);
-  pruneBackups(backupDirectory, keep);
-  return path;
+  const finalPath = join(backupDirectory, `zzirit-guard-${formatTimestamp(clock())}.sqlite`);
+  await writeBackupFile(database, finalPath);
+  pruneBackups(backupDirectory, Math.max(1, keep), finalPath);
+  return finalPath;
+}
+
+/**
+ * 임시 파일에 백업을 쓰고 권한을 맞춘 뒤 최종 이름으로 바꾼다. 실패하면 임시 파일을 지우고 원래 오류를 그대로 던진다.
+ * 임시 이름은 BACKUP_PATTERN과 겹치지 않아, 정리 로직이 미완성 파일을 백업으로 세지 않는다.
+ */
+async function writeBackupFile(database: Database, finalPath: string): Promise<void> {
+  const partialPath = `${finalPath}${PARTIAL_SUFFIX}`;
+  try {
+    await database.backup(partialPath);
+    // umask에 따라 넓게 열릴 수 있으므로 이름을 바꾸기 전에 소유자 전용으로 고친다.
+    chmodSync(partialPath, BACKUP_FILE_MODE);
+    renameSync(partialPath, finalPath);
+  } catch (error) {
+    rmSync(partialPath, { force: true });
+    throw error;
+  }
 }
 
 /**
@@ -102,8 +121,15 @@ function formatTimestamp(timestampMs: number): string {
   return `${iso.slice(0, 10).replace(/-/g, "")}-${iso.slice(11, 19).replace(/:/g, "")}`;
 }
 
-/** 백업 파일 중 최신 keep개만 남긴다. 형식이 다른 파일은 건드리지 않는다. */
-function pruneBackups(backupDirectory: string, keep: number): void {
+/**
+ * 백업 파일 중 최신 keep개만 남긴다. 형식이 다른 파일은 건드리지 않는다.
+ * 방금 만든 백업(keepPath)은 시각이 더 미래인 파일이 있어도 지우지 않는다. 시계가 어긋나면 새 백업이 가장 오래된 것으로 보일 수 있기 때문이다.
+ */
+function pruneBackups(backupDirectory: string, keep: number, keepPath: string): void {
+  const keepName = basename(keepPath);
   const backups = readdirSync(backupDirectory).filter((name) => BACKUP_PATTERN.test(name)).sort();
-  backups.slice(0, Math.max(0, backups.length - keep)).forEach((name) => rmSync(join(backupDirectory, name)));
+  backups
+    .slice(0, Math.max(0, backups.length - keep))
+    .filter((name) => name !== keepName)
+    .forEach((name) => rmSync(join(backupDirectory, name)));
 }
