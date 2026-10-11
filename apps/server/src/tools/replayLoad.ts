@@ -1,4 +1,4 @@
-// 부하 재생 도구: 합성 채팅을 초당 N건으로 판정 파이프라인에 흘려 처리 시간을 잰다(스펙 13장).
+// 부하 재생 도구: 합성 채팅을 초당 N건으로 판정 파이프라인에 흘려 처리 시간과 밀린 시간을 잰다(스펙 13장).
 // 사용법: npm run build -w @zzirit-guard/server && npm run replay -w @zzirit-guard/server -- --rate 50 --seconds 600
 // 치지직에 연결하지 않는다. 메모리 DB와 아무것도 하지 않는 실행기를 써서 네트워크를 전혀 타지 않는다.
 import { performance } from "node:perf_hooks";
@@ -19,13 +19,22 @@ import { createMinuteStats } from "../records/minuteStats.js";
 import { createSettingsRepository } from "../records/settingsRepository.js";
 import { createVerdictRepository } from "../records/verdictRepository.js";
 
+/**
+ * 명령행 출력 맨 앞에 붙는 측정 범위 표기. 스펙 13장 근거로 옮길 때 이 범위를 함께 적어야 오해가 없다.
+ * CLI 출력에만 붙이고 ReplayReport에는 넣지 않는다. 라이브러리 호출자는 범위를 이미 알고 있기 때문이다.
+ */
+const SCOPE_NOTE = "규칙 판정+판정 처리+메모리 SQLite 쓰기만 측정. 실행기·치지직 네트워크 제외, 자동 숨김 스위치 꺼짐(섀도 기록)";
+
 /** 재생 설정. */
 export interface ReplayOptions {
   ratePerSecond: number;
   seconds: number;
 }
 
-/** 재생 결과. achievedPerSecond가 목표보다 낮으면 처리가 밀린 것이다. */
+/**
+ * 재생 결과. achievedPerSecond가 목표보다 낮으면 처리가 밀린 것이다.
+ * 지연 필드(p95LatenessMs·maxLatenessMs)는 처리 시간만 재면 보이지 않는 멈춤의 영향을 드러내려고 따로 둔다(누락 보정).
+ */
 export interface ReplayReport {
   messages: number;
   elapsedMs: number;
@@ -33,7 +42,26 @@ export interface ReplayReport {
   p50Ms: number;
   p95Ms: number;
   maxMs: number;
+  /**
+   * 예정 시각부터 실제 처리 시작까지 밀린 시간의 95분위. 한 건이 멈추면 뒤따르는 건들이 밀려서 드러난다.
+   * 처리 시간(p95Ms)만 재면 멈춤 뒤에 줄 선 메시지가 빠르게 찍혀 이 값이 0에 가깝게 보인다.
+   */
+  p95LatenessMs: number;
+  /**
+   * 밀린 시간의 최댓값. 0보다 크면 목표 속도를 따라가지 못한 순간이 있었다는 뜻이고,
+   * 값의 크기는 가장 길게 멈춘 구간이 뒤 메시지에 얼마나 전가됐는지를 보여 준다.
+   */
+  maxLatenessMs: number;
   decisions: Record<string, number>;
+  /** 판정 이유(reason) 전체 문자열별 건수. 개인 도배 같은 규칙 경로가 실제로 지나갔는지 확인하는 용도다. */
+  reasons: Record<string, number>;
+}
+
+/** runPaced가 돌려주는 원자료. 건마다 처리 시간과 밀린 시간을 담는다. */
+export interface PacedRun {
+  elapsedMs: number;
+  serviceMs: number[];
+  latenessMs: number[];
 }
 
 /**
@@ -47,17 +75,39 @@ export class ReplayArgumentError extends Error {
   }
 }
 
-/** 합성 채팅 문장. 실채팅 분포를 흉내 낸 것이 아니라 각 규칙 경로를 고루 지나가게 고른 것이다. */
+/** 일반 송신자가 쓰는 문장. 약한 금칙어·떼도배·통과 경로를 지나가도록 고른 것이다. 강한 금칙어는 이 목록으로 맞지 않는다(smoke의 reasons로 확인). */
 const SAMPLE_TEXTS = [
   "ㅋㅋㅋㅋㅋ", "와 방금 컨트롤 미쳤다 ㄷㄷ", "오늘 몇 시까지 방송해요?", "GG", "저 보스 존나 세네",
   "씨발 방송 꺼라", "구독하면 선물 드려요 진짜로 지금", "다음 판은 원딜 해주세요", "ㅠㅠ", "헤드샷 개쩐다",
 ];
 
-/** 메시지 1건을 만든다. 보낸 사람을 돌려 써서 도배 감지도 함께 돈다. */
+/**
+ * 도배 송신자가 쓰는 문장. 금칙어에 걸리지 않는 평범한 문장만 골라서, 개인 도배 판정이 이유(rule:personal_flood)로 드러나게 한다.
+ * 욕설을 넣으면 금칙어가 먼저 걸려 개인 도배 경로가 가려진다.
+ */
+const SPAMMER_TEXTS = ["오늘 몇 시까지 방송해요?", "다음 판은 원딜 해주세요", "헤드샷 개쩐다", "GG", "ㅠㅠ"];
+
+/** 이 간격마다 한 번씩 도배 송신자가 끼어든다. 100/s에서 약 6.7건/초라 10초 창 안에 5건 기준을 넘는다. */
+const SPAMMER_INTERVAL = 15;
+
+/** 도배 송신자의 채널 식별자. */
+const SPAMMER_ID = "spammer-1";
+
+/**
+ * 합성 채팅 1건을 만든다. 경로 구성: 일반 송신자 300명이 SAMPLE_TEXTS를 돌아가며 쓰고,
+ * 15건마다 SPAMMER_ID가 SPAMMER_TEXTS를 보낸다. 이 구성에서 나오는 판정 이유는 약한 금칙어(rule:weak)·떼도배(rule:group_flood)·
+ * 개인 도배(rule:personal_flood)·통과(none)다. 강한 금칙어(rule:strong)와 링크·전화번호 경로는 나오지 않는다.
+ * 실제 채팅 분포를 흉내 낸 것은 아니다. 어떤 경로가 실제로 몇 건 나왔는지는 ReplayReport.reasons로 확인한다.
+ */
 function syntheticChat(index: number, receivedAt: number): ChatEvent {
+  const isSpammer = index % SPAMMER_INTERVAL === 0;
+  const senderChannelId = isSpammer ? SPAMMER_ID : `viewer-${index % 300}`;
+  const content = isSpammer
+    ? (SPAMMER_TEXTS[Math.floor(index / SPAMMER_INTERVAL) % SPAMMER_TEXTS.length] as string)
+    : (SAMPLE_TEXTS[index % SAMPLE_TEXTS.length] as string);
   return {
-    channelId: "replay", senderChannelId: `viewer-${index % 300}`, chatChannelId: "chat", nickname: `viewer-${index % 300}`,
-    userRoleCode: "common_user", content: SAMPLE_TEXTS[index % SAMPLE_TEXTS.length] as string, messageTime: receivedAt, receivedAt,
+    channelId: "replay", senderChannelId, chatChannelId: "chat", nickname: senderChannelId,
+    userRoleCode: "common_user", content, messageTime: receivedAt, receivedAt,
   };
 }
 
@@ -83,24 +133,45 @@ function buildPipeline() {
   return { pipeline, handler };
 }
 
-/** 정한 속도로 메시지를 흘리며 한 건당 처리 시간(판정 + 처리)을 잰다. */
+/**
+ * 정해진 간격으로 work를 호출하고, 건마다 처리 시간과 예정 시각 대비 밀린 시간을 잰다.
+ * 왜 밀린 시간을 따로 재는가(누락 보정): 한 건이 오래 멈추면 뒤 건들의 예정 시각이 이미 지나 바로 처리되는데,
+ * 처리 시간만 재면 그 건들이 빠르게 찍혀 멈춤이 가려진다. 예정 시각 기준 지연을 같이 재야 멈춤이 드러난다.
+ * @param total 보낼 건수
+ * @param intervalMs 건 사이 간격(ms). 건 i의 예정 시각은 시작 + i × intervalMs
+ * @param work 건 하나를 처리하는 함수. 인덱스를 받는다
+ * @returns 전체 경과 시간과 건마다의 처리 시간·밀린 시간
+ */
+export async function runPaced(total: number, intervalMs: number, work: (index: number) => void): Promise<PacedRun> {
+  const serviceMs: number[] = [];
+  const latenessMs: number[] = [];
+  const startedAt = performance.now();
+  for (let index = 0; index < total; index += 1) {
+    const scheduledAt = startedAt + index * intervalMs;
+    await waitUntil(scheduledAt);
+    const begin = performance.now();
+    // 예정보다 일찍 시작하는 경우는 없어야 하지만, 혹시 있어도 밀린 시간이 음수로 섞이지 않게 0으로 바닥을 깐다.
+    latenessMs.push(Math.max(0, begin - scheduledAt));
+    work(index);
+    serviceMs.push(performance.now() - begin);
+  }
+  return { elapsedMs: performance.now() - startedAt, serviceMs, latenessMs };
+}
+
+/** 정한 속도로 합성 채팅을 흘리며 판정·처리를 하고, 시간과 판정 집계를 돌려준다. */
 export async function runReplay(options: ReplayOptions): Promise<ReplayReport> {
   const { pipeline, handler } = buildPipeline();
   const total = Math.round(options.ratePerSecond * options.seconds);
-  const intervalMs = 1000 / options.ratePerSecond;
-  const durations: number[] = [];
   const decisions: Record<string, number> = {};
-  const startedAt = performance.now();
-  for (let index = 0; index < total; index += 1) {
-    await waitUntil(startedAt + index * intervalMs);
+  const reasons: Record<string, number> = {};
+  const run = await runPaced(total, 1000 / options.ratePerSecond, (index) => {
     const event = syntheticChat(index, Date.now());
-    const begin = performance.now();
     const result = pipeline.evaluate(event);
     handler.handle(event, result);
-    durations.push(performance.now() - begin);
     decisions[result.decision] = (decisions[result.decision] ?? 0) + 1;
-  }
-  return summarize(durations, performance.now() - startedAt, decisions);
+    reasons[result.reason] = (reasons[result.reason] ?? 0) + 1;
+  });
+  return summarize(run, decisions, reasons);
 }
 
 /** 목표 시각까지 기다린다(이미 지났으면 바로 진행해 밀림이 결과에 드러나게 한다). */
@@ -109,11 +180,39 @@ async function waitUntil(targetMs: number): Promise<void> {
   if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
 }
 
-/** 분위수와 처리율을 계산한다. */
-function summarize(durations: number[], elapsedMs: number, decisions: Record<string, number>): ReplayReport {
-  const sorted = [...durations].sort((left, right) => left - right);
-  const at = (ratio: number) => round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] ?? 0);
-  return { messages: durations.length, elapsedMs: round(elapsedMs), achievedPerSecond: round((durations.length / elapsedMs) * 1000), p50Ms: at(0.5), p95Ms: at(0.95), maxMs: round(sorted.at(-1) ?? 0), decisions };
+/**
+ * 원자료를 보고서로 바꾼다. 분위수는 정렬된 배열에서 floor(건수 × 비율) 번째 값을 고른다.
+ * floor 인덱스는 0부터 세므로 nearest-rank보다 한 칸 위의 값이 나온다. 지연 지표에서 이쪽이 보수적이다(낮게 보이지 않는다).
+ * @param run 원자료
+ * @param decisions 판정별 건수
+ * @param reasons 판정 이유별 건수
+ */
+export function summarize(run: PacedRun, decisions: Record<string, number>, reasons: Record<string, number>): ReplayReport {
+  const service = [...run.serviceMs].sort((left, right) => left - right);
+  const lateness = [...run.latenessMs].sort((left, right) => left - right);
+  const messages = service.length;
+  return {
+    messages,
+    elapsedMs: round(run.elapsedMs),
+    // 분모는 목표 시간(seconds)이 아니라 실제 경과 시간이다. 밀렸다면 목표보다 낮게 나와야 하기 때문이다.
+    achievedPerSecond: round((messages / run.elapsedMs) * 1000),
+    p50Ms: percentileOf(service, 0.5),
+    p95Ms: percentileOf(service, 0.95),
+    maxMs: round(service.at(-1) ?? 0),
+    p95LatenessMs: percentileOf(lateness, 0.95),
+    maxLatenessMs: round(lateness.at(-1) ?? 0),
+    decisions,
+    reasons,
+  };
+}
+
+/**
+ * 정렬된 값에서 분위수 하나를 고른다. 빈 배열이면 0을 돌려준다.
+ * @param sorted 오름차순으로 정렬된 값
+ * @param ratio 0~1 사이 비율
+ */
+function percentileOf(sorted: number[], ratio: number): number {
+  return round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] ?? 0);
 }
 
 /** 소수 둘째 자리 반올림. */
@@ -163,7 +262,7 @@ function readOptionsFromArgv(): ReplayOptions {
 }
 
 /**
- * 명령행 실행: --rate(초당 건수, 기본 50) --seconds(기본 60). 결과를 JSON으로 출력한다.
+ * 명령행 실행: --rate(초당 건수, 기본 50) --seconds(기본 60). 범위 표기와 결과를 JSON으로 출력한다.
  * 인자 오류는 원인을 stderr에 적고 종료 코드 2로 끝낸다. 재생 중 예외는 1로 끝낸다.
  */
 async function runFromCommandLine(): Promise<void> {
@@ -176,7 +275,7 @@ async function runFromCommandLine(): Promise<void> {
     console.error("사용법: npm run replay -w @zzirit-guard/server -- --rate 100 --seconds 10");
     process.exit(2);
   }
-  console.log(JSON.stringify(await runReplay(options), null, 2));
+  console.log(JSON.stringify({ scope: SCOPE_NOTE, ...(await runReplay(options)) }, null, 2));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

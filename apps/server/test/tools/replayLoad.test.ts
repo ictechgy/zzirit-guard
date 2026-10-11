@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseReplayOptions, runReplay } from "../../src/tools/replayLoad.js";
+import { parseReplayOptions, runPaced, runReplay, summarize } from "../../src/tools/replayLoad.js";
+
+/** 주어진 밀리초만큼 동기적으로 CPU를 붙잡는다. 이벤트 루프를 멈춰 GC·체크포인트 같은 멈춤을 흉내 낸다. */
+function blockFor(milliseconds: number): void {
+  const until = performance.now() + milliseconds;
+  while (performance.now() < until) {
+    // 바쁜 대기: 멈춤 길이를 정확히 맞추려고 일부러 아무것도 하지 않는다.
+  }
+}
 
 describe("runReplay", () => {
   it("정한 속도로 합성 채팅을 흘리고 처리 시간을 잰다", async () => {
@@ -8,6 +16,30 @@ describe("runReplay", () => {
     expect(report.p95Ms).toBeLessThan(50);
     expect(Object.values(report.decisions).reduce((sum, count) => sum + count, 0)).toBe(100);
     expect(report.decisions.candidate ?? 0).toBeGreaterThan(0);
+  });
+
+  it("도배 송신자 경로가 실제로 지나가 개인 도배 후보가 나온다", async () => {
+    const report = await runReplay({ ratePerSecond: 200, seconds: 0.5 });
+    expect(report.reasons["rule:personal_flood"] ?? 0).toBeGreaterThan(0);
+  });
+});
+
+describe("runPaced 누락 보정", () => {
+  it("한 건이 50ms 멈추면 뒤따르는 건들의 밀린 시간이 드러난다", async () => {
+    const run = await runPaced(100, 2, (index) => {
+      if (index === 5) blockFor(50);
+    });
+    const report = summarize(run, {}, {});
+    expect(report.maxMs).toBeGreaterThanOrEqual(45);
+    expect(report.maxLatenessMs).toBeGreaterThanOrEqual(30);
+    expect(report.p95LatenessMs).toBeGreaterThan(10);
+    // 처리 시간만 보면 멈춤 한 건만 튀고 나머지는 빠르게 보인다. 그래서 p95Ms는 작다.
+    expect(report.p95Ms).toBeLessThan(10);
+  });
+
+  it("멈춤이 없으면 밀린 시간은 0 이상이고 음수가 없다", async () => {
+    const run = await runPaced(20, 5, () => undefined);
+    expect(run.latenessMs.every((value) => value >= 0)).toBe(true);
   });
 });
 
