@@ -1,5 +1,5 @@
 import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/api/client";
@@ -47,7 +47,7 @@ describe("CandidatesScreen", () => {
 
   it("숨기기를 누르면 그 판정으로 동작을 부른다", async () => {
     const { actions } = renderScreen([verdict(1)]);
-    await userEvent.click(screen.getByRole("button", { name: "숨기기" }));
+    await userEvent.click(screen.getByRole("button", { name: "악플러의 메시지 숨기기" }));
     expect(actions.hide).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
   });
 
@@ -63,20 +63,20 @@ describe("CandidatesScreen", () => {
 
   it("실패하면 서버가 준 이유를 보여 준다", async () => {
     renderScreen([verdict(1)], fakeActions({ hide: async () => { throw new ApiError(502, "chzzk_failed", "치지직 호출 한도를 넘었습니다. 잠시 뒤 다시 시도하세요."); } }));
-    await userEvent.click(screen.getByRole("button", { name: "숨기기" }));
+    await userEvent.click(screen.getByRole("button", { name: "악플러의 메시지 숨기기" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/호출 한도/));
   });
 
   it("성공하면 서버 안내(note)를 보여 준다(R-13)", async () => {
     renderScreen([verdict(1)], fakeActions({ hide: async () => "이미 사라진 메시지입니다" }));
-    await userEvent.click(screen.getByRole("button", { name: "숨기기" }));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("이미 사라진 메시지입니다"));
+    await userEvent.click(screen.getByRole("button", { name: "악플러의 메시지 숨기기" }));
+    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 사라진 메시지입니다"));
   });
 
   it("이미 처리된 판정(409 already_handled)이면 이유를 보여 주고 목록을 다시 읽는다(R-13)", async () => {
     const conflict = new ApiError(409, "already_handled", "이미 다른 조치가 끝난 판정입니다. 화면을 새로고침해 현재 상태를 확인하세요.");
     const { onReload } = renderScreen([verdict(1)], fakeActions({ ignore: async () => { throw conflict; } }));
-    await userEvent.click(screen.getByRole("button", { name: "무시" }));
+    await userEvent.click(screen.getByRole("button", { name: "악플러의 메시지 무시" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/이미 다른 조치가 끝난 판정/));
     expect(onReload).toHaveBeenCalledTimes(1);
   });
@@ -89,15 +89,75 @@ describe("CandidatesScreen", () => {
 
   it("아직 숨겨지지 않은 자동 숨김은 '숨김 대기·실패'에 숨기기 버튼과 함께, 숨겨진 것만 '자동 숨김됨'에 보여 준다(R-4)", async () => {
     const { actions } = renderScreen([
-      verdict(1, { decision: "auto_hide", content: "못 숨긴 광고" }),
-      verdict(2, { decision: "auto_hide", status: "hidden", content: "숨긴 광고" }),
+      verdict(1, { decision: "auto_hide", content: "대기 항목" }),
+      verdict(2, { decision: "auto_hide", status: "hidden", content: "완료 항목" }),
     ]);
     const pendingSection = screen.getByRole("heading", { name: /숨김 대기·실패\(1건\)/ }).closest("section") as HTMLElement;
-    expect(pendingSection.textContent).toContain("못 숨긴 광고");
-    expect(pendingSection.textContent).not.toContain("숨긴 광고 ");
-    expect(screen.getByText(/자동 숨김됨\(최근 10분, 1건\)/)).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "숨기기" }));
+    expect(within(pendingSection).getByText(/대기 항목/)).toBeTruthy();
+    expect(within(pendingSection).queryByText(/완료 항목/)).toBeNull();
+    const hiddenDetails = screen.getByText(/자동 숨김됨\(최근 10분, 1건\)/).closest("details") as HTMLElement;
+    expect(within(hiddenDetails).getByText(/완료 항목/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "악플러의 메시지 숨기기" }));
     expect(actions.hide).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it("사용자 제한된 자동 숨김은 '자동 숨김됨'이 아니라 별도 항목에, 숨기기 버튼 없이 오판만 보여 준다", async () => {
+    const { actions } = renderScreen([verdict(1, { decision: "auto_hide", status: "restricted", content: "제한 항목" })]);
+    const restrictedDetails = screen.getByText(/사용자 제한됨 \(메시지는 아직 보일 수 있음\)/).closest("details") as HTMLElement;
+    expect(within(restrictedDetails).getByText(/제한 항목/)).toBeTruthy();
+    expect(within(restrictedDetails).queryByRole("button", { name: /숨기기/ })).toBeNull();
+    expect(screen.queryByText(/자동 숨김됨\(/)).toBeNull();
+    await userEvent.click(within(restrictedDetails).getByRole("button", { name: "악플러의 메시지 오판 신고" }));
+    expect(actions.reportFalsePositive).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+  });
+
+  it("동작이 끝나기 전에는 버튼이 잠기고 같은 동작이 두 번 가지 않는다", async () => {
+    const hide = vi.fn(() => new Promise<string | null>(() => undefined));
+    renderScreen([verdict(1)], fakeActions({ hide }));
+    const button = screen.getByRole("button", { name: "악플러의 메시지 숨기기" }) as HTMLButtonElement;
+    await userEvent.click(button);
+    await userEvent.click(button);
+    expect(hide).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /자동 숨김: / }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("동작이 실패해도 버튼이 다시 풀린다", async () => {
+    renderScreen([verdict(1)], fakeActions({ hide: async () => { throw new ApiError(502, "chzzk_failed", "실패"); } }));
+    await userEvent.click(screen.getByRole("button", { name: "악플러의 메시지 숨기기" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "악플러의 메시지 숨기기" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("자동 숨김 켜기는 확인 후 setAutoHide(true), 취소하면 부르지 않는다", async () => {
+    const admin: MeDto = { ...chatManager, permissions: ["enable_auto_hide", "disable_auto_hide"] };
+    const actions = fakeActions();
+    render(<CandidatesScreen me={admin} status={status} sections={buildSections([], NOW)} realtimeConnected actions={actions} onReload={vi.fn()} />);
+    const confirm = vi.spyOn(window, "confirm");
+    confirm.mockReturnValueOnce(false);
+    await userEvent.click(screen.getByRole("button", { name: /자동 숨김: 꺼짐/ }));
+    expect(actions.setAutoHide).not.toHaveBeenCalled();
+    confirm.mockReturnValueOnce(true);
+    await userEvent.click(screen.getByRole("button", { name: /자동 숨김: 꺼짐/ }));
+    expect(actions.setAutoHide).toHaveBeenCalledWith(true);
+    expect(screen.getByRole("button", { name: /자동 숨김: 꺼짐/ }).getAttribute("aria-pressed")).toBe("false");
+    confirm.mockRestore();
+  });
+
+  it("임시 제한은 그 사람 묶음으로 부른다", async () => {
+    const { actions } = renderScreen([verdict(1), verdict(2)]);
+    await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
+    expect(actions.temporaryRestrict).toHaveBeenCalledWith(expect.objectContaining({ senderChannelId: "bad" }));
+  });
+
+  it("카드에는 메시지를 최대 3건만 보여 준다", () => {
+    renderScreen([verdict(1), verdict(2), verdict(3), verdict(4), verdict(5)]);
+    expect(screen.getByText("5건")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "악플러의 메시지 숨기기" })).toHaveLength(3);
+  });
+
+  it("상태 배너는 늘 떠 있는 status 영역 안에 있다", () => {
+    renderScreen([]);
+    expect(within(screen.getByRole("status", { name: "서버 상태" })).getByText("정상 동작 중")).toBeTruthy();
   });
 
   it("후보가 없으면 안내 문구", () => {

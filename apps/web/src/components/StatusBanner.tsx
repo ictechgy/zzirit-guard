@@ -19,15 +19,20 @@ function problemsOf(status: ServerStatus | null, realtimeConnected: boolean): st
   return problems;
 }
 
-/** 화면 맨 위의 상태 배너(스펙 6장). */
+/** 화면 맨 위의 상태 배너(스펙 6장). 늘 떠 있는 status 영역 안에서 문구만 바뀌어야 스크린리더가 변화를 읽는다. */
 export function StatusBanner({ status, realtimeConnected }: StatusBannerProps) {
   const problems = problemsOf(status, realtimeConnected);
-  if (problems.length === 0) return <p className="banner banner-ok">정상 동작 중</p>;
   return (
-    <ul className="banner banner-warning" aria-live="polite">
-      {problems.map((problem) => (
-        <li key={problem}>{problem}</li>
-      ))}
-    </ul>
+    <div role="status" aria-label="서버 상태">
+      {problems.length === 0 ? (
+        <p className="banner banner-ok">정상 동작 중</p>
+      ) : (
+        <ul className="banner banner-warning">
+          {problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

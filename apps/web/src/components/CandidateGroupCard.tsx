@@ -17,6 +17,8 @@ export interface CandidateGroupCardProps {
   permissions: readonly Permission[];
   /** 동작 실행기. 결과 안내와 오류 표시를 맡는다. */
   run: ActionRunner;
+  /** 다른 동작이 진행 중인지. 진행 중에는 모든 버튼을 잠가 같은 요청이 두 번 가지 않게 한다. */
+  isBusy: boolean;
   /** 후보 화면 동작. */
   actions: CandidateActions;
 }
@@ -31,6 +33,8 @@ interface MessageRowProps {
   canHide: boolean;
   /** 동작 실행기. */
   run: ActionRunner;
+  /** 다른 동작이 진행 중인지(버튼 잠금). */
+  isBusy: boolean;
   /** 후보 화면 동작. */
   actions: CandidateActions;
 }
@@ -39,20 +43,20 @@ interface MessageRowProps {
 const VISIBLE_MESSAGES = 3;
 
 /** 한 사람의 후보 묶음 카드. 메시지별 숨기기·무시(또는 오판), 사람 단위 임시 제한. */
-export function CandidateGroupCard({ group, kind, permissions, run, actions }: CandidateGroupCardProps) {
+export function CandidateGroupCard({ group, kind, permissions, run, isBusy, actions }: CandidateGroupCardProps) {
   const canHide = permissions.includes("hide_message");
   return (
     <article className={`card card-${kind}`}>
       <header className="card-header">
         <strong>{group.senderNickname}</strong>
         <span className="count">{group.verdicts.length}건</span>
-        <button type="button" disabled={!permissions.includes("temporary_restrict")} onClick={() => run(() => actions.temporaryRestrict(group))}>
+        <button type="button" aria-label={`${group.senderNickname} 임시 제한`} disabled={!permissions.includes("temporary_restrict") || isBusy} onClick={() => run(() => actions.temporaryRestrict(group))}>
           임시 제한
         </button>
       </header>
       <ul className="messages">
         {group.verdicts.slice(0, VISIBLE_MESSAGES).map((verdict) => (
-          <MessageRow key={verdict.id} verdict={verdict} kind={kind} canHide={canHide} run={run} actions={actions} />
+          <MessageRow key={verdict.id} verdict={verdict} kind={kind} canHide={canHide} run={run} isBusy={isBusy} actions={actions} />
         ))}
       </ul>
     </article>
@@ -60,18 +64,18 @@ export function CandidateGroupCard({ group, kind, permissions, run, actions }: C
 }
 
 /** 메시지 한 줄과 이유·버튼. 채팅 원문은 텍스트로만 넣는다(React가 이스케이프한다). */
-function MessageRow({ verdict, kind, canHide, run, actions }: MessageRowProps) {
+function MessageRow({ verdict, kind, canHide, run, isBusy, actions }: MessageRowProps) {
   return (
     <li className="message">
       <span className="time">{formatClockTime(verdict.createdAt)}</span>
       <span className="content">{verdict.content}</span>
       <span className="reason">{describeReason(verdict.reason)}</span>
       <span className="buttons">
-        <button type="button" disabled={!canHide} onClick={() => run(() => actions.hide(verdict))}>숨기기</button>
+        <button type="button" aria-label={`${verdict.senderNickname}의 메시지 숨기기`} disabled={!canHide || isBusy} onClick={() => run(() => actions.hide(verdict))}>숨기기</button>
         {kind === "shadow" ? (
-          <button type="button" disabled={!canHide} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
+          <button type="button" aria-label={`${verdict.senderNickname}의 메시지 오판 신고`} disabled={!canHide || isBusy} onClick={() => run(() => actions.reportFalsePositive(verdict))}>오판</button>
         ) : (
-          <button type="button" disabled={!canHide} onClick={() => run(() => actions.ignore(verdict))}>무시</button>
+          <button type="button" aria-label={`${verdict.senderNickname}의 메시지 무시`} disabled={!canHide || isBusy} onClick={() => run(() => actions.ignore(verdict))}>무시</button>
         )}
       </span>
     </li>

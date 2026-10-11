@@ -38,8 +38,15 @@ export interface CandidateSections {
    * 왜 따로 두나: "자동 숨김됨"에 섞으면 숨겨지지 않은 메시지가 숨겨진 것처럼 보이고 숨길 버튼도 없어 조용히 사라진다(R-4).
    */
   autoHidePending: VerdictDto[];
-  /** 실제로 숨겨진 자동 숨김(status hidden, 또는 사람 단위 제한 restricted — 서버가 둘 다 숨김 불가로 다룬다, 최신순). 잘못 숨겼으면 오판으로 신고한다. */
+  /** 실제로 숨겨진 자동 숨김(status hidden, 최신순). 잘못 숨겼으면 오판으로 신고한다. */
   autoHidden: VerdictDto[];
+  /**
+   * 자동 숨김 판정인데 보낸 사람이 임시 제한된 것(status restricted, 최신순).
+   * 왜 hidden과 가르나: 서버는 어떤 판정으로든 임시 제한하면 그 판정을 restricted로 바꾸고 hidden도 덮어쓴다.
+   * 그래서 숨김에 실패한 메시지도 restricted가 될 수 있어, "숨겨짐"으로 보여 주면 보이는 메시지를 숨겼다고 착각한다.
+   * 서버는 restricted 판정의 숨기기를 409로 거절하므로 이 목록에는 숨기기 버튼을 두지 않는다.
+   */
+  restrictedAfterAutoHide: VerdictDto[];
 }
 
 /** 판정 목록을 화면 구역으로 나눈다. now보다 CANDIDATE_WINDOW_MS 넘게 지난 판정은 뺀다. */
@@ -51,7 +58,8 @@ export function buildSections(verdicts: readonly VerdictDto[], now: number): Can
     shadow: groupBySender(pick("shadow", "pending")),
     candidates: groupBySender(pick("candidate", "pending")),
     autoHidePending: pick("auto_hide", "pending").sort(newestFirst),
-    autoHidden: [...pick("auto_hide", "hidden"), ...pick("auto_hide", "restricted")].sort(newestFirst),
+    autoHidden: pick("auto_hide", "hidden").sort(newestFirst),
+    restrictedAfterAutoHide: pick("auto_hide", "restricted").sort(newestFirst),
   };
 }
 

@@ -46,9 +46,10 @@ describe("buildSections", () => {
 });
 
 describe("buildSections: 제한된 자동 숨김", () => {
-  it("사람이 임시 제한한 자동 숨김(restricted)은 서버가 숨김 불가로 다루므로 숨겨진 쪽에 둔다", () => {
+  it("restricted는 숨겨진 쪽이 아니라 별도 구역에 두고, ignored는 어느 구역에도 두지 않는다", () => {
     const sections = buildSections([verdict(1, { decision: "auto_hide", status: "restricted" }), verdict(2, { decision: "auto_hide", status: "ignored" })], NOW);
-    expect(sections.autoHidden.map((item) => item.id)).toEqual([1]);
+    expect(sections.restrictedAfterAutoHide.map((item) => item.id)).toEqual([1]);
+    expect(sections.autoHidden).toEqual([]);
     expect(sections.autoHidePending).toEqual([]);
   });
 });
