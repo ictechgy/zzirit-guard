@@ -23,9 +23,20 @@ export interface Actor {
 /** 처리 결과. message·note는 매니저 화면에 그대로 보여 준다. */
 export type ActionOutcome = { ok: true; note: string | null } | { ok: false; message: string };
 
+/**
+ * submit 추가 옵션. shouldRun은 대기열에서 차례가 왔을 때, 치지직을 부르기 직전에 한 번 확인한다.
+ * 이유: 자동 숨김은 되돌릴 수 없으므로, 대기 중에 스위치가 꺼졌다면 이미 쌓인 숨김도 보내지 않아야 한다.
+ */
+export interface SubmitOptions {
+  shouldRun?: () => boolean;
+}
+
+/** 자동 숨김 스위치가 꺼져서 요청을 취소했을 때의 매니저용 문구. */
+const CANCELLED_MESSAGE = "자동 숨김이 꺼져 보내지 않았습니다";
+
 /** 모든 쓰기 API가 지나는 유일한 통로(스펙 4장). */
 export interface Executor {
-  submit(channelId: string, request: ActionRequest, actor: Actor): Promise<ActionOutcome>;
+  submit(channelId: string, request: ActionRequest, actor: Actor, options?: SubmitOptions): Promise<ActionOutcome>;
   pendingCount(): number;
   onFailureRateExceeded(listener: (channelId: string) => void): void;
 }
@@ -74,9 +85,9 @@ class SerialExecutor implements Executor {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
-  submit(channelId: string, request: ActionRequest, actor: Actor): Promise<ActionOutcome> {
+  submit(channelId: string, request: ActionRequest, actor: Actor, options?: SubmitOptions): Promise<ActionOutcome> {
     this.pending += 1;
-    const run = this.tail.then(() => this.execute(channelId, request, actor));
+    const run = this.tail.then(() => this.execute(channelId, request, actor, options));
     // 대기열 사슬은 한 요청이 예외로 끝나도 이어져야 한다. 예외 자체는 run을 통해 호출자에게 그대로 전달된다.
     this.tail = run.then(
       () => undefined,
@@ -99,7 +110,13 @@ class SerialExecutor implements Executor {
    * 실행 → 기록. 예외를 밖으로 던지지 않아 대기열이 끊기지 않는다.
    * 기록이 실패해도 치지직 호출은 이미 끝난 되돌릴 수 없는 일이므로 실제 결과를 그대로 돌려준다.
    */
-  private async execute(channelId: string, request: ActionRequest, actor: Actor): Promise<ActionOutcome> {
+  private async execute(channelId: string, request: ActionRequest, actor: Actor, options?: SubmitOptions): Promise<ActionOutcome> {
+    if (options?.shouldRun?.() === false) {
+      // 취소는 치지직 호출이 아니므로 판정 상태·실패율에는 넣지 않고 감사 기록만 남긴다.
+      const cancelled: ActionOutcome = { ok: false, message: CANCELLED_MESSAGE };
+      this.recordAudit(channelId, request, actor, cancelled);
+      return cancelled;
+    }
     const outcome = await this.performWithRetry(request);
     this.recordOutcome(channelId, request, actor, outcome);
     return outcome;
@@ -143,15 +160,21 @@ class SerialExecutor implements Executor {
   /** 감사 기록·판정 상태·실패율을 갱신한다. 각 단계는 서로 영향을 주지 않도록 따로 보호한다. */
   private recordOutcome(channelId: string, request: ActionRequest, actor: Actor, outcome: ActionOutcome): void {
     const verdictId = "verdictId" in request ? request.verdictId : null;
+    this.recordAudit(channelId, request, actor, outcome);
+    if (!outcome.ok) this.options.logger.warn("쓰기 요청 실패", { action: request.kind, verdictId, message: outcome.message });
+    if (outcome.ok && verdictId !== null) this.guardRecording(request, "판정 상태 갱신 실패", () => this.updateVerdict(verdictId, request.kind));
+    this.trackFailureRate(channelId, outcome.ok);
+  }
+
+  /** 감사 기록 한 줄을 남긴다. 실패해도 실행 결과에는 영향을 주지 않는다. */
+  private recordAudit(channelId: string, request: ActionRequest, actor: Actor, outcome: ActionOutcome): void {
+    const verdictId = "verdictId" in request ? request.verdictId : null;
     this.guardRecording(request, "감사 기록 저장 실패", () =>
       this.options.auditLog.record({
         channelId, actorType: actor.type, actorChannelId: actor.channelId, action: request.kind, targetSenderChannelId: targetOf(request),
         verdictId, result: outcome.ok ? "ok" : "error", error: outcome.ok ? null : outcome.message,
       }),
     );
-    if (!outcome.ok) this.options.logger.warn("쓰기 요청 실패", { action: request.kind, verdictId, message: outcome.message });
-    if (outcome.ok && verdictId !== null) this.guardRecording(request, "판정 상태 갱신 실패", () => this.updateVerdict(verdictId, request.kind));
-    this.trackFailureRate(channelId, outcome.ok);
   }
 
   /**

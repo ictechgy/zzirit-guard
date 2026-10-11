@@ -108,6 +108,35 @@ describe("Executor", () => {
     expect(listener).toHaveBeenCalledWith("c1");
   });
 
+  it("shouldRun이 false면 치지직을 부르지 않고 취소로 기록하며 판정 상태는 그대로 둔다", async () => {
+    const blindMessage = vi.fn(async () => undefined);
+    const getAccessToken = vi.fn(async () => "owner-token");
+    const { executor, verdicts, auditLog, statusEvents, verdict, hide } = setup({ blindMessage }, { getAccessToken });
+    await expect(executor.submit("c1", hide, manager, { shouldRun: () => false })).resolves.toEqual({ ok: false, message: "자동 숨김이 꺼져 보내지 않았습니다" });
+    expect(blindMessage).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(verdicts.get(verdict.id)?.status).toBe("pending");
+    expect(statusEvents).toEqual([]);
+    expect(auditLog.list("c1", 10, null)[0]).toMatchObject({ action: "hide", result: "error", error: "자동 숨김이 꺼져 보내지 않았습니다", verdictId: verdict.id });
+  });
+
+  it("취소가 12건 쌓여도 실패율 알림은 울리지 않는다", async () => {
+    const blindMessage = vi.fn(async () => undefined);
+    const { executor, hide } = setup({ blindMessage });
+    const listener = vi.fn();
+    executor.onFailureRateExceeded(listener);
+    for (let index = 0; index < 12; index += 1) await executor.submit("c1", hide, manager, { shouldRun: () => false });
+    expect(blindMessage).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("shouldRun이 true면 평소처럼 치지직을 부른다", async () => {
+    const blindMessage = vi.fn(async () => undefined);
+    const { executor, hide } = setup({ blindMessage });
+    await expect(executor.submit("c1", hide, manager, { shouldRun: () => true })).resolves.toEqual({ ok: true, note: null });
+    expect(blindMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("요청을 들어온 순서대로 하나씩 처리한다", async () => {
     const order: string[] = [];
     let releaseFirst: () => void = () => undefined;

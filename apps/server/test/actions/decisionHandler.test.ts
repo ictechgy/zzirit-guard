@@ -4,7 +4,7 @@ import { createAutoHideSwitch, type AutoHideSwitch } from "../../src/actions/aut
 import { createDecisionHandler, type DecisionHandler } from "../../src/actions/decisionHandler.js";
 import type { Executor } from "../../src/actions/executor.js";
 import type { ChatEvent } from "../../src/chat/chatEvent.js";
-import { openDatabase } from "../../src/db/database.js";
+import { openDatabase, type Database } from "../../src/db/database.js";
 import type { MessageRef } from "../../src/detection/floodDetectors.js";
 import type { DetectionResult } from "../../src/detection/pipeline.js";
 import { silentLogger, type Logger } from "../../src/logger.js";
@@ -13,6 +13,7 @@ import { createMinuteStats, type MinuteStats } from "../../src/records/minuteSta
 import { createSettingsRepository } from "../../src/records/settingsRepository.js";
 import { createVerdictRepository, type VerdictRepository } from "../../src/records/verdictRepository.js";
 
+let database: Database;
 let handler: DecisionHandler;
 let verdicts: VerdictRepository;
 let stats: MinuteStats;
@@ -22,7 +23,7 @@ let events: RealtimeEvent[];
 let chatLines: string[];
 
 beforeEach(() => {
-  const database = openDatabase(":memory:");
+  database = openDatabase(":memory:");
   database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
   database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
   verdicts = createVerdictRepository(database, () => 0);
@@ -57,6 +58,11 @@ function result(decision: DetectionResult["decision"], content: string, extra: P
 function flushedStats() {
   stats.flush();
   return stats.recent("c1", 0)[0];
+}
+
+/** 폭주 차단 한도를 바꾼다. */
+function settingsBreaker(limit: number): void {
+  database.prepare("UPDATE setting SET breaker_per_minute = ? WHERE channel_id = 'c1'").run(limit);
 }
 
 describe("DecisionHandler", () => {
@@ -104,6 +110,35 @@ describe("DecisionHandler", () => {
     ]);
     expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["user-1", "user-2"]);
     expect(submit.mock.calls.map((call) => call[1].kind)).toEqual(["hide", "hide"]);
+  });
+
+  it("숨김 요청에는 스위치 상태를 다시 확인하는 shouldRun을 붙인다", () => {
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("홍어"), result("auto_hide", "홍어"));
+    const options = submit.mock.calls[0]?.[3] as { shouldRun: () => boolean };
+    expect(options.shouldRun()).toBe(true);
+    autoHide.setEnabled("c1", false, { type: "manager", channelId: "m1" }, "manual");
+    expect(options.shouldRun()).toBe(false);
+  });
+
+  it("폭주 한도에 걸리면 앞선 숨김 2건만 보내고 스위치를 끈 뒤 나머지는 섀도로 남긴다", () => {
+    settingsBreaker(2);
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("도배 문장"), result("auto_hide", "도배 문장", {
+      earlierFloodRefs: [ref("user-1", "도배 문장"), ref("user-2", "도배 문장"), ref("user-3", "도배 문장")],
+    }));
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(autoHide.isEnabled("c1")).toBe(false);
+    expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.decision)).toEqual(["auto_hide", "auto_hide", "shadow", "shadow"]);
+  });
+
+  it("권한자 앞선 메시지는 떼도배 숨김에서 빠진다", () => {
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("도배 문장"), result("auto_hide", "도배 문장", {
+      earlierFloodRefs: [ref("user-1", "도배 문장"), { ...ref("manager-1", "도배 문장"), privileged: true }],
+    }));
+    expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["viewer-1", "user-1"]);
+    expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.senderChannelId)).toEqual(["viewer-1", "user-1"]);
   });
 
   it("자동 숨김 요청이 거절되면 예외를 로그로 남기고 처리를 끝낸다", async () => {

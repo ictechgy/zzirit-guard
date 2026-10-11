@@ -75,7 +75,8 @@ function readSettings(database: Database, channelId: string): ChannelSettings {
  * @param value 새 값. 정수 여부와 범위를 모두 본다(API 입력은 신뢰하지 않는다).
  */
 function writeSetting(database: Database, channelId: string, key: keyof SettingsDto, value: unknown): void {
-  const rule = SETTING_RULES[key];
+  // Object.hasOwn으로 확인해야 "constructor" 같은 Object.prototype 키가 규칙으로 잘못 잡히지 않는다.
+  const rule = Object.hasOwn(SETTING_RULES, key) ? SETTING_RULES[key] : undefined;
   if (!rule) throw new SettingsValidationError(`알 수 없는 설정입니다: ${String(key)}`);
   if (typeof value !== "number" || !Number.isInteger(value) || value < rule.min || value > rule.max) {
     throw new SettingsValidationError(`${key}는 ${rule.min}~${rule.max} 사이 정수여야 합니다.`);

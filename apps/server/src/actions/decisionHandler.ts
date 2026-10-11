@@ -46,7 +46,8 @@ export function createDecisionHandler(deps: DecisionHandlerDeps): DecisionHandle
       if (result.decision === "candidate") saveCandidate(deps, event.channelId, result);
       if (result.decision === "auto_hide") applyAutoHide(deps, event.channelId, result.ref, result.reason);
       // 떼도배 발동은 한 번뿐이라 현재 메시지의 판정과 무관하게 앞선 메시지를 숨긴다(R17). 현재 메시지보다 뒤에 처리한다.
-      result.earlierFloodRefs.forEach((ref) => applyAutoHide(deps, event.channelId, ref, GROUP_FLOOD_REASON));
+      // 파이프라인이 이미 권한자를 빼지만, 권한자 자동 숨김 금지(Global Constraints)를 여기서도 한 번 더 막는다.
+      result.earlierFloodRefs.filter((ref) => !ref.privileged).forEach((ref) => applyAutoHide(deps, event.channelId, ref, GROUP_FLOOD_REASON));
     },
   };
 }
@@ -102,7 +103,7 @@ function applyAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messag
   const target = { chatChannelId: ref.chatChannelId, messageTime: ref.messageTime, senderChannelId: ref.senderChannelId };
   // submit은 거절하지 않도록 설계됐지만, 예외가 나면 Node 22가 프로세스를 끝내므로 반드시 잡는다.
   void deps.executor
-    .submit(channelId, { kind: "hide", target, verdictId: verdict.id }, RULE_ACTOR)
+    .submit(channelId, { kind: "hide", target, verdictId: verdict.id }, RULE_ACTOR, { shouldRun: () => deps.autoHide.isEnabled(channelId) })
     .then((outcome) => {
       if (!outcome.ok) deps.logger.warn("자동 숨김 실패", { verdictId: verdict.id, message: outcome.message });
     })
