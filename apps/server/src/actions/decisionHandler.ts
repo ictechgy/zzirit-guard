@@ -105,7 +105,7 @@ function applyAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messag
   void deps.executor
     .submit(channelId, { kind: "hide", target, verdictId: verdict.id }, RULE_ACTOR, { shouldRun: () => deps.autoHide.isEnabled(channelId) })
     .then((outcome) => {
-      if (!outcome.ok) deps.logger.warn("자동 숨김 실패", { verdictId: verdict.id, message: outcome.message });
+      if (!outcome.ok) deps.logger.warn("자동 숨김 실패", { verdictId: verdict.id, outcomeMessage: outcome.message });
     })
     .catch((error: unknown) => {
       deps.logger.error("자동 숨김 요청 처리 중 예외", { verdictId: verdict.id, error: describeError(error) });

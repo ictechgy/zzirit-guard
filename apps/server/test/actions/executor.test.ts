@@ -70,6 +70,14 @@ describe("Executor", () => {
     expect(auditLog.list("c1", 10, null)[0]).toMatchObject({ result: "error" });
   });
 
+  it("실패를 로그로 남길 때 기록기의 message를 덮지 않게 outcomeMessage로 남긴다(F8)", async () => {
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const blindMessage = failingThenOk([new ChzzkApiError(400, "스트리머가 아닙니다", "/x")]);
+    const { executor, verdict, hide } = setup({ blindMessage }, {}, logger);
+    await executor.submit("c1", hide, manager);
+    expect(logger.warn).toHaveBeenCalledWith("쓰기 요청 실패", { action: "hide", verdictId: verdict.id, outcomeMessage: "치지직이 요청을 거부했습니다: 스트리머가 아닙니다" });
+  });
+
   it("400은 다시 시도하지 않고 치지직 메시지를 보여 준다", async () => {
     const blindMessage = failingThenOk([new ChzzkApiError(400, "스트리머가 아닙니다", "/x")]);
     const { executor, hide } = setup({ blindMessage });

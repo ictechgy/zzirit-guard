@@ -159,4 +159,18 @@ describe("DecisionHandler", () => {
     expect(logger.error).toHaveBeenCalledWith("자동 숨김 요청 처리 중 예외", { verdictId, error: "Error: 실행기 실패" });
     expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("느금마 내용");
   });
+
+  it("자동 숨김이 실패하면 기록기의 message를 덮지 않게 outcomeMessage로 남긴다(F8)", async () => {
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const failingHandler = createDecisionHandler({
+      verdicts, autoHide, stats, logger,
+      executor: { submit: async () => ({ ok: false, message: "치지직 서버 오류" }), pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
+      broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
+    });
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    failingHandler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const verdictId = verdicts.listRecent("c1", 0)[0]?.id;
+    expect(logger.warn).toHaveBeenCalledWith("자동 숨김 실패", { verdictId, outcomeMessage: "치지직 서버 오류" });
+  });
 });

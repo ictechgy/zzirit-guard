@@ -161,7 +161,7 @@ class SerialExecutor implements Executor {
   private recordOutcome(channelId: string, request: ActionRequest, actor: Actor, outcome: ActionOutcome): void {
     const verdictId = "verdictId" in request ? request.verdictId : null;
     this.recordAudit(channelId, request, actor, outcome);
-    if (!outcome.ok) this.options.logger.warn("쓰기 요청 실패", { action: request.kind, verdictId, message: outcome.message });
+    if (!outcome.ok) this.options.logger.warn("쓰기 요청 실패", { action: request.kind, verdictId, outcomeMessage: outcome.message });
     if (outcome.ok && verdictId !== null) this.guardRecording(request, "판정 상태 갱신 실패", () => this.updateVerdict(verdictId, request.kind));
     this.trackFailureRate(channelId, outcome.ok);
   }
