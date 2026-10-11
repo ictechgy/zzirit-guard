@@ -1,0 +1,61 @@
+{
+  "run_label": "kanana-8b-8",
+  "load_seconds": 2.2,
+  "memory_after_load_gb": 8.53,
+  "peak_memory_gb": 8.87,
+  "latency_chat": {
+    "count": 72,
+    "median_ms": 275.7,
+    "p90_ms": 278.4,
+    "p95_ms": 279.5,
+    "max_ms": 281.2,
+    "serial_messages_per_second": 3.6,
+    "mean_prompt_tokens": 81.1
+  },
+  "latency_khaters": {
+    "count": 400,
+    "median_ms": 364.6,
+    "p90_ms": 471.9,
+    "p95_ms": 555.0,
+    "max_ms": 824.6,
+    "serial_messages_per_second": 2.7,
+    "mean_prompt_tokens": 111.7
+  },
+  "quality": {
+    "unsafe_only": {
+      "chat": {
+        "precision": 0.946,
+        "recall": 0.795,
+        "f1": 0.864,
+        "false_positive": 2,
+        "false_negative": 9,
+        "flag_rate_by_group": {
+          "normal": "0/15",
+          "slang": "2/10",
+          "insult": "9/10",
+          "hate": "8/8",
+          "sexual": "6/6",
+          "threat_pii": "2/6",
+          "self_harm": "3/3",
+          "spam": "1/5",
+          "obfuscated": "5/6",
+          "misinfo": "1/1",
+          "injection": "2/2"
+        }
+      },
+      "khaters": {
+        "precision": 0.893,
+        "recall": 0.723,
+        "f1": 0.799,
+        "false_positive": 26,
+        "false_negative": 83,
+        "flag_rate_by_group": {
+          "L1_hate": "67/100",
+          "L2_hate": "87/100",
+          "normal": "26/100",
+          "offensive": "63/100"
+        }
+      }
+    }
+  }
+}

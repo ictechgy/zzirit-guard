@@ -1,0 +1,22 @@
+[
+  {
+    "batch_size": 1,
+    "messages_per_second": 3.4,
+    "agreement_with_serial": 0.986
+  },
+  {
+    "batch_size": 8,
+    "messages_per_second": 4.2,
+    "agreement_with_serial": 0.986
+  },
+  {
+    "batch_size": 16,
+    "messages_per_second": 4.3,
+    "agreement_with_serial": 0.986
+  },
+  {
+    "batch_size": 32,
+    "messages_per_second": 4.3,
+    "agreement_with_serial": 0.986
+  }
+]

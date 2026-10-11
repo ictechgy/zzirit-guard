@@ -1,0 +1,100 @@
+{
+  "run_label": "qwen3guard-4b-8-pc",
+  "load_seconds": 1.4,
+  "memory_after_load_gb": 4.28,
+  "peak_memory_gb": 4.81,
+  "latency_chat": {
+    "count": 72,
+    "median_ms": 382.3,
+    "p90_ms": 469.1,
+    "p95_ms": 474.3,
+    "max_ms": 477.5,
+    "serial_messages_per_second": 2.5,
+    "mean_prompt_tokens": 309.1
+  },
+  "latency_khaters": {
+    "count": 400,
+    "median_ms": 476.2,
+    "p90_ms": 563.7,
+    "p95_ms": 606.4,
+    "max_ms": 736.8,
+    "serial_messages_per_second": 2.1,
+    "mean_prompt_tokens": 340.6
+  },
+  "quality": {
+    "unsafe_only": {
+      "chat": {
+        "precision": 1.0,
+        "recall": 0.114,
+        "f1": 0.204,
+        "false_positive": 0,
+        "false_negative": 39,
+        "flag_rate_by_group": {
+          "normal": "0/15",
+          "slang": "0/10",
+          "insult": "0/10",
+          "hate": "1/8",
+          "sexual": "2/6",
+          "threat_pii": "0/6",
+          "self_harm": "2/3",
+          "spam": "0/5",
+          "obfuscated": "0/6",
+          "misinfo": "0/1",
+          "injection": "0/2"
+        }
+      },
+      "khaters": {
+        "precision": 0.926,
+        "recall": 0.167,
+        "f1": 0.282,
+        "false_positive": 4,
+        "false_negative": 250,
+        "flag_rate_by_group": {
+          "L1_hate": "15/100",
+          "L2_hate": "28/100",
+          "normal": "4/100",
+          "offensive": "7/100"
+        }
+      }
+    },
+    "unsafe_or_controversial": {
+      "chat": {
+        "precision": 0.879,
+        "recall": 0.659,
+        "f1": 0.753,
+        "false_positive": 4,
+        "false_negative": 15,
+        "flag_rate_by_group": {
+          "normal": "0/15",
+          "slang": "4/10",
+          "insult": "7/10",
+          "hate": "5/8",
+          "sexual": "4/6",
+          "threat_pii": "3/6",
+          "self_harm": "2/3",
+          "spam": "4/5",
+          "obfuscated": "4/6",
+          "misinfo": "1/1",
+          "injection": "2/2"
+        }
+      },
+      "khaters": {
+        "precision": 0.81,
+        "recall": 0.853,
+        "f1": 0.831,
+        "false_positive": 60,
+        "false_negative": 44,
+        "flag_rate_by_group": {
+          "L1_hate": "88/100",
+          "L2_hate": "91/100",
+          "normal": "60/100",
+          "offensive": "77/100"
+        }
+      }
+    }
+  },
+  "prefix_cache": {
+    "prefix_tokens": 201,
+    "fallbacks": 0
+  }
+}
