@@ -5,7 +5,7 @@ import { isTrivialMessage, type DuplicateTracker } from "./messageTraits.js";
 import { normalizeForMatching, normalizeKeepingWhitespace } from "./normalize.js";
 import { containsBlockedLink, containsPhoneNumber, looksLikeAddress } from "./patterns.js";
 import type { RuleEntry, RuleRepository, RuleSnapshot } from "./ruleRepository.js";
-import { findFirstIntactMatch, findFirstMatch, stripExceptions, stripExceptionsKeepingWhitespace } from "./wordMatch.js";
+import { findFirstIntactMatch, findFirstMatch, locateExceptions, locateExceptionsKeepingWhitespace, type ExceptionAwareText } from "./wordMatch.js";
 
 /** 메시지 1건의 판정. 1단계에서는 AI가 없어 needs_care가 나오지 않는다. */
 export interface DetectionResult {
@@ -45,9 +45,10 @@ type RuleOutcome = { decision: DetectionResult["decision"]; reason: string } | n
 interface RuleContext {
   event: ChatEvent;
   normalized: string;
-  withoutExceptions: string;
-  /** 공백을 남겨 정규화하고 예외 단어를 지운 문장. 금칙어 강이 단어 안에 그대로 있는지 볼 때 쓴다(F4). */
-  spacedWithoutExceptions: string;
+  /** 공백까지 지운 문장과 그 안의 예외 단어 위치. 금칙어 약·협박·단어를 걸친 금칙어 강을 볼 때 쓴다. */
+  compact: ExceptionAwareText;
+  /** 공백을 남긴 문장과 그 안의 예외 단어 위치. 금칙어 강이 단어 안에 그대로 있는지 볼 때 쓴다(F4). */
+  spaced: ExceptionAwareText;
   snapshot: RuleSnapshot;
   groupFloodTriggered: boolean;
   personalFloodTriggered: boolean;
@@ -88,8 +89,8 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
   const snapshot = deps.rules.snapshot(event.channelId);
   return {
     event, normalized, snapshot, groupFloodTriggered,
-    withoutExceptions: stripExceptions(normalized, snapshot.exception),
-    spacedWithoutExceptions: stripExceptionsKeepingWhitespace(normalizeKeepingWhitespace(event.content), snapshot.exception),
+    compact: locateExceptions(normalized, snapshot.exception),
+    spaced: locateExceptionsKeepingWhitespace(normalizeKeepingWhitespace(event.content), snapshot.exception),
     personalFloodTriggered: deps.personalFlood.observe(event.senderChannelId, event.receivedAt),
   };
 }
@@ -103,15 +104,15 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
  */
 function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: DetectionResult["decision"]; reason: string } {
   const checks: Array<(context: RuleContext) => RuleOutcome> = [
-    (c) => matchRule(findFirstIntactMatch(c.spacedWithoutExceptions, c.snapshot.strong), "auto_hide", "strong"),
+    (c) => matchRule(findFirstIntactMatch(c.spaced, c.snapshot.strong), "auto_hide", "strong"),
     (c) => (c.groupFloodTriggered ? { decision: "auto_hide", reason: "rule:group_flood" } : null),
     (c) => (containsBlockedLink(c.event.content, c.snapshot.allowDomains) ? { decision: "auto_hide", reason: "rule:link" } : null),
     (c) => (containsPhoneNumber(c.event.content) ? { decision: "auto_hide", reason: "rule:phone" } : null),
-    (c) => matchRule(findFirstMatch(c.withoutExceptions, c.snapshot.strong), "candidate", "strong_spanning"),
+    (c) => matchRule(findFirstMatch(c.compact, c.snapshot.strong), "candidate", "strong_spanning"),
     (c) => (c.snapshot.allow.has(c.normalized) ? { decision: "pass", reason: "rule:allow" } : null),
-    (c) => matchRule(findFirstMatch(c.withoutExceptions, c.snapshot.weak), "candidate", "weak"),
+    (c) => matchRule(findFirstMatch(c.compact, c.snapshot.weak), "candidate", "weak"),
     (c) => (c.personalFloodTriggered ? { decision: "candidate", reason: "rule:personal_flood" } : null),
-    (c) => matchRule(findFirstMatch(c.withoutExceptions, c.snapshot.threat), "candidate", "threat"),
+    (c) => matchRule(findFirstMatch(c.compact, c.snapshot.threat), "candidate", "threat"),
     (c) => (looksLikeAddress(c.event.content) ? { decision: "candidate", reason: "rule:address" } : null),
     (c) => (isWatched(deps, c.event) ? { decision: "candidate", reason: "rule:watch_user" } : null),
   ];

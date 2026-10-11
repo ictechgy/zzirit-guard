@@ -167,6 +167,16 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat(`김치${mark}녀`))).toMatchObject({ decision: "auto_hide", reason: expect.stringMatching(/^rule:strong:\d+$/) });
   });
 
+  it("기본 예외 단어 밖에 같은 금칙어가 또 있으면 후보로 올린다(S4)", () => {
+    expect(pipeline.evaluate(chat("시발택시발"))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:weak:\d+$/) });
+  });
+
+  it("예외 단어와 일부만 겹치는 금칙어는 예외에 가려지지 않는다(S4)", () => {
+    rules.add("c1", "exception", "새끼손가락", "m");
+    expect(pipeline.evaluate(chat("개새끼손가락"))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:weak:\d+$/) });
+    expect(pipeline.evaluate(chat("새끼손가락 걸고 약속", { senderChannelId: "viewer-2" }))).toMatchObject({ decision: "pass", reason: "none" });
+  });
+
   it("개인 도배는 다섯 번째부터 후보", () => {
     const decisions = [1, 2, 3, 4, 5].map((index) => pipeline.evaluate(chat(`그냥 말 ${index}`)).decision);
     expect(decisions).toEqual(["pass", "pass", "pass", "pass", "candidate"]);
