@@ -18,6 +18,15 @@ describe("containsBlockedLink", () => {
     "룬 슬롯 꽁머니 카톡 abc123",
     "슬롯 꽁머니 카톡 abc123",
     "토토 사이트 010-1234-5678",
+    "토토 가입 @abc123",
+    "카지노 문의 @gamble_vip",
+    "카톡 아이디 abc123 토토",
+    "youtube.com.de",
+    "visit spam。com",
+    "spam[.]com",
+    "spam(.)com/abc",
+    "evil.de",
+    "spam.ru 들어와",
   ])("광고·링크를 잡는다: %s", (text) => {
     expect(containsBlockedLink(text, [])).toBe(true);
   });
@@ -31,6 +40,7 @@ describe("containsBlockedLink", () => {
     "길드 가입 슬롯 몇개야",
     "먹튀 문의 많네",
     "@스트리머 슬롯 몇개",
+    "슬롯 dm 주세요",
     "3.5/2 정도",
   ])("일반 대화는 통과: %s", (text) => {
     expect(containsBlockedLink(text, [])).toBe(false);
