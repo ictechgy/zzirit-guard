@@ -51,6 +51,10 @@ export interface ChatReceiverOptions {
 /**
  * 치지직 문서의 연결 옵션 그대로(옛 이름과 2.x 이름을 함께 둔다).
  * 재연결은 끈다. 세션 URL이 일정 시간만 유효해서 재연결할 때마다 새로 받아야 하기 때문이다.
+ * forceNode는 engine.io-client가 Node 22의 전역 WebSocket(undici) 대신 번들된 ws 패키지를 쓰게 한다.
+ * undici는 연결 중 실패나 close() 때 readyState를 바꾸기 전에 error를 동기로 발생시켜
+ * engine.io의 onError → onClose → close()가 끝없이 되풀이되고(스택 초과), 그 예외가
+ * 비동기 uncaughtException이 되어 프로세스가 종료된다. ws는 재진입을 막는다.
  */
 const SOCKET_OPTIONS = {
   reconnection: false,
@@ -59,6 +63,7 @@ const SOCKET_OPTIONS = {
   "connect timeout": 3000,
   timeout: 3000,
   transports: ["websocket"],
+  forceNode: true,
 };
 
 /** socket.io-client 2.0.3으로 세션에 연결한다. */
