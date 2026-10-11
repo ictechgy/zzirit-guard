@@ -1,5 +1,5 @@
-import type { MeDto } from "@zzirit-guard/shared";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import type { AutoHideOffReason, MeDto, ServerStatus } from "@zzirit-guard/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiSend, requiresSignIn } from "../api/client";
 import { TabBar, type Tab } from "../components/TabBar";
 import { buildSections, countActionable } from "../domain/candidates";
@@ -40,9 +40,8 @@ export interface MainScreenProps {
  * 후보 화면 동작을 API로 채운다. 결과 상태는 서버가 WebSocket으로 다시 알려 화면이 바뀐다.
  * 로그인이 필요한 오류(401·409 no_channel)면 로그인 화면으로 보내고, 오류는 다시 던져 화면에 남긴다.
  * @param onSignedOut 로그인 화면으로 보낸다
- * @param ownDisableRef 이 기기가 자동 숨김 끄기를 요청했는지 표시한다(시스템이 끈 것과 가르려고, useSystemDisableNotice)
  */
-function createCandidateActions(onSignedOut: (message: string | null) => void, ownDisableRef: RefObject<boolean>): CandidateActions {
+function createCandidateActions(onSignedOut: (message: string | null) => void): CandidateActions {
   const send = (path: string, body?: unknown) =>
     apiSend<ActionResponse>("POST", path, body).catch((error: unknown) => {
       if (requiresSignIn(error)) onSignedOut(error.message);
@@ -54,48 +53,54 @@ function createCandidateActions(onSignedOut: (message: string | null) => void, o
       (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { chatChannelId: group.chatChannelId, verdictId: group.verdicts[0]?.id ?? null })).note ?? TEMPORARY_RESTRICT_DONE,
     ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? IGNORE_DONE,
     reportFalsePositive: async (verdict) => (await send(`/api/verdicts/${verdict.id}/false-positive`)).note ?? FALSE_POSITIVE_DONE,
-    setAutoHide: async (enabled) => {
-      if (!enabled) ownDisableRef.current = true;
-      try {
-        return (await send("/api/auto-hide", { enabled })).note ?? null;
-      } catch (error) {
-        // 끄기가 실패했으면 이 기기가 끈 것이 아니다: 표시를 남겨 두면 나중에 시스템이 끈 것을 놓친다.
-        if (!enabled) ownDisableRef.current = false;
-        throw error;
-      }
-    },
+    setAutoHide: async (enabled) => (await send("/api/auto-hide", { enabled })).note ?? null,
   };
+}
+
+/** 시스템이 끈 이유별 이름. manual(매니저가 직접)은 안내하지 않으므로 없다. */
+const SYSTEM_OFF_REASON_LABELS: Readonly<Record<Exclude<AutoHideOffReason, "manual">, string>> = { breaker: "1분 한도 초과", failure_rate: "치지직 호출 실패 증가" };
+/** 감사 기록을 볼 수 있는 매니저(view_audit)에게만 붙이는 안내. 볼 수 없는 매니저에게 가리키면 막다른 길이다. */
+const AUDIT_HINT = "기록·설정 → 감사 기록에서 확인하세요.";
+
+/**
+ * 시스템 꺼짐 안내 문구를 만든다.
+ * @param reason 서버가 알린 이유. 재시작 뒤처럼 모르면 null이라 이유 없이 알린다
+ * @param canViewAudit 감사 기록 안내를 붙일지
+ */
+function describeSystemDisable(reason: Exclude<AutoHideOffReason, "manual"> | null, canViewAudit: boolean): string {
+  const headline = reason === null ? "자동 숨김이 꺼졌습니다." : `자동 숨김이 꺼졌습니다(${SYSTEM_OFF_REASON_LABELS[reason]}).`;
+  return canViewAudit ? `${headline} ${AUDIT_HINT}` : headline;
 }
 
 /** useSystemDisableNotice 결과. */
 interface SystemDisableNotice {
-  /** 안내를 보여 줄지. */
-  isVisible: boolean;
+  /** 보여 줄 안내 문구. 없으면 null. */
+  message: string | null;
   /** 안내를 닫는다(렌더마다 같은 함수). */
   dismiss(): void;
 }
 
 /**
- * 자동 숨김이 켜짐→꺼짐으로 바뀌었는데 이 기기가 끈 것이 아니면 안내를 띄운다(F8, 스모크 S2).
- * 왜: 1분 한도 초과·치지직 호출 실패 증가로 서버가 스위치를 끄면 이유는 푸시와 감사 기록에만 남아, 화면을 보던 매니저는 왜 꺼졌는지 모른다.
+ * 자동 숨김이 켜짐→꺼짐으로 바뀌었고 그 이유가 manual이 아니면(1분 한도 초과·치지직 호출 실패 증가) 이유를 밝힌 안내를 띄운다(F8·B19-3).
+ * 왜: 서버가 스위치를 끄면 이유는 푸시와 감사 기록에만 남아, 화면을 보던 매니저는 왜 꺼졌는지 모른다.
+ * 이유를 서버 상태(autoHideOffReason)로 받으므로, 이 기기든 다른 매니저든 손으로 끈 것에는 안내하지 않는다.
  * 처음 받은 상태(모름→값)는 바뀐 것으로 보지 않는다. 다시 켜지면 낡은 안내를 지운다.
- * 주의: 상태에는 끈 이유가 없어, 다른 매니저가 손으로 끈 것도 같은 안내가 뜬다.
- * @param enabled 서버 상태의 자동 숨김 값(모르면 null)
- * @param ownDisableRef 이 기기가 끄기를 요청했는지(바뀐 것을 보면 내린다)
+ * @param status 서버 상태(모르면 null)
+ * @param canViewAudit 감사 기록 안내를 붙일지(view_audit)
  */
-function useSystemDisableNotice(enabled: boolean | null, ownDisableRef: RefObject<boolean>): SystemDisableNotice {
-  const [isVisible, setVisible] = useState(false);
+function useSystemDisableNotice(status: ServerStatus | null, canViewAudit: boolean): SystemDisableNotice {
+  const [message, setMessage] = useState<string | null>(null);
   const previousRef = useRef<boolean | null>(null);
+  const enabled = status?.autoHideEnabled ?? null;
+  const reason = status?.autoHideOffReason ?? null;
   useEffect(() => {
     const previous = previousRef.current;
     previousRef.current = enabled;
     if (enabled === null || previous === null || previous === enabled) return;
-    const isOwnDisable = ownDisableRef.current;
-    ownDisableRef.current = false;
-    setVisible(!enabled && !isOwnDisable);
-  }, [enabled, ownDisableRef]);
-  const dismiss = useCallback(() => setVisible(false), []);
-  return { isVisible, dismiss };
+    setMessage(enabled || reason === "manual" ? null : describeSystemDisable(reason, canViewAudit));
+  }, [enabled, reason, canViewAudit]);
+  const dismiss = useCallback(() => setMessage(null), []);
+  return { message, dismiss };
 }
 
 /** 로그인 뒤 본 화면: 탭 3개(스펙 6장). 세션이 끝나면 로그인 화면으로 돌아간다. */
@@ -115,10 +120,8 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
   };
   const { state, reload, reconnect } = useServerState();
   const now = useNow(NOW_REFRESH_MS);
-  // 이 기기가 자동 숨김 끄기를 요청했는지. 상태가 꺼짐으로 바뀌었을 때 시스템이 끈 것과 가르는 데 쓴다(F8).
-  const ownDisableRef = useRef(false);
-  const actions = useMemo(() => createCandidateActions(onSignedOut, ownDisableRef), [onSignedOut]);
-  const systemDisableNotice = useSystemDisableNotice(state.status?.autoHideEnabled ?? null, ownDisableRef);
+  const actions = useMemo(() => createCandidateActions(onSignedOut), [onSignedOut]);
+  const systemDisableNotice = useSystemDisableNotice(state.status, me.permissions.includes("view_audit"));
   useEffect(() => {
     if (state.sessionEndedReason !== null) onSignedOut(state.sessionEndedReason);
   }, [state.sessionEndedReason, onSignedOut]);
@@ -131,7 +134,7 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
       {/* 후보·채팅은 처음부터, 설정은 처음 열 때 마운트하고 이후에는 숨기기만 한다: 탭을 오가도 진행 중인 요청 결과·처리 중 잠금·채팅 필터가 사라지지 않는다. */}
       <div hidden={tab !== "candidates"}>
         <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected} actions={actions} onReload={reload}
-          isSystemDisableNoticeVisible={systemDisableNotice.isVisible} onDismissSystemDisableNotice={systemDisableNotice.dismiss} />
+          systemDisableNotice={systemDisableNotice.message} onDismissSystemDisableNotice={systemDisableNotice.dismiss} />
       </div>
       <div hidden={tab !== "chat"}>
         <LiveChatScreen lines={state.chatLines} />

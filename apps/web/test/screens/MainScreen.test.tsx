@@ -1,4 +1,4 @@
-import type { ServerStatus } from "@zzirit-guard/shared";
+import type { MeDto, ServerStatus } from "@zzirit-guard/shared";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,10 +18,12 @@ vi.mock("../../src/state/useServerState", () => ({
 const me = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER" as const, permissions: [] };
 /** 자동 숨김을 끌 수 있는 채팅 운영자. */
 const switchManager = { ...me, permissions: ["disable_auto_hide" as const] };
+/** 자동 숨김을 끌 수 있고 감사 기록도 볼 수 있는 채널 관리자. */
+const auditManager = { ...switchManager, role: "STREAMING_CHANNEL_MANAGER" as const, permissions: ["disable_auto_hide" as const, "view_audit" as const] };
 /** 정상 서버 상태(자동 숨김 켜짐). */
-const enabledStatus: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: true, lastChatAt: null, pendingActions: 0 };
-/** 시스템이 자동 숨김을 껐을 때의 안내(F8). */
-const SYSTEM_DISABLED_TEXT = "자동 숨김이 꺼졌습니다(1분 한도 초과 또는 치지직 호출 실패 증가). 기록·설정 → 감사 기록에서 이유를 확인하세요.";
+const enabledStatus: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: true, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+/** 감사 기록을 볼 수 있는 매니저에게만 붙이는 안내(B19-3). */
+const AUDIT_HINT = "기록·설정 → 감사 기록에서 확인하세요.";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -86,41 +88,61 @@ describe("MainScreen", () => {
   });
 });
 
-describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8, 스모크 S2)", () => {
-  it("상태가 켜짐→꺼짐으로 바뀌었는데 이 기기가 끄지 않았으면 후보 화면에 이유 확인 안내를 띄우고, 닫으면 사라진다", async () => {
+describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8·B19-3, 스모크 S2)", () => {
+  /** 켜짐 상태로 그린 뒤, 꺼짐 상태(이유 포함)로 바꿔 다시 그린다. */
+  function renderThenDisable(manager: MeDto, autoHideOffReason: ServerStatus["autoHideOffReason"]) {
     stubFetch({});
     hookState.current = { ...initialServerState, status: enabledStatus };
     const onSignedOut = vi.fn();
-    const { rerender } = render(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
-    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
-    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
-    rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    const { rerender } = render(<MainScreen me={manager} onSignedOut={onSignedOut} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason } };
+    rerender(<MainScreen me={manager} onSignedOut={onSignedOut} />);
+  }
+
+  it("1분 한도 초과로 꺼지면 그 이유를 밝힌 안내를 목록을 밀지 않는 층에 띄우고, 닫으면 사라진다", async () => {
+    renderThenDisable(auditManager, "breaker");
     const alert = screen.getByRole("alert");
-    expect(alert.textContent).toContain(SYSTEM_DISABLED_TEXT);
+    expect(alert.querySelector("p")?.textContent).toBe(`자동 숨김이 꺼졌습니다(1분 한도 초과). ${AUDIT_HINT}`);
     // 안내는 목록을 밀지 않는 고정 위치 층에 뜬다: 배너 바로 다음은 여전히 도구 막대다(B19-4).
     expect(alert.closest(".overlay-bottom")).not.toBeNull();
     expect(screen.getByRole("status", { name: "서버 상태" }).nextElementSibling?.classList.contains("toolbar")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "닫기" }));
-    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("이 기기에서 끈 것이면 안내를 띄우지 않는다", async () => {
+  it("치지직 호출 실패 증가로 꺼지면 그 이유를 밝힌다", () => {
+    renderThenDisable(auditManager, "failure_rate");
+    expect(screen.getByRole("alert").querySelector("p")?.textContent).toBe(`자동 숨김이 꺼졌습니다(치지직 호출 실패 증가). ${AUDIT_HINT}`);
+  });
+
+  it("감사 기록을 볼 수 없는 매니저에게는 감사 기록 안내를 붙이지 않는다", () => {
+    renderThenDisable(switchManager, "breaker");
+    expect(screen.getByRole("alert").querySelector("p")?.textContent).toBe("자동 숨김이 꺼졌습니다(1분 한도 초과).");
+  });
+
+  it("다른 매니저가 손으로 끈 것(manual)이면 안내를 띄우지 않는다", () => {
+    renderThenDisable(auditManager, "manual");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("이 기기에서 끈 것(manual)이면 안내를 띄우지 않는다", async () => {
     const fetchMock = stubFetch({ "POST /api/auto-hide": () => json(200, { enabled: false }) });
     hookState.current = { ...initialServerState, status: enabledStatus };
     const onSignedOut = vi.fn();
     const { rerender } = render(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
     await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason: "manual" } };
     rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
-    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("처음 받은 상태가 꺼짐이면 안내를 띄우지 않는다", () => {
     stubFetch({});
-    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
-    render(<MainScreen me={switchManager} onSignedOut={vi.fn()} />);
-    expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason: "breaker" } };
+    render(<MainScreen me={auditManager} onSignedOut={vi.fn()} />);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

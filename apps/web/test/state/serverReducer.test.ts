@@ -4,7 +4,7 @@ import { VERDICT_KEEP_MS } from "../../src/domain/candidates";
 import { initialServerState, MAX_CHAT_LINES, serverReducer, type ServerAction, type ServerState } from "../../src/state/serverReducer";
 
 /** 상태 예시. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
 
 /** 채팅 줄 예시. */
 function line(index: number): ChatLine {

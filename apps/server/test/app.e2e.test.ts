@@ -103,3 +103,22 @@ describe("종단 간: 연결 → 섀도 → 자동 숨김 → 매니저 권한",
     expect(app.status().channelConnected).toBe(false);
   });
 });
+
+describe("자동 숨김을 끈 이유(B19-3)", () => {
+  it("1분 한도를 넘어 꺼지면 상태에 breaker를 싣고, 다시 켜면 지우며, 손으로 끄면 manual을 싣는다", async () => {
+    const owner = await signIn("/auth/connect", fake.owner);
+    await waitFor(() => fake.subscribedSessionCount() === 1);
+    const headers = { cookie: `zg_session=${owner}`, origin: ORIGIN, "x-zzirit-request": "1" };
+    expect((await app.http.inject({ method: "PUT", url: "/api/settings", headers, payload: { breakerPerMinute: 1 } })).statusCode).toBe(200);
+    expect((await app.http.inject({ method: "POST", url: "/api/auto-hide", headers, payload: { enabled: true } })).statusCode).toBe(200);
+    expect(app.status()).toMatchObject({ autoHideEnabled: true, autoHideOffReason: null });
+    fake.emitChat(chatPayload("viewer-a", "느금마 하나"));
+    fake.emitChat(chatPayload("viewer-b", "느금마 둘"));
+    await waitFor(() => !app.status().autoHideEnabled);
+    expect(app.status().autoHideOffReason).toBe("breaker");
+    expect((await app.http.inject({ method: "POST", url: "/api/auto-hide", headers, payload: { enabled: true } })).statusCode).toBe(200);
+    expect(app.status().autoHideOffReason).toBeNull();
+    expect((await app.http.inject({ method: "POST", url: "/api/auto-hide", headers, payload: { enabled: false } })).statusCode).toBe(200);
+    expect(app.status()).toMatchObject({ autoHideEnabled: false, autoHideOffReason: "manual" });
+  });
+});

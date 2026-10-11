@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import type { ServerStatus } from "@zzirit-guard/shared";
+import type { AutoHideOffReason, ServerStatus } from "@zzirit-guard/shared";
 import type { FastifyInstance } from "fastify";
 import { createAutoHideSwitch } from "./actions/autoHideSwitch.js";
 import { createDecisionHandler } from "./actions/decisionHandler.js";
@@ -117,6 +117,12 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
    * 왜: tokenManager.disconnect()도 잠금(setLocked(true))을 알려, 표시가 없으면 모든 매니저에게 "토큰을 갱신하지 못해" 장애 알림이 잘못 간다(F10).
    */
   let isDisconnectingOnPurpose = false;
+  /**
+   * 자동 숨김이 마지막으로 꺼진 이유. 켜지면 null로 되돌린다(B19-3).
+   * 왜: 화면이 시스템이 끈 것(1분 한도·실패율)과 매니저가 손으로 끈 것을 가려, 앞의 경우에만 이유를 밝힌 안내를 띄우게 한다.
+   * 메모리에만 둔다: 재시작 뒤에는 이유를 모르므로 null이다(감사 기록에는 남아 있다).
+   */
+  let autoHideOffReason: AutoHideOffReason | null = null;
 
   /**
    * 등록된 기기에 푸시 알림을 보낸다. 알림 실패가 본 동작을 막으면 안 되므로 거부는 경고 로그로만 남긴다.
@@ -139,6 +145,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       writeLocked: channel === null || tokenManager.isWriteLocked(),
       accessExpiresAt: tokenManager.accessExpiresAt(),
       autoHideEnabled: channel ? autoHide.isEnabled(channel.channelId) : false,
+      autoHideOffReason,
       lastChatAt,
       pendingActions: executor.pendingCount(),
     };
@@ -209,6 +216,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   });
   executor.onFailureRateExceeded((channelId) => autoHide.setEnabled(channelId, false, SYSTEM_ACTOR, "failure_rate"));
   autoHide.onChange((_channelId, enabled, reason) => {
+    autoHideOffReason = enabled ? null : reason;
     if (!enabled && reason !== "manual") notify({ title: "찌리릿 가드", body: `자동 숨김이 꺼졌습니다(${reason === "breaker" ? "1분 한도 초과" : "치지직 호출 실패 증가"}).` });
     broadcastStatus();
   });

@@ -10,11 +10,11 @@ import { CandidatesScreen, type CandidateActions } from "../../src/screens/Candi
 /** 채팅 운영자. */
 const chatManager: MeDto = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER", permissions: ["disable_auto_hide", "hide_message", "temporary_restrict"] };
 /** 정상 상태. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
 /** 기준 시각. */
 const NOW = 1_000_000;
 /** 시스템 꺼짐 안내를 띄우지 않는 속성(F8 안내는 MainScreen 테스트가 다룬다). */
-const noNotice = { isSystemDisableNoticeVisible: false, onDismissSystemDisableNotice: () => undefined };
+const noNotice = { systemDisableNotice: null, onDismissSystemDisableNotice: () => undefined };
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {

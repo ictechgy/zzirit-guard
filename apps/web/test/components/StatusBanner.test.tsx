@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { StatusBanner } from "../../src/components/StatusBanner";
 
 /** 정상 상태. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
 
 describe("StatusBanner 채널 다시 연결 링크(F1)", () => {
   it("쓰기가 잠기면 채널 연결 권한이 있는 스트리머에게 '채널 다시 연결' 링크를 보여 준다", () => {

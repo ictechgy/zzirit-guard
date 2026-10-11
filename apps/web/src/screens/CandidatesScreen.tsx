@@ -44,14 +44,12 @@ export interface CandidatesScreenProps {
   actions: CandidateActions;
   /** 서버에서 상태·후보를 다시 읽는다(iOS 홈 화면 앱에는 새로고침이 없다). */
   onReload(): void;
-  /** 시스템(1분 한도·실패율)이 자동 숨김을 껐다는 안내를 보여 줄지(F8). MainScreen이 상태 변화를 보고 정한다. */
-  isSystemDisableNoticeVisible: boolean;
+  /** 시스템(1분 한도·실패율)이 자동 숨김을 껐다는 안내 문구(F8·B19-3). 없으면 null. MainScreen이 상태 변화와 이유를 보고 정한다. */
+  systemDisableNotice: string | null;
   /** 그 안내를 닫는다. memo가 깨지지 않게 렌더마다 같은 함수여야 한다. */
   onDismissSystemDisableNotice(): void;
 }
 
-/** 시스템이 자동 숨김을 껐을 때의 안내. 상태에는 이유가 없어 두 이유를 함께 적고 감사 기록을 보게 한다. */
-const SYSTEM_DISABLE_MESSAGE = "자동 숨김이 꺼졌습니다(1분 한도 초과 또는 치지직 호출 실패 증가). 기록·설정 → 감사 기록에서 이유를 확인하세요.";
 
 /**
  * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수(null이면 모두). 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
@@ -102,7 +100,7 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  * 감싸지 않으면 판정 수천 건의 목록을 초당 4번 다시 그려 휴대폰이 멈춘다(F4). 속성은 MainScreen이 useMemo·useCallback으로 고정한다.
  * 목록을 만지는 동안에는 구역을 고정해 줄이 손가락 밑에서 움직이지 않게 한다(useStableSections, 스모크 S1).
  */
-export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, isSystemDisableNoticeVisible, onDismissSystemDisableNotice }: CandidatesScreenProps) {
+export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, systemDisableNotice, onDismissSystemDisableNotice }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<ActionFeedback>(null);
   // 알림 닫기. ActionToast가 4초 타이머의 의존성으로 쓰므로 렌더마다 같은 함수여야 한다(아니면 타이머가 다시 시작된다).
   const dismissFeedback = useCallback(() => setFeedback(null), []);
@@ -144,9 +142,9 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
         {stable.newCount > 0 && <button type="button" className="new-items" onClick={stable.showLatest}>새 항목 {stable.newCount}개 — 보기</button>}
       </div>
       <div className="overlay-bottom">
-        {isSystemDisableNoticeVisible && (
+        {systemDisableNotice && (
           <div className="system-notice error" role="alert">
-            <p>{SYSTEM_DISABLE_MESSAGE}</p>
+            <p>{systemDisableNotice}</p>
             <button type="button" onClick={onDismissSystemDisableNotice}>닫기</button>
           </div>
         )}

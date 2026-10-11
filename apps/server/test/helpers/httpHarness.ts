@@ -44,7 +44,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
   const submit = vi.fn<Executor["submit"]>(async () => ({ ok: true, note: null }) as ActionOutcome);
   const services: RouteServices = {
     channel: () => ({ channelId: "c1", channelName: "채널" }),
-    status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 }),
+    status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }),
     verdicts, auditLog, settings, clock,
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ settings, auditLog, clock, logger: silentLogger }),

@@ -90,7 +90,7 @@ describe("StatsSection", () => {
 describe("StatusSection", () => {
   it("열릴 때 상태를 읽고 15초마다 다시 읽는다(마지막 채팅 수신·처리 대기는 실시간으로 오지 않는다, R-7)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 2 };
+    const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 2 };
     const fetchMock = stubFetch({ "GET /api/status": () => json(200, status) });
     render(<StatusSection />);
     expect(await screen.findByText("2건")).toBeTruthy();

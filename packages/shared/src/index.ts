@@ -46,6 +46,9 @@ export interface ChatLine {
   decision: Decision;
 }
 
+/** 자동 숨김을 켜고 끈 이유. manual: 매니저가 직접, breaker: 1분 한도 초과, failure_rate: 치지직 호출 실패 증가. */
+export type AutoHideOffReason = "manual" | "breaker" | "failure_rate";
+
 /** 상태 배너·상태 점검 화면에 쓰는 서버 상태. */
 export interface ServerStatus {
   channelConnected: boolean;
@@ -54,6 +57,11 @@ export interface ServerStatus {
   writeLocked: boolean;
   accessExpiresAt: number | null;
   autoHideEnabled: boolean;
+  /**
+   * 자동 숨김이 마지막으로 꺼진 이유(B19-3). 켜져 있거나, 이 서버가 시작된 뒤 꺼진 적이 없으면 null.
+   * 화면은 manual이 아니면(시스템이 껐으면) 이유를 밝힌 안내를 띄운다. 서버 메모리에만 두어 재시작하면 null이 된다.
+   */
+  autoHideOffReason: AutoHideOffReason | null;
   lastChatAt: number | null;
   pendingActions: number;
 }

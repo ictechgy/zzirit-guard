@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 /** 정상 서버 상태. */
-const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, lastChatAt: null, pendingActions: 0 };
+const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
 /** not_manager 코드의 문구. */
 const NOT_MANAGER_TEXT = "이 채널의 매니저가 아닙니다. 치지직에서 채널 관리자나 채팅 운영자로 등록돼 있어야 합니다.";
 /** 일반 실패(failed·모르는 코드)의 문구. */
