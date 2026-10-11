@@ -1,0 +1,50 @@
+# npm audit report
+
+parseuri  <2.0.0
+Severity: moderate
+parse-uri Regular expression Denial of Service (ReDoS) - https://github.com/advisories/GHSA-6fx8-h7jm-663j
+fix available via `npm audit fix --force`
+Will install socket.io-client@4.8.4, which is a breaking change
+apps/server/node_modules/parseuri
+  engine.io-client  0.7.0 || 0.7.8 - 0.7.9 || 1.0.2 - 6.1.1
+  Depends on vulnerable versions of parseuri
+  Depends on vulnerable versions of ws
+  Depends on vulnerable versions of xmlhttprequest-ssl
+  apps/server/node_modules/engine.io-client
+    socket.io-client  1.0.0-pre - 4.4.1
+    Depends on vulnerable versions of engine.io-client
+    Depends on vulnerable versions of parseuri
+    Depends on vulnerable versions of socket.io-parser
+    apps/server/node_modules/socket.io-client
+
+socket.io-parser  <=3.3.5
+Severity: critical
+Resource exhaustion in socket.io-parser - https://github.com/advisories/GHSA-xfhh-g9f5-x4m4
+Insufficient validation when decoding a Socket.IO packet - https://github.com/advisories/GHSA-qm95-pgcg-qqfq
+Insufficient validation when decoding a Socket.IO packet - https://github.com/advisories/GHSA-cqmj-92xf-r6r9
+socket.io allows an unbounded number of binary attachments - https://github.com/advisories/GHSA-677m-j7p3-52f9
+Socket.IO: Zero-attachment Memory Exhaustion - https://github.com/advisories/GHSA-2m8v-j782-fhvr
+fix available via `npm audit fix --force`
+Will install socket.io-client@4.8.4, which is a breaking change
+apps/server/node_modules/socket.io-parser
+
+ws  1.1.0 - 5.2.4
+Severity: high
+ws affected by a DoS when handling a request with many HTTP headers - https://github.com/advisories/GHSA-3h5v-q93c-6h6q
+ws: Memory exhaustion DoS from tiny fragments and data chunks - https://github.com/advisories/GHSA-96hv-2xvq-fx4p
+fix available via `npm audit fix --force`
+Will install socket.io-client@4.8.4, which is a breaking change
+apps/server/node_modules/engine.io-client/node_modules/ws
+
+xmlhttprequest-ssl  <=1.6.1
+Severity: critical
+xmlhttprequest and xmlhttprequest-ssl vulnerable to Arbitrary Code Injection - https://github.com/advisories/GHSA-h4j5-c7cj-74xg
+Improper Certificate Validation in xmlhttprequest-ssl - https://github.com/advisories/GHSA-72mh-269x-7mh5
+fix available via `npm audit fix --force`
+Will install socket.io-client@4.8.4, which is a breaking change
+apps/server/node_modules/xmlhttprequest-ssl
+
+6 vulnerabilities (1 moderate, 2 high, 3 critical)
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
