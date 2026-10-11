@@ -119,3 +119,16 @@ describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8, 스모크 S2)"
     expect(screen.queryByText(SYSTEM_DISABLED_TEXT)).toBeNull();
   });
 });
+
+describe("MainScreen 기본 성공 안내(F9)", () => {
+  it("서버가 안내(note)를 주지 않으면 숨기기·무시에 기본 안내를 보여 준다", async () => {
+    const verdict = (id: number) => ({ id, chatChannelId: "c", senderChannelId: `s${id}`, senderNickname: `시청자${id}`, content: `메시지${id}`, messageTime: id, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() - id });
+    stubFetch({ "POST /api/verdicts/1/hide": () => json(200, { ok: true, note: null }), "POST /api/verdicts/2/ignore": () => json(200, { ok: true }) });
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict(1), verdict(2)] };
+    render(<MainScreen me={{ ...me, permissions: ["hide_message"] }} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: /^시청자1의 .+ 메시지 숨기기$/ }));
+    expect((await screen.findByRole("status", { name: "작업 결과" })).textContent).toBe("숨겼습니다.");
+    await userEvent.click(screen.getByRole("button", { name: /^시청자2의 .+ 메시지 무시$/ }));
+    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("무시했습니다."));
+  });
+});

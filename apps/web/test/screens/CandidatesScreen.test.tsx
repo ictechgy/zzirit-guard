@@ -332,3 +332,35 @@ describe("CandidatesScreen 조작 중 목록 고정(F4, 스모크 S1)", () => {
     expect(screen.queryByRole("button", { name: /새 항목/ })).toBeNull();
   });
 });
+
+describe("CandidatesScreen 작업 결과 알림(F9, 스모크 S3)", () => {
+  /** 숨기기 버튼. */
+  const hideButton = () => screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ });
+
+  it("성공 안내는 아래쪽 알림(작업 결과)으로 보이고 4초 뒤 사라진다", async () => {
+    vi.useFakeTimers();
+    renderScreen([verdict(1)], fakeActions({ hide: async () => "숨겼습니다." }));
+    fireEvent.click(hideButton());
+    await act(async () => undefined);
+    const toast = screen.getByRole("status", { name: "작업 결과" });
+    expect(toast.textContent).toBe("숨겼습니다.");
+    expect(toast.closest(".toast")).not.toBeNull();
+    act(() => vi.advanceTimersByTime(3_999));
+    expect(screen.queryByRole("status", { name: "작업 결과" })).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole("status", { name: "작업 결과" })).toBeNull();
+  });
+
+  it("오류는 시간이 지나도 남고, 닫아야 사라진다", async () => {
+    vi.useFakeTimers();
+    renderScreen([verdict(1)], fakeActions({ hide: async () => { throw new ApiError(502, "chzzk_failed", "치지직 서버 오류로 실패했습니다."); } }));
+    fireEvent.click(hideButton());
+    await act(async () => undefined);
+    act(() => vi.advanceTimersByTime(60_000));
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/치지직 서버 오류로 실패했습니다/);
+    expect(alert.closest(".toast")).not.toBeNull();
+    fireEvent.click(within(alert).getByRole("button", { name: "작업 결과 닫기" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});

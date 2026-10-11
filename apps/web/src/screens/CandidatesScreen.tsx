@@ -1,6 +1,7 @@
 import type { MeDto, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
-import { memo, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
+import { ActionToast, type ActionFeedback } from "../components/ActionToast";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
@@ -52,9 +53,6 @@ export interface CandidatesScreenProps {
 /** 시스템이 자동 숨김을 껐을 때의 안내. 상태에는 이유가 없어 두 이유를 함께 적고 감사 기록을 보게 한다. */
 const SYSTEM_DISABLE_MESSAGE = "자동 숨김이 꺼졌습니다(1분 한도 초과 또는 치지직 호출 실패 증가). 기록·설정 → 감사 기록에서 이유를 확인하세요.";
 
-/** 화면에 남기는 동작 결과. */
-type Feedback = { kind: "ok" | "error"; message: string } | null;
-
 /**
  * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수(null이면 모두). 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
  * 섀도만 줄이는 이유: 처리하지 않아도 되는 정보라 떼도배 때 수백 명이 쌓여도 다 그릴 필요가 없다(F4). 도움 필요·후보는 매니저가 처리해야 해서 모두 그린다.
@@ -72,7 +70,7 @@ const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kin
  * @param onReload 목록을 다시 읽는다
  * @param locks 열쇠별 잠금(같은 열쇠의 동작만 막는다)
  */
-function createRunner(setFeedback: (feedback: Feedback) => void, onReload: () => void, locks: ActionLocks): ActionRunner {
+function createRunner(setFeedback: (feedback: ActionFeedback) => void, onReload: () => void, locks: ActionLocks): ActionRunner {
   return (lockKey, task) => {
     if (!locks.tryLock(lockKey)) return;
     setFeedback(null);
@@ -105,7 +103,8 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  * 목록을 만지는 동안에는 구역을 고정해 줄이 손가락 밑에서 움직이지 않게 한다(useStableSections, 스모크 S1).
  */
 export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, isSystemDisableNoticeVisible, onDismissSystemDisableNotice }: CandidatesScreenProps) {
-  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [feedback, setFeedback] = useState<ActionFeedback>(null);
+  const dismissFeedback = useCallback(() => setFeedback(null), []);
   const locks = useActionLocks();
   const run = createRunner(setFeedback, onReload, locks);
   const { lockedKeys } = locks;
@@ -130,7 +129,6 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
           onChange={(enabled) => run(autoHideLockKey(enabled), () => actions.setAutoHide(enabled))} />
         <button type="button" onClick={onReload}>다시 불러오기</button>
       </div>
-      <FeedbackLine feedback={feedback} />
       <div ref={listRef} className="candidate-list">
         {stable.newCount > 0 && <button type="button" className="new-items" onClick={stable.showLatest}>새 항목 {stable.newCount}개 — 보기</button>}
         {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
@@ -141,15 +139,10 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
         <AutoHiddenList verdicts={shown.autoHidden} {...rowProps} />
         <RestrictedAutoHideList verdicts={shown.restrictedAfterAutoHide} {...rowProps} />
       </div>
+      <ActionToast feedback={feedback} onDismiss={dismissFeedback} />
     </section>
   );
 });
-
-/** 동작 결과 한 줄. 오류는 alert, 안내는 status로 읽어 준다. */
-function FeedbackLine({ feedback }: { feedback: Feedback }) {
-  if (!feedback) return null;
-  return feedback.kind === "error" ? <p className="error" role="alert">{feedback.message}</p> : <p className="feedback" role="status" aria-label="작업 결과">{feedback.message}</p>;
-}
 
 /** 사람 단위 구역 하나의 속성. */
 interface GroupSectionProps {

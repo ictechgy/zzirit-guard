@@ -11,6 +11,10 @@ import { SettingsScreen } from "./SettingsScreen";
 
 /** 후보 시각 창을 다시 계산하는 간격(15초). */
 const NOW_REFRESH_MS = 15_000;
+/** 숨기기 성공 기본 안내. 서버가 안내(note, 예: "이미 사라진 메시지입니다")를 주지 않았을 때 쓴다(F9). */
+const HIDE_DONE = "숨겼습니다.";
+/** 무시 성공 기본 안내. 무시한 판정은 후보 화면에서 빠진다(F9). */
+const IGNORE_DONE = "무시했습니다.";
 /** 임시 제한 성공 안내. 서버는 묶음의 첫 판정 1건만 restricted로 바꾸므로, 남은 메시지를 정리하라고 알린다. */
 const TEMPORARY_RESTRICT_DONE = "임시 제한했습니다. 같은 사람의 남은 메시지는 숨기기나 무시로 정리하세요.";
 /** 오판 신고 성공 안내. 신고한 판정은 후보 화면에서 빠지고 오판 검토 목록에 오른다. */
@@ -45,10 +49,10 @@ function createCandidateActions(onSignedOut: (message: string | null) => void, o
       throw error;
     });
   return {
-    hide: async (verdict) => (await send(`/api/verdicts/${verdict.id}/hide`)).note ?? null,
+    hide: async (verdict) => (await send(`/api/verdicts/${verdict.id}/hide`)).note ?? HIDE_DONE,
     temporaryRestrict: async (group) =>
       (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { chatChannelId: group.chatChannelId, verdictId: group.verdicts[0]?.id ?? null })).note ?? TEMPORARY_RESTRICT_DONE,
-    ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? null,
+    ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? IGNORE_DONE,
     reportFalsePositive: async (verdict) => (await send(`/api/verdicts/${verdict.id}/false-positive`)).note ?? FALSE_POSITIVE_DONE,
     setAutoHide: async (enabled) => {
       if (!enabled) ownDisableRef.current = true;
