@@ -175,7 +175,7 @@ describe("PushNotifier", () => {
 
   it("로그에 전체 endpoint와 키 값이 남지 않는다", async () => {
     const database = openDatabase(":memory:");
-    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const endpoint = "https://fcm.googleapis.com/fcm/send/capability-token-xyz";
     const send = vi.fn<PushSender>(async () => {
       throw Object.assign(new Error("server error"), { statusCode: 500 });
@@ -183,8 +183,9 @@ describe("PushNotifier", () => {
     const notifier = createPushNotifier({ database, clock: () => 0, logger, vapid, send });
     notifier.subscribe("m1", subscription(endpoint));
     await notifier.notifyAll({ title: "t", body: "b" });
-    const logged = JSON.stringify([logger.warn, logger.error, logger.info]);
     expect(logger.warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify([logger.warn.mock.calls, logger.error.mock.calls, logger.info.mock.calls]);
+    expect(logged).toContain("fcm.googleapis.com");
     expect(logged).not.toContain("capability-token-xyz");
     expect(logged).not.toContain("/fcm/send/");
     expect(logged).not.toContain("p256dh-secret");
