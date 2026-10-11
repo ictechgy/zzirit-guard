@@ -230,6 +230,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     verifyRole: (managerChannelId) => roleVerifier.roleOf(managerChannelId),
     disconnectChannel,
     endSessions: (sessionIds, reason) => hub.closeSessions(sessionIds, reason),
+    logger,
   };
   const http = await buildHttpServer({ config, sessions, authFlow, hub, services, logger });
   /** 반복 타이머 핸들. stop()에서 비운다. */

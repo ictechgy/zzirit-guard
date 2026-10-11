@@ -395,6 +395,30 @@ describe("WebSocket", () => {
     expect(harness.sessions.get(rawId)).toBeNull();
   });
 
+  it("티켓을 받을 때 해임이 확인되면 그 매니저의 장애 알림 구독도 지운다(B19-5)", async () => {
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    const unsubscribeManager = vi.spyOn(harness.services.push, "unsubscribeManager");
+    harness.services.verifyRole = async () => null;
+    const response = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(rawId) });
+    expect(response.statusCode).toBe(401);
+    expect(unsubscribeManager).toHaveBeenCalledWith("STREAMING_CHAT_MANAGER-id");
+  });
+
+  it("구독 삭제가 실패해도 해임 처리(세션 삭제·401)는 끝내고 오류를 기록한다(B19-5)", async () => {
+    const rawId = harness.login("STREAMING_CHAT_MANAGER");
+    vi.spyOn(harness.services.push, "unsubscribeManager").mockImplementation(() => {
+      throw new Error("database is locked");
+    });
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    harness.services.logger = logger;
+    harness.services.verifyRole = async () => null;
+    const response = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(rawId) });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().message).toMatch(/매니저 권한이 해제되었습니다/);
+    expect(harness.sessions.get(rawId)).toBeNull();
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), { error: "Error: database is locked" });
+  });
+
   it("잘못된 티켓은 4003으로 닫는다", async () => {
     // injectWS는 핸드셰이크 직후 서버가 닫으면 열림 이벤트를 놓쳐 멈추므로, 실제 로컬 포트에서 ws 클라이언트로 확인한다.
     const address = await harness.app.listen({ host: "127.0.0.1", port: 0 });

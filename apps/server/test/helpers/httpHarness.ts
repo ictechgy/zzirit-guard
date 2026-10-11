@@ -57,6 +57,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     verifyRole: async (managerChannelId) => managerChannelId.replace(/-id$/, "") as ManagerRole,
     disconnectChannel: vi.fn(),
     endSessions: vi.fn<RouteServices["endSessions"]>(),
+    logger: silentLogger,
   };
   const authFlow: AuthFlow = {
     authorizeUrl: (purpose) => `https://chzzk.example/account-interlock?purpose=${purpose}&state=test-state`,
