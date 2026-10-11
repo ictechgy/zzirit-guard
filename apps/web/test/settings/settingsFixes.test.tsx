@@ -90,6 +90,37 @@ describe("ChatSettingsSection", () => {
   });
 });
 
+describe("ChatSettingsSection 최신 값 병합(F5)", () => {
+  /** 화면을 처음 열 때 읽은 설정(A). */
+  const opened: ChatSettingsDto = { chatAvailableCondition: "NONE", chatAvailableGroup: "ALL", minFollowerMinute: 0, allowSubscriberInFollowerMode: false, chatSlowModeSec: 0, chatEmojiMode: false };
+  /** 그사이 다른 사람이 치지직에서 바꾼 설정(B). */
+  const changedElsewhere: ChatSettingsDto = { ...opened, chatAvailableGroup: "FOLLOWER", minFollowerMinute: 10, chatEmojiMode: true };
+
+  it("보내기 직전에 설정을 다시 읽어, 바꾼 저속 모드만 최신 값(B) 위에 얹어 보낸다", async () => {
+    const reads = [opened, changedElsewhere];
+    const fetchMock = stubFetch({
+      "GET /api/chat-settings": () => json(200, reads.shift() ?? changedElsewhere),
+      "PUT /api/chat-settings": (init) => json(200, JSON.parse(String(init?.body))),
+    });
+    render(<ChatSettingsSection me={manager} />);
+    await userEvent.selectOptions(await screen.findByLabelText("저속 모드"), "10");
+    expect(await screen.findByText("저속 모드를 10초로 바꿨습니다.")).toBeTruthy();
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ ...changedElsewhere, chatSlowModeSec: 10 });
+  });
+
+  it("다시 읽기가 실패하면 보내지 않고 오류를 보여 준다", async () => {
+    let reads = 0;
+    const fetchMock = stubFetch({
+      "GET /api/chat-settings": () => (reads++ === 0 ? json(200, opened) : json(502, { error: "chzzk_failed", message: "치지직 설정을 읽지 못했습니다." })),
+    });
+    render(<ChatSettingsSection me={manager} />);
+    await userEvent.selectOptions(await screen.findByLabelText("저속 모드"), "10");
+    expect(await screen.findByText("치지직 설정을 읽지 못했습니다.")).toBeTruthy();
+    expect(callsTo(fetchMock, "PUT", "/api/chat-settings")).toBe(0);
+  });
+});
+
 describe("RulesSection 입력", () => {
   it("추가가 400으로 실패하면 입력한 글자가 남고 오류가 보인다", async () => {
     stubFetch({
