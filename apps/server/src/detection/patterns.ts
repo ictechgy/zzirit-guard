@@ -3,8 +3,9 @@ import { stripInvisibleAndFullwidth } from "./normalize.js";
 /**
  * 호스트 바로 뒤에 경로("/")나 포트(":8080")가 오는지 보는 앞쪽 탐색. 3번 그룹으로 잡는다.
  * 왜 포트도 보나: "evil.zzz:8080/x"처럼 포트를 끼우면 경로 휴리스틱(word.word/…)을 피해 갔다(적대적 재점검).
+ * 포트는 두 자리 이상만 본다(N2): "T1 vs.GEN:2", "t1.faker:3킬" 같은 점수·횟수 표기를 되돌릴 수 없는 숨김으로 보지 않기 위해서다.
  */
-const PATH_OR_PORT_LOOKAHEAD = String.raw`(?=(\/|:\d{1,5}(?!\d))?)`;
+const PATH_OR_PORT_LOOKAHEAD = String.raw`(?=(\/|:\d{2,5}(?!\d))?)`;
 /**
  * 호스트 후보를 전부 뽑는 패턴. 1번 그룹은 http(s):// 접두, 2번 그룹은 전체 호스트, 3번 그룹은 바로 뒤의 "/"(경로)나 ":포트"다.
  * 최상위 도메인을 미리 정해 두지 않고 모양만 보는 이유: 목록에 없는 TLD(.bet, .casino)나 IP도 빠짐없이 잡기 위해서다.
@@ -35,8 +36,11 @@ const HANGUL_HOST_CANDIDATE_PATTERN = new RegExp(
 const HANGUL_SYLLABLE_PATTERN = /[가-힣]/;
 /** 퓨니코드(IDN을 ASCII로 쓴 형태) 라벨 접두. "xn--3e0b707e"(한국)처럼 목록에 없는 TLD로도 링크를 만들 수 있다. */
 const PUNYCODE_LABEL_PREFIX = "xn--";
-/** 마지막 라벨이 영문자로 시작하는지. "3.5/2" 같은 숫자 표기를 경로 휴리스틱에서 빼기 위해 쓴다. */
-const STARTS_WITH_LETTER_PATTERN = /^[a-z]/;
+/**
+ * 마지막 라벨이 최상위 도메인 모양(영문자로 시작하는 두 글자 이상)인지. 경로·포트 휴리스틱에만 쓴다.
+ * 왜: "3.5/2" 같은 숫자 표기와 "e.g:10"·"a.m:10" 같은 한 글자 약어를 빼기 위해서다. 한 글자 최상위 도메인은 없다(N2).
+ */
+const TOP_LEVEL_DOMAIN_SHAPE_PATTERN = /^[a-z][a-z0-9-]/;
 /**
  * 흔한 최상위 도메인. 접두(http://, www.)가 없는 호스트를 링크로 볼지 가리는 데만 쓴다.
  * 호스트의 첫 라벨을 뺀 나머지 라벨 중 하나라도 여기 있으면 링크로 본다("youtube.com.de", "spam.ru" 같은 우회를 막기 위해).
@@ -198,13 +202,13 @@ function hasKnownTopLevelDomain(host: string): boolean {
  * 1) 접두가 있으면 TLD와 상관없이 링크(.bet, IP 포함).
  * 2) 퓨니코드 라벨(xn--)이 있으면 링크(S11).
  * 3) 접두가 없어도 "word.word/..."·"word.word:8080"(접두 없이 경로·포트가 붙은 호스트)은 거의 항상 URL이라 링크로 본다.
- *    단, 마지막 라벨이 영문자로 시작해야 한다("3.5/2 정도" 같은 숫자 표기, "그래.그래/…" 같은 한글 표기는 제외).
+ *    단, 마지막 라벨이 영문자로 시작하는 두 글자 이상이어야 한다("3.5/2 정도" 같은 숫자 표기, "a.m:10" 같은 한 글자 약어, "그래.그래/…" 같은 한글 표기는 제외).
  * 4) 그 밖에는 첫 라벨 뒤에 알려진 TLD(.한국 포함)가 있을 때만 링크다("3.5", "ver.2", "안녕.하세요" 같은 표기를 거르기 위해).
  */
 function isLinkCandidate(candidate: HostCandidate): boolean {
   if (candidate.hasExplicitPrefix || hasPunycodeLabel(candidate.host)) return true;
   const lastLabel = candidate.host.split(".").at(-1) ?? "";
-  if (candidate.isFollowedBySlash && STARTS_WITH_LETTER_PATTERN.test(lastLabel)) return true;
+  if (candidate.isFollowedBySlash && TOP_LEVEL_DOMAIN_SHAPE_PATTERN.test(lastLabel)) return true;
   return hasKnownTopLevelDomain(candidate.host);
 }
 

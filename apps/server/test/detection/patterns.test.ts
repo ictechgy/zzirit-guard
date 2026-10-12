@@ -160,6 +160,14 @@ describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 �
     },
   );
 
+  it.each(["T1 vs.GEN:2", "e.g:1", "t1.faker:3킬", "a.m:10", "오전 a.m:10 방송"])("한 자리 숫자나 한 글자 끝 라벨에 붙은 콜론은 포트로 보지 않는다(N2): %s", (text) => {
+    expect(containsBlockedLink(text, allow)).toBe(false);
+  });
+
+  it.each(["evil.zzz:80", "evil.zzz:8080/x", "spam.bet:443"])("두 자리 이상 포트는 계속 링크 단서로 본다(N2): %s", (text) => {
+    expect(containsBlockedLink(text, allow)).toBe(true);
+  });
+
   it("한글을 허용 도메인 앞에 붙여 다른 주소일 수 있는 링크는 자동 숨김하지 않고 후보 신호로만 낸다", () => {
     expect(containsBlockedLink("카지노youtube.com/abc", allow)).toBe(false);
     expect(containsGluedAllowedLink("카지노youtube.com/abc", allow)).toBe(true);
