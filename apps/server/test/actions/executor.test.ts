@@ -71,6 +71,22 @@ describe("Executor", () => {
     expect(auditLog.list("c1", 10, null)[0]).toMatchObject({ action: "hide", actorChannelId: "manager-1", targetSenderChannelId: "bad", result: "ok" });
   });
 
+  it.each(["false_positive", "restricted", "ignored"] as const)("숨김이 성공해도 그사이 %s로 바뀐 판정은 hidden으로 덮지 않는다(S12)", async (status) => {
+    const blindMessage = vi.fn(async () => undefined);
+    const { executor, verdicts, statusEvents, verdict, hide } = setup({ blindMessage });
+    verdicts.updateStatus(verdict.id, status);
+    await expect(executor.submit("c1", hide, manager)).resolves.toEqual({ ok: true, note: null });
+    expect(verdicts.get(verdict.id)?.status).toBe(status);
+    expect(statusEvents).toEqual([]);
+  });
+
+  it("다른 채널 이름으로 들어온 숨김 성공은 판정 상태를 바꾸지 않는다(S12)", async () => {
+    const { executor, verdicts, statusEvents, verdict, hide } = setup({ blindMessage: vi.fn(async () => undefined) });
+    await executor.submit("other-channel", hide, manager);
+    expect(verdicts.get(verdict.id)?.status).toBe("pending");
+    expect(statusEvents).toEqual([]);
+  });
+
   it("429는 1·2초 기다리며 다시 시도한다", async () => {
     const blindMessage = failingThenOk([new ChzzkApiError(429, "TOO_MANY_REQUESTS", "/x"), new ChzzkApiError(429, "TOO_MANY_REQUESTS", "/x")]);
     const { executor, sleeps, hide } = setup({ blindMessage });

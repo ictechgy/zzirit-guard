@@ -1,6 +1,7 @@
 import type { RealtimeEvent } from "@zzirit-guard/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAutoHideSwitch, type AutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
+import { createVerdictClaims, type VerdictClaims } from "../../src/actions/verdictClaims.js";
 import { createDecisionHandler, type DecisionHandler } from "../../src/actions/decisionHandler.js";
 import type { Executor } from "../../src/actions/executor.js";
 import type { ChatEvent } from "../../src/chat/chatEvent.js";
@@ -21,6 +22,7 @@ let autoHide: AutoHideSwitch;
 let submit: ReturnType<typeof vi.fn>;
 let events: RealtimeEvent[];
 let chatLines: string[];
+let claims: VerdictClaims;
 
 beforeEach(() => {
   database = openDatabase(":memory:");
@@ -32,8 +34,9 @@ beforeEach(() => {
   submit = vi.fn(async () => ({ ok: true, note: null }));
   events = [];
   chatLines = [];
+  claims = createVerdictClaims();
   handler = createDecisionHandler({
-    verdicts, autoHide, stats, logger: silentLogger,
+    verdicts, autoHide, stats, claims, logger: silentLogger,
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
     broadcaster: { broadcast: (event) => events.push(event), pushChatLine: (line) => chatLines.push(`${line.decision}:${line.content}`) },
   });
@@ -121,6 +124,18 @@ describe("DecisionHandler", () => {
     expect(flushedStats()).toMatchObject({ auto_hidden: 0, shadow: 0 });
   });
 
+  it("자동 숨김을 보내는 동안 그 판정을 붙잡아 매니저 숨기기·무시와 겹치지 않게 하고, 끝나면 놓는다(S12)", async () => {
+    let finish: (outcome: { ok: boolean; note: null }) => void = () => undefined;
+    submit.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    const verdictId = verdicts.listRecent("c1", 0)[0]?.id as number;
+    expect(claims.isClaimed(verdictId)).toBe(true);
+    finish({ ok: true, note: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(claims.isClaimed(verdictId)).toBe(false);
+  });
+
   it("폭주 한도에 걸려 섀도로 저장되는 메시지는 실시간 채팅 줄도 shadow로 보인다(S5, M02)", () => {
     settingsBreaker(1);
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
@@ -180,7 +195,7 @@ describe("DecisionHandler", () => {
       throw new Error("실행기 실패");
     });
     const failingHandler = createDecisionHandler({
-      verdicts, autoHide, stats, logger,
+      verdicts, autoHide, stats, claims, logger,
       executor: { submit: rejecting, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as unknown as Executor,
       broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
     });
@@ -196,7 +211,7 @@ describe("DecisionHandler", () => {
   it("자동 숨김이 실패하면 기록기의 message를 덮지 않게 outcomeMessage로 남긴다(F8)", async () => {
     const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const failingHandler = createDecisionHandler({
-      verdicts, autoHide, stats, logger,
+      verdicts, autoHide, stats, claims, logger,
       executor: { submit: async () => ({ ok: false, message: "치지직 서버 오류" }), pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
       broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
     });

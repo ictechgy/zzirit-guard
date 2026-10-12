@@ -23,6 +23,18 @@ describe("VerdictRepository", () => {
     expect(repository.listRecent("c1", 2_000).map((verdict) => verdict.id)).toEqual([second.id]);
     expect(repository.deleteOlderThan(2_000)).toBe(1);
   });
+
+  it("상태 전이는 허용한 이전 상태·같은 채널일 때만 바꾸고 결과를 알려 준다(S12)", () => {
+    const repository = createVerdictRepository(openDatabase(":memory:"), () => 0);
+    const verdict = repository.insert(sample);
+    expect(repository.transitionStatus(verdict.id, "other-channel", "ignored", ["pending"])).toBe(false);
+    expect(repository.transitionStatus(verdict.id, "c1", "ignored", ["hidden", "restricted"])).toBe(false);
+    expect(repository.get(verdict.id)?.status).toBe("pending");
+    expect(repository.transitionStatus(verdict.id, "c1", "ignored", ["pending"])).toBe(true);
+    expect(repository.get(verdict.id)?.status).toBe("ignored");
+    expect(repository.transitionStatus(verdict.id, "c1", "ignored", ["pending"])).toBe(false);
+    expect(repository.transitionStatus(999, "c1", "hidden", ["pending"])).toBe(false);
+  });
 });
 
 describe("AuditLog", () => {

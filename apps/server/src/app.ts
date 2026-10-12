@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { createAutoHideSwitch } from "./actions/autoHideSwitch.js";
 import { createDecisionHandler } from "./actions/decisionHandler.js";
 import { createExecutor } from "./actions/executor.js";
+import { createVerdictClaims } from "./actions/verdictClaims.js";
 import { connectWithSocketIo, createChatReceiver, type SocketConnector } from "./chat/chatReceiver.js";
 import { createChzzkApi } from "./chzzk/apiClient.js";
 import type { AppConfig } from "./config.js";
@@ -102,7 +103,9 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     onVerdictStatus: (verdictId, status) => hub.broadcast({ type: "verdict_status", verdictId, status }),
   });
   const autoHide = createAutoHideSwitch({ settings, auditLog, clock, logger });
-  const decisionHandler = createDecisionHandler({ verdicts, executor, autoHide, stats, broadcaster: hub, logger });
+  /** 숨김을 보내는 중인 판정 모음. 매니저 숨기기(routes)와 자동 숨김이 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
+  const claims = createVerdictClaims();
+  const decisionHandler = createDecisionHandler({ verdicts, executor, autoHide, claims, stats, broadcaster: hub, logger });
   const pipeline = createDetectionPipeline({
     rules, auditLog,
     groupFlood: createGroupFloodDetector(),
@@ -223,7 +226,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
 
   const services: RouteServices = {
     channel: () => credentialStore.loadChannel(),
-    status, verdicts, executor, autoHide, rules, settings, auditLog, stats, push,
+    status, verdicts, claims, executor, autoHide, rules, settings, auditLog, stats, push,
     broadcaster: hub,
     clock,
     getChatSettings: async () => api.getChatSettings(await tokenManager.getAccessToken()),

@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { createAutoHideSwitch } from "../actions/autoHideSwitch.js";
 import { createDecisionHandler } from "../actions/decisionHandler.js";
 import type { Executor } from "../actions/executor.js";
+import { createVerdictClaims } from "../actions/verdictClaims.js";
 import type { ChatEvent } from "../chat/chatEvent.js";
 import { openDatabase } from "../db/database.js";
 import { createGroupFloodDetector, createPersonalFloodDetector } from "../detection/floodDetectors.js";
@@ -127,7 +128,7 @@ function buildPipeline() {
   const executor: Executor = { submit: async () => ({ ok: true, note: null }), pendingCount: () => 0, onFailureRateExceeded: () => undefined };
   const pipeline = createDetectionPipeline({ rules, auditLog, groupFlood: createGroupFloodDetector(), personalFlood: createPersonalFloodDetector(), duplicates: createDuplicateTracker() });
   const handler = createDecisionHandler({
-    verdicts: createVerdictRepository(database, clock), executor, stats: createMinuteStats(database, clock), logger: silentLogger,
+    verdicts: createVerdictRepository(database, clock), executor, claims: createVerdictClaims(), stats: createMinuteStats(database, clock), logger: silentLogger,
     autoHide: createAutoHideSwitch({ settings: createSettingsRepository(database), auditLog, clock, logger: silentLogger }),
     broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
   });

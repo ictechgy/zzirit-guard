@@ -102,12 +102,52 @@ describe("판정 조치", () => {
     expect(harness.submit).not.toHaveBeenCalled();
   });
 
-  it.each(["ignored", "false_positive"] as const)("%s인 판정은 다시 숨길 수 있다(F9.2)", async (status) => {
+  it.each(["ignored", "false_positive"] as const)("%s인 판정도 숨기지 않고 409(S12): 숨김은 대기 중(pending)에서만, 오판 표시는 다시 숨길 대상을 만들지 않는다", async (status) => {
     const verdict = insertCandidate();
     harness.verdicts.updateStatus(verdict.id, status);
     const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.submit).not.toHaveBeenCalled();
+  });
+
+  it("두 매니저가 거의 동시에 숨기기를 눌러도 실행기에는 한 번만 보내고, 늦은 쪽은 409 already_handled(S12, M10)", async () => {
+    // 실행기가 응답을 늦게 주는 동안 두 번째 클릭이 들어오게 한다. 받은 요청은 모두 한꺼번에 끝낸다.
+    const releases: Array<() => void> = [];
+    harness.submit.mockImplementation(() => new Promise((resolve) => void releases.push(() => resolve({ ok: true, note: null }))));
+    const release = () => releases.forEach((finish) => finish());
+    const verdict = insertCandidate();
+    const url = `/api/verdicts/${verdict.id}/hide`;
+    const first = harness.app.inject({ method: "POST", url, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    const second = harness.app.inject({ method: "POST", url, headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+    await vi.waitFor(() => expect(harness.submit).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    const statuses = (await Promise.all([first, second])).map((response) => response.statusCode).sort();
+    expect(statuses).toEqual([200, 409]);
     expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("다른 요청(자동 숨김 등)이 숨기는 중인 판정은 숨기기·무시를 409로 거절한다(S12)", async () => {
+    const verdict = insertCandidate();
+    harness.services.claims.tryClaim(verdict.id);
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    const hide = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers });
+    const ignore = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/ignore`, headers });
+    expect([hide.statusCode, ignore.statusCode]).toEqual([409, 409]);
+    expect(hide.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.submit).not.toHaveBeenCalled();
+    expect(harness.verdicts.get(verdict.id)?.status).toBe("pending");
+  });
+
+  it("숨김이 실패하면 붙잡은 판정을 놓아 다시 숨길 수 있다(S12)", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 서버 오류로 실패했습니다." });
+    const verdict = insertCandidate();
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    expect((await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers })).statusCode).toBe(502);
+    expect(harness.services.claims.isClaimed(verdict.id)).toBe(false);
+    expect((await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers })).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(2);
   });
 
   it("대기 중인 판정만 무시할 수 있다(F9.2)", async () => {
@@ -124,15 +164,24 @@ describe("판정 조치", () => {
     }
   });
 
-  it("오판 신고는 자동 숨김된 판정을 포함해 어떤 상태에서도 받는다(F9.2)", async () => {
+  it("오판 신고는 대기 중·숨김·제한된 판정에서 받는다(F9.2, S12)", async () => {
     const rawId = harness.login("STREAMING_CHAT_MANAGER");
-    for (const status of ["pending", "hidden", "ignored", "restricted", "false_positive"] as const) {
+    for (const status of ["pending", "hidden", "restricted"] as const) {
       const verdict = insertCandidate();
       harness.verdicts.updateStatus(verdict.id, status);
       const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/false-positive`, headers: mutatingHeaders(rawId) });
       expect(response.statusCode).toBe(200);
       expect(harness.verdicts.get(verdict.id)?.status).toBe("false_positive");
     }
+  });
+
+  it.each(["ignored", "false_positive"] as const)("%s인 판정의 오판 신고는 409이고 상태를 그대로 둔다(S12)", async (status) => {
+    const verdict = insertCandidate();
+    harness.verdicts.updateStatus(verdict.id, status);
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/false-positive`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.verdicts.get(verdict.id)?.status).toBe(status);
   });
 
   it("오판 신고는 상태를 바꾸고 감사 기록을 남긴다", async () => {

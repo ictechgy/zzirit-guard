@@ -7,6 +7,7 @@ import type { MinuteStats } from "../records/minuteStats.js";
 import type { VerdictRepository } from "../records/verdictRepository.js";
 import type { AutoHideSwitch } from "./autoHideSwitch.js";
 import type { Executor } from "./executor.js";
+import type { VerdictClaims } from "./verdictClaims.js";
 
 /** 실시간 화면으로 보내는 통로. Task 18의 RealtimeHub가 구현한다. */
 export interface Broadcaster {
@@ -24,6 +25,8 @@ export interface DecisionHandlerDeps {
   verdicts: VerdictRepository;
   executor: Executor;
   autoHide: AutoHideSwitch;
+  /** 숨김을 보내는 중인 판정 모음. 자동 숨김이 대기열에 있는 동안 매니저의 숨기기·무시가 겹치지 않게 붙잡는다(S12). */
+  claims: VerdictClaims;
   stats: MinuteStats;
   broadcaster: Broadcaster;
   logger: Logger;
@@ -129,6 +132,8 @@ function recordAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
  */
 function submitAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: MessageRef, verdictId: number): void {
   const target = { chatChannelId: ref.chatChannelId, messageTime: ref.messageTime, senderChannelId: ref.senderChannelId };
+  // 방금 만든 판정이라 붙잡기는 늘 성공한다. 결과가 오기 전까지 매니저의 숨기기·무시가 같은 판정에 겹치지 않게 한다(S12).
+  deps.claims.tryClaim(verdictId);
   // submit은 거절하지 않도록 설계됐지만, 예외가 나면 Node 22가 프로세스를 끝내므로 반드시 잡는다.
   void deps.executor
     .submit(channelId, { kind: "hide", target, verdictId }, RULE_ACTOR, { shouldRun: () => deps.autoHide.isEnabled(channelId) })
@@ -138,7 +143,8 @@ function submitAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
     })
     .catch((error: unknown) => {
       deps.logger.error("자동 숨김 요청 처리 중 예외", { verdictId, error: describeError(error) });
-    });
+    })
+    .finally(() => deps.claims.release(verdictId));
 }
 
 /**

@@ -72,6 +72,9 @@ const FAILURE_MIN_SAMPLES = 10;
 /** 이 비율을 넘으면 알린다(50%). */
 const FAILURE_RATE_LIMIT = 0.5;
 
+/** 숨김이 성공했을 때 hidden으로 바꿔도 되는 지금 상태(S12): 대기 중만. */
+const HIDE_ALLOWED_FROM: readonly VerdictStatus[] = ["pending"];
+
 /** 실패 처리 결정: 끝내거나(done) 다시 시도(retry). */
 type FailureDecision = { kind: "done"; outcome: ActionOutcome } | { kind: "retry" };
 
@@ -256,7 +259,7 @@ class SerialExecutor implements Executor {
     const verdictId = "verdictId" in request ? request.verdictId : null;
     this.recordAudit(channelId, request, actor, outcome);
     if (!outcome.ok) this.options.logger.warn("쓰기 요청 실패", { action: request.kind, verdictId, outcomeMessage: outcome.message });
-    if (outcome.ok && verdictId !== null) this.guardRecording(request, "판정 상태 갱신 실패", () => this.updateVerdict(verdictId, request.kind));
+    if (outcome.ok && verdictId !== null) this.guardRecording(request, "판정 상태 갱신 실패", () => this.updateVerdict(channelId, verdictId, request.kind));
     this.trackFailureRate(channelId, outcome.ok);
   }
 
@@ -283,12 +286,22 @@ class SerialExecutor implements Executor {
     }
   }
 
-  /** 성공한 조치에 맞게 판정 상태를 바꾸고 알린다. */
-  private updateVerdict(verdictId: number, kind: ActionRequest["kind"]): void {
-    const status: VerdictStatus | null = kind === "hide" ? "hidden" : kind === "temporary_restrict" || kind === "restrict" ? "restricted" : null;
-    if (!status) return;
-    this.options.verdicts.updateStatus(verdictId, status);
-    this.options.onVerdictStatus(verdictId, status);
+  /**
+   * 성공한 조치에 맞게 판정 상태를 바꾸고 알린다.
+   * 숨김은 대기 중(pending)인 판정만 hidden으로 바꾼다(S12). 왜: 숨기는 사이 매니저가 오판·임시 제한으로 바꿨으면 그 기록을 덮지 않는다.
+   * 제한은 지금처럼 어떤 상태든 restricted로 바꾼다(사람 단위 조치가 더 강한 기록이다).
+   * @param channelId 요청한 채널(판정이 이 채널의 것이어야 바꾼다)
+   * @param verdictId 판정 번호
+   * @param kind 성공한 조치 종류
+   */
+  private updateVerdict(channelId: string, verdictId: number, kind: ActionRequest["kind"]): void {
+    if (kind === "hide") {
+      if (this.options.verdicts.transitionStatus(verdictId, channelId, "hidden", HIDE_ALLOWED_FROM)) this.options.onVerdictStatus(verdictId, "hidden");
+      return;
+    }
+    if (kind !== "temporary_restrict" && kind !== "restrict") return;
+    this.options.verdicts.updateStatus(verdictId, "restricted");
+    this.options.onVerdictStatus(verdictId, "restricted");
   }
 
   /** 최근 1분 실패율이 기준을 넘으면 1분에 한 번만 알린다. */

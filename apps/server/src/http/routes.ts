@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
 import type { Broadcaster } from "../actions/decisionHandler.js";
 import type { ActionOutcome, Actor, Executor } from "../actions/executor.js";
+import type { VerdictClaims } from "../actions/verdictClaims.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
 import type { RuleRepository } from "../detection/ruleRepository.js";
 import { describeError, type Logger } from "../logger.js";
@@ -23,6 +24,8 @@ export interface RouteServices {
   channel(): ConnectedChannel | null;
   status(): ServerStatus;
   verdicts: VerdictRepository;
+  /** 숨김을 보내는 중인 판정 모음. 자동 숨김(decisionHandler)과 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
+  claims: VerdictClaims;
   executor: Executor;
   autoHide: AutoHideSwitch;
   rules: RuleRepository;
@@ -62,12 +65,24 @@ const MAX_PUSH_ENDPOINT_LENGTH = 2048;
 const MAX_PUSH_KEY_LENGTH = 256;
 
 /**
- * 이 상태의 판정은 다시 숨기지 않는다. 왜: 이미 숨겼거나 활동을 제한한 메시지에 숨김을 또 보내면 치지직 호출·감사 기록만 늘고,
- * 두 매니저가 동시에 누른 경우 같은 조치가 두 번 기록된다(F9.2). 무시·오판으로 표시한 판정은 매니저가 생각을 바꿀 수 있어 다시 숨길 수 있다.
+ * 숨길 수 있는 판정 상태(S12): 대기 중만.
+ * 왜: 이미 숨겼거나 제한한 메시지에 숨김을 또 보내면 치지직 호출·감사 기록만 늘고(F9.2), 무시·오판으로 표시한 판정은 매니저가 이미 판단을 끝낸 것이다.
+ * 특히 오판 표시가 판정을 다시 숨길 대상으로 되돌리면 안 된다(M11).
  */
-const HIDE_BLOCKING_STATUSES: ReadonlySet<VerdictStatus> = new Set(["hidden", "restricted"]);
+const HIDE_ALLOWED_FROM: readonly VerdictStatus[] = ["pending"];
+/**
+ * 표시 동작별로 바꿀 수 있는 이전 상태(S12).
+ * 무시는 대기 중만: 숨김·제한이 끝난 판정을 무시로 덮으면 실제 조치 기록이 화면에서 사라진다.
+ * 오판은 대기 중·숨김·제한: 잘못된 자동 숨김(hidden)·제한을 알리는 통로다. 무시했거나 이미 오판인 판정은 받지 않는다.
+ */
+const MARK_ALLOWED_FROM: Readonly<Record<Extract<VerdictStatus, "ignored" | "false_positive">, readonly VerdictStatus[]>> = {
+  ignored: ["pending"],
+  false_positive: ["pending", "hidden", "restricted"],
+};
 /** 이미 처리된 판정에 다시 조치하려 할 때의 안내 문구. */
 const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.";
+/** 다른 요청(다른 매니저·자동 숨김)이 같은 판정을 숨기는 중일 때의 안내 문구. 화면이 already_handled 코드로 다시 불러오게 같은 코드를 쓴다. */
+const ACTION_IN_PROGRESS_MESSAGE = "다른 요청이 이 판정을 숨기는 중입니다. 잠시 뒤 '다시 불러오기'를 눌러 결과를 확인하세요.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -167,18 +182,27 @@ function registerSessionRoutes(app: FastifyInstance, services: RouteServices, se
 /** 후보 목록과 판정 조치. */
 function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): void {
   app.get("/api/candidates", guarded(services, null, ({ channelId }) => services.verdicts.listRecent(channelId, services.clock() - CANDIDATE_WINDOW_MS)));
-  app.post(
-    "/api/verdicts/:id/hide",
-    guarded(services, "hide_message", async ({ request, reply, manager, channelId }) => {
-      const verdict = findVerdict(services, request.params, channelId);
-      if (HIDE_BLOCKING_STATUSES.has(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-      const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
-      return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
-    }),
-  );
+  app.post("/api/verdicts/:id/hide", guarded(services, "hide_message", (context) => hideVerdict(services, context)));
   app.post("/api/verdicts/:id/ignore", guarded(services, "hide_message", (context) => markVerdict(services, context, "ignored")));
   app.post("/api/verdicts/:id/false-positive", guarded(services, "hide_message", (context) => markVerdict(services, context, "false_positive")));
   app.get("/api/false-positives", guarded(services, null, (context) => listFalsePositiveReview(services, context)));
+}
+
+/**
+ * 판정 하나를 숨긴다. 대기 중인 판정만 받고, 보내기 전에 판정을 붙잡아 동시에 누른 요청 중 하나만 실행기로 보낸다(S12, M10).
+ * 확인(findVerdict·상태)과 붙잡기 사이에 await가 없어 다른 요청이 끼어들 수 없다. 결과와 관계없이 끝나면 놓는다.
+ * 성공했을 때의 hidden 전이는 실행기가 pending에서만 한다(그사이 오판·제한으로 바뀌었으면 덮지 않는다).
+ */
+async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
+  const verdict = findVerdict(services, request.params, channelId);
+  if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
+  if (!services.claims.tryClaim(verdict.id)) throw new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
+  try {
+    const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
+    return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
+  } finally {
+    services.claims.release(verdict.id);
+  }
 }
 
 /**
@@ -354,13 +378,14 @@ function resolveVerdictId(services: RouteServices, verdictId: number | null | un
 
 /**
  * 무시·오판으로 표시하고 기록·방송한다. 오판은 해당 규칙을 검토할 근거가 된다.
- * 무시는 대기 중(pending)인 판정에만 허락한다. 숨김·제한이 끝난 판정을 무시로 덮으면 실제 조치 기록이 화면에서 사라지기 때문이다.
- * 오판 신고는 어떤 상태에서도 받는다. 매니저가 잘못된 자동 숨김(hidden)을 알리는 유일한 통로이기 때문이다(F9.2).
+ * 바꿀 수 있는 이전 상태는 MARK_ALLOWED_FROM이고, 확인과 쓰기를 조건부 UPDATE 한 번으로 해 동시 요청이 서로 덮어쓰지 못한다(S12).
+ * 숨기는 중인 판정은 무시로 바꾸지 않는다: 숨김이 성공하면 무시 표시와 실제 조치가 어긋난다.
+ * 오판은 숨기는 중에도 받는다: 그 뒤 숨김이 성공해도 실행기가 오판을 hidden으로 덮지 않는다.
  */
 function markVerdict(services: RouteServices, { request, manager, channelId }: GuardedContext, status: Extract<VerdictStatus, "ignored" | "false_positive">) {
   const verdict = findVerdict(services, request.params, channelId);
-  if (status === "ignored" && verdict.status !== "pending") throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-  services.verdicts.updateStatus(verdict.id, status);
+  if (status === "ignored" && services.claims.isClaimed(verdict.id)) throw new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
+  if (!services.verdicts.transitionStatus(verdict.id, channelId, status, MARK_ALLOWED_FROM[status])) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
   services.auditLog.record({
     channelId, actorType: "manager", actorChannelId: manager.managerChannelId, action: status,
     targetSenderChannelId: verdict.senderChannelId, verdictId: verdict.id, result: "ok", error: null,
