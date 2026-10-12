@@ -45,6 +45,8 @@ export function createAutoHideSwitch(deps: AutoHideSwitchDeps): AutoHideSwitch {
     setEnabled(channelId, enabled, actor, reason) {
       if (autoHide.isEnabled(channelId) === enabled) return;
       deps.settings.setAutoHide(channelId, enabled);
+      // 켜고 끌 때마다(한도 트립 포함) 폭주 창을 비운다. 왜: 남겨 두면 1분 안에 다시 켰을 때 꺼지기 전 숨김이 그대로 세져 첫 건에서 바로 다시 꺼진다(S4, X03).
+      recentHides.delete(channelId);
       deps.auditLog.record({
         channelId, actorType: actor.type, actorChannelId: actor.channelId, action: `auto_hide_${enabled ? "on" : "off"}:${reason}`,
         targetSenderChannelId: null, verdictId: null, result: "ok", error: null,
