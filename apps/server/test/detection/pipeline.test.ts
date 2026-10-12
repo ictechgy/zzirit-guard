@@ -59,6 +59,12 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat("하이라이트 youtube.com/abc"))).toMatchObject({ decision: "pass" });
   });
 
+  it("한글 낱말 + 알려진 최상위 도메인은 후보(rule:link_idn), 도박 단어가 함께면 자동 숨김(rule:link)이다(N1)", () => {
+    expect(pipeline.evaluate(chat("구글.com에서 찾아봐"))).toMatchObject({ decision: "candidate", reason: "rule:link_idn" });
+    expect(pipeline.evaluate(chat("가자.한국!"))).toMatchObject({ decision: "candidate", reason: "rule:link_idn" });
+    expect(pipeline.evaluate(chat("카지노.kr"))).toMatchObject({ decision: "auto_hide", reason: "rule:link" });
+  });
+
   it("허용어는 메시지 전체가 같을 때만 통과시킨다", () => {
     expect(pipeline.evaluate(chat("적팀 죽여버려!!")).decision).toBe("pass");
     expect(pipeline.evaluate(chat("적팀 죽여버려 시발")).decision).toBe("candidate");

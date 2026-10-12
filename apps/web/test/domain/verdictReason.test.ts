@@ -10,6 +10,7 @@ describe("describeReason", () => {
     ["rule:group_flood:privileged", "떼도배 · 스트리머·매니저 메시지라 후보로 낮춤"],
     ["rule:watch_user", "요주의 사용자(최근 180일 조치 이력)"],
     ["rule:link_glued", "광고 링크 의심(허용 주소 앞에 한글이 붙어 다른 주소일 수 있음)"],
+    ["rule:link_idn", "한글 주소(후보)"],
     ["rule:strong:12:unknown_role", "금칙어 강 #12 · 보낸 사람의 역할을 알 수 없어 후보로 낮춤"],
     ["rule:link:unknown_role", "광고 링크 · 보낸 사람의 역할을 알 수 없어 후보로 낮춤"],
     ["model:kanana", "model:kanana"],

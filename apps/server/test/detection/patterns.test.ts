@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, looksLikeAddress } from "../../src/detection/patterns.js";
+import { containsBareHangulLink, containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, looksLikeAddress } from "../../src/detection/patterns.js";
 
 describe("containsBlockedLink", () => {
   it.each([
@@ -179,6 +179,54 @@ describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 �
     expect(containsGluedAllowedLink("링크 youtube.com/abc", allow)).toBe(false);
     expect(containsGluedAllowedLink("youtube.com입니다", allow)).toBe(false);
     expect(containsGluedAllowedLink("카지노evil.zzz", allow)).toBe(false);
+  });
+});
+
+describe("한글 낱말 + 알려진 최상위 도메인(N1): 단서가 없으면 자동 숨김 대신 후보", () => {
+  /** 채널이 허용한 도메인. */
+  const allow = ["youtube.com"];
+
+  it.each([
+    "좋아요.me", "진짜.kr", "응.com", "그래.co", "헐.live", "레전드.club", "역시.Pro 선수", "방송 재밌다.me too",
+    "네이버.com 쳐봐", "유튜브.com", "구글.com에서 찾아봐", "가자.한국!", "역시.한국", "대한민국.한국", "응원합니다.한국.", "네이버.닷컴",
+  ])("자동 숨김하지 않고 한글 주소 후보 신호만 낸다: %s", (text) => {
+    expect(containsBlockedLink(text, allow)).toBe(false);
+    expect(containsBareHangulLink(text, allow)).toBe(true);
+  });
+
+  it.each([
+    "카지노.kr", "토토사이트.net", "가입은 카지노.kr에서", "카지노.한국/abc", "https://카지노.한국", "https://네이버.com",
+    "네이버.com/abc", "네이버.com:8080", "xn--9n2bp8q.xn--3e0b707e", "슬롯 좋아요.me", "ㅋㅏㅈㅣㄴㅗ.kr",
+  ])("도박 단어·접두·경로·포트·퓨니코드 단서가 있으면 계속 자동 숨김 대상이다: %s", (text) => {
+    expect(containsBlockedLink(text, allow)).toBe(true);
+  });
+
+  it.each([
+    "좋아.evil.com", "이벤트.evil.bet", "좋아.evil.한국", "좋아.com.evil.bet", "좋아．evil．com", "좋아。evil。com", "좋아\u2066.\u2069evil.com",
+  ])("한글 라벨이 영문 도메인의 하위 도메인일 뿐이면(등록 도메인이 영문) 후보로 낮추지 않고 자동 숨김한다(적대적 재점검): %s", (text) => {
+    expect(containsBlockedLink(text, allow)).toBe(true);
+  });
+
+  it.each(["카지노.kr evil.com/x", "좋아요.me evil.zzz/x", "좋아요.me evil.com", "가자.한국 spam.ru"])(
+    "한글 주소와 영문 링크가 함께 있으면 영문 링크 때문에 자동 숨김한다(적대적 재점검): %s",
+    (text) => {
+      expect(containsBlockedLink(text, allow)).toBe(true);
+    },
+  );
+
+  it("한글 등록 도메인 앞의 하위 도메인은 후보 그대로다(U2: 단서 없는 한글 주소는 확실하지 않다)", () => {
+    expect(containsBlockedLink("무료쿠폰.kr", allow)).toBe(false);
+    expect(containsBareHangulLink("무료쿠폰.kr", allow)).toBe(true);
+    expect(containsBareHangulLink("evil.좋아.com", allow)).toBe(true);
+  });
+
+  it("허용한 한글 도메인은 후보 신호도 내지 않는다", () => {
+    expect(containsBareHangulLink("카페.한국", ["카페.한국"])).toBe(false);
+  });
+
+  it("영문 호스트는 한글 주소 후보 신호를 내지 않는다", () => {
+    expect(containsBareHangulLink("spam.com", allow)).toBe(false);
+    expect(containsBareHangulLink("안녕.하세요", allow)).toBe(false);
   });
 });
 

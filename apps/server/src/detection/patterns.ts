@@ -226,11 +226,48 @@ function isAllowedHost(host: string, allowDomains: readonly string[]): boolean {
 }
 
 /**
- * 텍스트에서 링크로 볼 호스트를 모두 뽑는다(맨 앞 www. 제거).
+ * 텍스트에서 자동 숨김할 링크 호스트를 모두 뽑는다(맨 앞 www. 제거). 단서 없는 한글 호스트는 빼고 후보 신호로만 쓴다(N1).
  * @param linkText prepareLinkText를 거친 텍스트
  */
 function extractLinkHosts(linkText: string): string[] {
-  return extractHostCandidates(linkText).filter(isLinkCandidate).map((candidate) => stripLeadingWww(candidate.host));
+  return extractHostCandidates(linkText)
+    .filter((candidate) => isLinkCandidate(candidate) && !isBareHangulHost(candidate))
+    .map((candidate) => stripLeadingWww(candidate.host));
+}
+
+/**
+ * 최상위 도메인 바로 앞 라벨(등록 도메인 이름)에 한글이 있고, 접두(http(s)://·www.·사용자 정보)·경로·포트·퓨니코드 단서가 하나도 없는 링크 후보인지 본다(N1).
+ * 왜 따로 보나: "좋아요.me", "구글.com에서 찾아봐", "가자.한국!"처럼 한글 낱말 뒤에 마침표와 흔한 영문 낱말이 오는 정상 채팅과 모양이 같아,
+ * 되돌릴 수 없는 자동 숨김 대신 매니저가 보는 후보로 낮춘다. 도박 단어와 함께면 광고 연락 수단으로 세어 자동 숨김을 유지한다.
+ * 왜 바로 앞 라벨만 보나: "좋아.evil.com"은 한글 라벨이 있어도 실제로는 영문 도메인 evil.com의 하위 주소라, 한글을 앞에 붙이기만 하면
+ * 허용되지 않은 영문 도메인이 후보로 낮아지는 우회가 된다(적대적 재점검). 등록 도메인 이름이 영문이면 낮추지 않는다.
+ * @param candidate 호스트 후보
+ */
+function isBareHangulHost(candidate: HostCandidate): boolean {
+  if (candidate.hasExplicitPrefix || candidate.isFollowedBySlash || hasPunycodeLabel(candidate.host)) return false;
+  const registrableLabel = candidate.host.split(".").at(-2) ?? "";
+  return HANGUL_SYLLABLE_PATTERN.test(registrableLabel);
+}
+
+/**
+ * 읽기 순서 하나에서 허용되지 않은 단서 없는 한글 링크 호스트를 뽑는다(N1).
+ * @param linkText prepareLinkText를 거친 텍스트
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function bareHangulHostsIn(linkText: string, allowDomains: readonly string[]): string[] {
+  return extractHostCandidates(linkText)
+    .filter((candidate) => isLinkCandidate(candidate) && isBareHangulHost(candidate))
+    .map((candidate) => stripLeadingWww(candidate.host))
+    .filter((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 단서 없는 한글 링크(예: "좋아요.me", "가자.한국")가 있는지 본다. 파이프라인은 이것을 자동 숨김이 아니라 후보(rule:link_idn)로 올린다(N1).
+ * @param text 원문(정규화 전)
+ * @param allowDomains 채널이 허용한 도메인
+ */
+export function containsBareHangulLink(text: string, allowDomains: readonly string[]): boolean {
+  return readingOrders(text).some((reading) => bareHangulHostsIn(prepareLinkText(reading), allowDomains).length > 0);
 }
 
 /**
@@ -273,7 +310,9 @@ function hasBlockedLinkIn(linkText: string, allowDomains: readonly string[]): bo
   const linkHosts = extractLinkHosts(linkText);
   if (hasBlockedHost(linkHosts, allowDomains)) return true;
   if (TELEGRAM_HANDLE_PATTERN.test(linkText)) return true;
-  return GAMBLING_PATTERN.test(linkText) && hasRealContact(linkText, linkHosts, allowDomains);
+  if (!GAMBLING_PATTERN.test(linkText)) return false;
+  // 도박 단어와 함께면 단서 없는 한글 링크("카지노.kr", "토토사이트.net")도 광고 연락 수단으로 센다(N1).
+  return hasRealContact(linkText, linkHosts, allowDomains) || bareHangulHostsIn(linkText, allowDomains).length > 0;
 }
 
 /**
