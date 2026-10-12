@@ -248,6 +248,32 @@ describe("NFKC가 호스트·번호 경계를 옮겨 생긴 우회(B1): NFKC 한
   });
 });
 
+describe("점 바로 뒤 추출 금지로 생긴 우회(B2): 점 앞 글자가 호스트 글자일 때만 막는다", () => {
+  it.each([
+    "좋아.me_.evil.com", "좋아.me가.evil.com", "좋아.me!.evil.com", "좋아.me..evil.com", "가자.한국_.evil.com", "좋아.me_.bit.ly/abc",
+    "ㅋ.evil.com", "..evil.com", "a가.evil.com", "ㅋㅋ.bit.ly/abc", "아 진짜...evil.com 가봐",
+  ])("한글 주소 뒤나 구분 문자 뒤의 영문 도메인을 놓치지 않고 막는다: %s", (text) => {
+    expect(containsBlockedLink(text, [])).toBe(true);
+  });
+
+  it.each(["ㅋ.카지노.kr", "..카지노.한국", "아!.토토사이트.net"])("구분 문자 뒤의 한글 도박 주소도 놓치지 않는다: %s", (text) => {
+    expect(containsBlockedLink(text, [])).toBe(true);
+  });
+
+  it.each(["아...ok.com", "ㅇㅇ...co.kr"])("말줄임표 뒤에 진짜 도메인이 오면 막는다(받아들인 오탐): %s", (text) => {
+    expect(containsBlockedLink(text, [])).toBe(true);
+  });
+
+  it.each(["음... 그래", "ㅋㅋ...ㅋㅋ", "아..진짜", "오늘 3.5시간 방송함", "ver.2 패치 좋네", "그래.그래", "끝...이 아니다"])("일반 대화는 계속 통과: %s", (text) => {
+    expect(containsBlockedLink(text, [])).toBe(false);
+  });
+
+  it("점 앞이 호스트 글자면(도메인의 중간 라벨) 따로 뽑지 않는다", () => {
+    expect(containsBlockedLink("youtube.com.de", ["youtube.com"])).toBe(true);
+    expect(containsBlockedLink("m.youtube.com/abc", ["youtube.com"])).toBe(false);
+  });
+});
+
 describe("bidi·서식 제어 문자로 끊은 링크·전화번호(S9, M08)", () => {
   it.each([
     ["LRE·PDF(U+202A·U+202C)", "evil\u202A.\u202Ccom/x"],
