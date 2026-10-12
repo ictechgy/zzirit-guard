@@ -128,16 +128,33 @@ describe("판정 조치", () => {
     expect(harness.submit).toHaveBeenCalledTimes(1);
   });
 
-  it("다른 요청(자동 숨김 등)이 숨기는 중인 판정은 숨기기·무시를 409로 거절한다(S12)", async () => {
+  it("자동 숨김이 숨기는 중인 판정은 숨기기·무시를 409 in_progress와 안내 문구로 거절한다(S12, N4)", async () => {
     const verdict = insertCandidate();
-    harness.services.claims.tryClaim(verdict.id);
+    harness.services.claims.tryClaim(verdict.id, "auto_hide");
     const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
     const hide = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers });
     const ignore = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/ignore`, headers });
     expect([hide.statusCode, ignore.statusCode]).toEqual([409, 409]);
-    expect(hide.json()).toMatchObject({ error: "already_handled" });
+    expect(hide.json()).toEqual({ error: "in_progress", message: "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다." });
+    expect(ignore.json()).toMatchObject({ error: "in_progress" });
     expect(harness.submit).not.toHaveBeenCalled();
     expect(harness.verdicts.get(verdict.id)?.status).toBe("pending");
+  });
+
+  it("다른 매니저가 숨기는 중인 판정은 409 already_handled다(S12)", async () => {
+    const verdict = insertCandidate();
+    harness.services.claims.tryClaim(verdict.id, "manager");
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "already_handled" });
+  });
+
+  it("치지직 처리 결과를 알 수 없으면 502 result_unknown으로 알린다(N4)", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const verdict = insertCandidate();
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({ error: "result_unknown", message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다." });
   });
 
   it("숨김이 실패하면 붙잡은 판정을 놓아 다시 숨길 수 있다(S12)", async () => {

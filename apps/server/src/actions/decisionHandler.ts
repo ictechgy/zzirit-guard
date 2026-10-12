@@ -133,7 +133,7 @@ function recordAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
 function submitAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: MessageRef, verdictId: number): void {
   const target = { chatChannelId: ref.chatChannelId, messageTime: ref.messageTime, senderChannelId: ref.senderChannelId };
   // 방금 만든 판정이라 붙잡기는 늘 성공한다. 결과가 오기 전까지 매니저의 숨기기·무시가 같은 판정에 겹치지 않게 한다(S12).
-  deps.claims.tryClaim(verdictId);
+  deps.claims.tryClaim(verdictId, "auto_hide");
   // submit은 거절하지 않도록 설계됐지만, 예외가 나면 Node 22가 프로세스를 끝내므로 반드시 잡는다.
   void deps.executor
     .submit(channelId, { kind: "hide", target, verdictId }, RULE_ACTOR, { shouldRun: () => deps.autoHide.isEnabled(channelId) })

@@ -20,8 +20,12 @@ export interface Actor {
   channelId: string | null;
 }
 
-/** 처리 결과. message·note는 매니저 화면에 그대로 보여 준다. */
-export type ActionOutcome = { ok: true; note: string | null } | { ok: false; message: string };
+/**
+ * 처리 결과. message·note는 매니저 화면에 그대로 보여 준다.
+ * isResultUnknown은 쓰기가 치지직에 닿았는지 알 수 없는 실패(시간 초과·연결 끊김·해석할 수 없는 2xx)에만 true로 붙는다(N4).
+ * 왜: 라우트가 502 result_unknown으로 알려, 화면이 같은 조치를 곧바로 다시 보내지 않게 한다.
+ */
+export type ActionOutcome = { ok: true; note: string | null } | { ok: false; message: string; isResultUnknown?: true };
 
 /**
  * submit 추가 옵션. shouldRun은 시도마다 두 번 확인한다: 토큰을 받기 전, 그리고 토큰을 받은 뒤 치지직 쓰기를 부르기 직전.
@@ -223,7 +227,18 @@ class SerialExecutor implements Executor {
       await this.sleep(RETRY_BASE_MS * 2 ** attempt);
       return { kind: "retry" };
     }
-    return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error, phase) } };
+    return { kind: "done", outcome: this.failureOutcome(request, error, phase) };
+  }
+
+  /**
+   * 끝난 실패를 결과로 만든다. 처리 결과를 알 수 없는 실패면 isResultUnknown을 붙인다(N4).
+   * @param request 실패한 요청
+   * @param error 잡은 오류
+   * @param phase 실패한 단계
+   */
+  private failureOutcome(request: ActionRequest, error: unknown, phase: FailurePhase): ActionOutcome {
+    const message = this.describeFailure(request, error, phase);
+    return isResultUnknown(error, phase) ? { ok: false, message, isResultUnknown: true } : { ok: false, message };
   }
 
   /**
@@ -392,15 +407,27 @@ function networkErrorCode(error: unknown): string | null {
 }
 
 /**
+ * 쓰기가 치지직에 닿았는지 알 수 없는 실패인지 본다: 쓰기 단계에서 난, 해석할 수 없는 2xx(wasDelivered)이거나
+ * 치지직 응답이 아닌 오류 중 요청이 나가기 전 실패(연결 거부·DNS)가 아닌 것(시간 초과·연결 끊김·내부 오류).
+ * @param error 잡은 오류
+ * @param phase 실패한 단계
+ */
+function isResultUnknown(error: unknown, phase: FailurePhase): boolean {
+  if (phase !== "write" || error instanceof WriteLockedError) return false;
+  if (error instanceof ChzzkApiError) return error.wasDelivered;
+  return !isPreSendNetworkError(error);
+}
+
+/**
  * 오류를 매니저에게 보여 줄 문장으로 바꾼다(원인과 해결 방향 포함).
  * @param error 잡은 오류
  * @param phase 실패한 단계. 쓰기 호출 중의 치지직 응답이 아닌 오류는 요청이 이미 닿았을 수 있어 확인하라고 안내한다
  */
 function toUserMessage(error: unknown, phase: FailurePhase): string {
   if (error instanceof WriteLockedError) return error.message;
-  if (phase === "write" && error instanceof ChzzkApiError && error.wasDelivered) return RESULT_UNKNOWN_MESSAGE;
+  if (isResultUnknown(error, phase)) return RESULT_UNKNOWN_MESSAGE;
   // 내부 오류 내용은 넣지 않는다(describeFailure가 로그로 남긴다).
-  if (!(error instanceof ChzzkApiError)) return phase === "write" && !isPreSendNetworkError(error) ? RESULT_UNKNOWN_MESSAGE : NETWORK_FAILURE_MESSAGE;
+  if (!(error instanceof ChzzkApiError)) return NETWORK_FAILURE_MESSAGE;
   if (error.status === 429) return "치지직 호출 한도를 넘었습니다. 잠시 뒤 다시 시도하세요.";
   if (error.status === 403) return "치지직이 권한 없음으로 거부했습니다. 스트리머 연결 때 동의한 권한(Scope)을 확인하세요.";
   if (error.status >= 500) return "치지직 서버 오류로 실패했습니다. 잠시 뒤 다시 시도하세요.";

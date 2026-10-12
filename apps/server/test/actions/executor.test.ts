@@ -305,7 +305,7 @@ describe("Executor 재시도 범위(S1): 요청이 나갔을 수 있는 실패�
       const outcome = await executor.submit("c1", request, manager);
       expect(call).toHaveBeenCalledTimes(1);
       expect(sleeps).toEqual([]);
-      expect(outcome).toEqual({ ok: false, message: expect.stringMatching(/결과를 알 수 없습니다.*확인/) });
+      expect(outcome).toEqual({ ok: false, message: expect.stringMatching(/결과를 알 수 없습니다.*확인/), isResultUnknown: true });
     });
   });
 
@@ -316,7 +316,14 @@ describe("Executor 재시도 범위(S1): 요청이 나갔을 수 있는 실패�
     const outcome = await executor.submit("c1", hide, manager);
     expect(blindMessage).toHaveBeenCalledTimes(1);
     expect(sleeps).toEqual([]);
-    expect(outcome).toEqual({ ok: false, message: expect.stringMatching(/결과를 알 수 없습니다/) });
+    expect(outcome).toEqual({ ok: false, message: expect.stringMatching(/결과를 알 수 없습니다/), isResultUnknown: true });
+  });
+
+  it("결과를 아는 실패(치지직 4xx·요청 전 연결 실패)에는 결과 모름 표시를 붙이지 않는다(N4)", async () => {
+    const rejected = setup({ blindMessage: failingThenOk([new ChzzkApiError(400, "bad", "/x")]) });
+    await expect(rejected.executor.submit("c1", rejected.hide, manager)).resolves.toEqual({ ok: false, message: "치지직이 요청을 거부했습니다: bad" });
+    const refused = setup({ blindMessage: failingThenOk([1, 2, 3, 4].map(() => fetchFailure("ECONNREFUSED"))) });
+    await expect(refused.executor.submit("c1", refused.hide, manager)).resolves.toEqual({ ok: false, message: "치지직에 연결하지 못했습니다. 네트워크를 확인하세요." });
   });
 
   it.each(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"])("요청이 나가기 전 실패(%s)는 기다렸다가 다시 시도한다", async (code) => {

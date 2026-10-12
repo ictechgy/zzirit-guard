@@ -130,7 +130,7 @@ describe("DecisionHandler", () => {
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
     handler.handle(chat("느금마"), result("auto_hide", "느금마"));
     const verdictId = verdicts.listRecent("c1", 0)[0]?.id as number;
-    expect(claims.isClaimed(verdictId)).toBe(true);
+    expect(claims.holderOf(verdictId)).toBe("auto_hide");
     finish({ ok: true, note: null });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(claims.isClaimed(verdictId)).toBe(false);

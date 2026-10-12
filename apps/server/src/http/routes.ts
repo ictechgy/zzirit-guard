@@ -81,8 +81,13 @@ const MARK_ALLOWED_FROM: Readonly<Record<Extract<VerdictStatus, "ignored" | "fal
 };
 /** 이미 처리된 판정에 다시 조치하려 할 때의 안내 문구. */
 const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.";
-/** 다른 요청(다른 매니저·자동 숨김)이 같은 판정을 숨기는 중일 때의 안내 문구. 화면이 already_handled 코드로 다시 불러오게 같은 코드를 쓴다. */
+/** 다른 매니저가 같은 판정을 숨기는 중일 때의 안내 문구. 화면이 already_handled 코드로 다시 불러오게 같은 코드를 쓴다. */
 const ACTION_IN_PROGRESS_MESSAGE = "다른 요청이 이 판정을 숨기는 중입니다. 잠시 뒤 '다시 불러오기'를 눌러 결과를 확인하세요.";
+/**
+ * 자동 숨김이 같은 판정을 숨기는 중일 때의 안내 문구(N4). 코드는 in_progress라 화면이 실패가 아닌 안내로 이 문구를 그대로 보여 준다.
+ * 왜 already_handled와 가르나: 자동 숨김은 아직 끝나지 않아 다시 불러와도 대기 중으로 보이므로 "이미 처리됨"은 틀린 안내다.
+ */
+const AUTO_HIDE_IN_PROGRESS_MESSAGE = "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -200,13 +205,23 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
 async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
   const verdict = findVerdict(services, request.params, channelId);
   if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-  if (!services.claims.tryClaim(verdict.id)) throw new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
+  if (!services.claims.tryClaim(verdict.id, "manager")) throw claimConflict(services, verdict.id);
   try {
     const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
     return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
   } finally {
     services.claims.release(verdict.id);
   }
+}
+
+/**
+ * 이미 붙잡힌 판정에 대한 409 오류를 만든다. 자동 숨김이 붙잡았으면 in_progress와 "곧 반영" 안내, 다른 매니저면 already_handled(N4).
+ * @param services 붙잡기 모음
+ * @param verdictId 판정 번호
+ */
+function claimConflict(services: RouteServices, verdictId: number): RouteError {
+  if (services.claims.holderOf(verdictId) === "auto_hide") return new RouteError(409, "in_progress", AUTO_HIDE_IN_PROGRESS_MESSAGE);
+  return new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
 }
 
 /**
@@ -396,7 +411,7 @@ function findSenderVerdict(services: RouteServices, verdictId: number, senderCha
  */
 function markVerdict(services: RouteServices, { request, manager, channelId }: GuardedContext, status: Extract<VerdictStatus, "ignored" | "false_positive">) {
   const verdict = findVerdict(services, request.params, channelId);
-  if (status === "ignored" && services.claims.isClaimed(verdict.id)) throw new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
+  if (status === "ignored" && services.claims.isClaimed(verdict.id)) throw claimConflict(services, verdict.id);
   if (!services.verdicts.transitionStatus(verdict.id, channelId, status, MARK_ALLOWED_FROM[status])) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
   services.auditLog.record({
     channelId, actorType: "manager", actorChannelId: manager.managerChannelId, action: status,
@@ -406,10 +421,14 @@ function markVerdict(services: RouteServices, { request, manager, channelId }: G
   return { ok: true };
 }
 
-/** 실행 결과를 응답으로 바꾼다. 치지직 실패는 502와 이유. */
+/**
+ * 실행 결과를 응답으로 바꾼다. 치지직 실패는 502와 이유.
+ * 처리 결과를 알 수 없는 실패(시간 초과·연결 끊김·해석할 수 없는 2xx)는 코드를 result_unknown으로 둔다(N4).
+ * 왜: 화면이 이 코드를 보고 시간 초과와 같이 60초 동안 같은 버튼을 다시 보내지 않게 한다(치지직이 이미 처리했을 수 있다).
+ */
 function sendOutcome(reply: FastifyReply, outcome: ActionOutcome) {
   if (outcome.ok) return reply.send({ ok: true, note: outcome.note });
-  return reply.code(502).send(errorBody("chzzk_failed", outcome.message));
+  return reply.code(502).send(errorBody(outcome.isResultUnknown ? "result_unknown" : "chzzk_failed", outcome.message));
 }
 
 /** 매니저 행위자. */

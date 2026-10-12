@@ -470,6 +470,33 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     expect(restrictButton().disabled).toBe(false);
   });
 
+  it("서버가 처리 결과를 알 수 없다고 하면(502 result_unknown) 시간 초과와 같이 60초 동안 같은 줄을 다시 보내지 않는다(N4)", async () => {
+    vi.useFakeTimers();
+    const resultUnknown = () => new ApiError(502, "result_unknown", "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.");
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw resultUnknown(); });
+    renderScreen([verdict(1)], fakeActions({ hide }));
+    const hideButton = () => screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement;
+    fireEvent.click(hideButton());
+    await act(async () => undefined);
+    expect(screen.getByRole("alert").textContent).toMatch(/결과를 알 수 없습니다.*다시 누르지 마세요/);
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(hideButton());
+    expect(hide).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(1));
+    expect(hideButton().disabled).toBe(false);
+  });
+
+  it("자동 숨김이 진행 중이라는 409(in_progress)는 서버 문구를 안내(info)로 보여 주고 다시 불러오지 않는다(N4)", async () => {
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw new ApiError(409, "in_progress", "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다."); });
+    const { onReload } = renderScreen([verdict(1, { decision: "auto_hide" })], fakeActions({ hide }));
+    fireEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다."));
+    expect(actionToast()?.classList.contains("info")).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/이미 처리된 항목입니다/)).toBeNull();
+    expect(onReload).not.toHaveBeenCalled();
+  });
+
   it("자동 숨김 끄기는 시간 초과돼도 붙잡지 않는다(안전장치는 바로 다시 누를 수 있어야 한다)", async () => {
     const setAutoHide = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
     renderScreen([], fakeActions({ setAutoHide }), { ...status, autoHideEnabled: true });

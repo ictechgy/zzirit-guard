@@ -127,14 +127,24 @@ interface TimeoutHoldRequest {
 }
 
 /**
- * 시간이 초과됐으면 잠금을 붙잡는다(B19-7). 사람 단위 동작은 60초 고정으로, 판정을 지켜보는 동작은 그 판정 상태가 바뀔 때까지 붙잡는다.
+ * 처리 결과를 알 수 없는 오류인지 본다: 요청 시간 초과(timeout)이거나, 서버가 치지직 처리 결과를 알 수 없다고 알린 것(502 result_unknown, N4).
+ * 둘 다 조치가 이미 처리됐을 수 있어 곧바로 다시 보내면 두 번 간다.
+ * @param error 동작이 던진 오류
+ */
+function isOutcomeUnknown(error: unknown): boolean {
+  return error instanceof ApiError && (error.code === "timeout" || error.code === "result_unknown");
+}
+
+/**
+ * 결과를 알 수 없으면(시간 초과·result_unknown) 잠금을 붙잡는다(B19-7, N4). 사람 단위 동작은 60초 고정으로,
+ * 판정을 지켜보는 동작은 그 판정 상태가 바뀔 때까지(최대 60초) 붙잡는다.
  * @param context 붙잡기 도구(holds)
  * @param error 동작이 던진 오류
  * @param request 열쇠와 붙잡기 방식
  * @returns 붙잡았으면 true(호출부가 잠금을 풀지 않는다)
  */
 function holdAfterTimeout(context: RunnerContext, error: unknown, request: TimeoutHoldRequest): boolean {
-  if (!(error instanceof ApiError && error.code === "timeout")) return false;
+  if (!isOutcomeUnknown(error)) return false;
   if (request.shouldHoldAfterDone) context.holds.holdFor(request.lockKey);
   else if (request.watchedVerdictId !== undefined) context.holds.hold(request.lockKey, request.watchedVerdictId, request.statusAtStart);
   else return false;
@@ -143,11 +153,17 @@ function holdAfterTimeout(context: RunnerContext, error: unknown, request: Timeo
 
 /**
  * 실패를 화면에 남긴다. 이미 처리된 판정이면 목록을 다시 읽고 안내로, 잠금을 붙잡았으면 다시 누르지 말라고 덧붙인다.
+ * 자동 숨김이 진행 중(409 in_progress)이면 서버 문구를 그대로 안내로 보여 주고 다시 읽지 않는다(N4).
+ * 왜: 자동 숨김이 끝나면 실시간으로 반영되고, 지금 다시 읽어도 대기 중으로 보여 "이미 처리됨"은 틀린 안내다.
  * @param context 결과 표시·다시 읽기
  * @param error 동작이 던진 오류
  * @param isHeld 시간 초과로 잠금을 붙잡았는지
  */
 function reportFailure(context: RunnerContext, error: unknown, isHeld: boolean): void {
+  if (error instanceof ApiError && error.code === "in_progress") {
+    context.setFeedback({ kind: "info", message: error.message });
+    return;
+  }
   if (error instanceof ApiError && error.code === "already_handled") {
     context.setFeedback({ kind: "info", message: ALREADY_HANDLED_NOTICE });
     context.onReload();
