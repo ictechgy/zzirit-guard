@@ -108,17 +108,34 @@ function isAllowedHost(host: string, allowDomains: readonly string[]): boolean {
   return allowDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
-/** 텍스트에 링크로 볼 호스트가 하나라도 있는지 본다. */
-function hasAnyLink(text: string): boolean {
-  return extractHostCandidates(text).some(isLinkCandidate);
+/**
+ * 텍스트에서 링크로 볼 호스트를 모두 뽑는다(맨 앞 www. 제거).
+ * @param linkText prepareLinkText를 거친 텍스트
+ */
+function extractLinkHosts(linkText: string): string[] {
+  return extractHostCandidates(linkText).filter(isLinkCandidate).map((candidate) => stripLeadingWww(candidate.host));
 }
 
 /**
- * 도박 단어가 실제 연락 수단과 함께 있는지 본다. 연락 수단은 messenger 아이디, "@아이디", 휴대전화 번호, 링크 중 하나다.
- * 단순히 "가입·문의·@"만 있는 것은 일반 대화와 구분되지 않으므로 세지 않는다.
+ * 허용 도메인이 아닌 링크가 하나라도 있는지 본다.
+ * @param linkHosts extractLinkHosts 결과
+ * @param allowDomains 채널이 허용한 도메인
  */
-function hasRealContact(text: string): boolean {
-  return MESSENGER_ID_PATTERN.test(text) || HANDLE_PATTERN.test(text) || containsPhoneNumber(text) || hasAnyLink(text);
+function hasBlockedHost(linkHosts: readonly string[], allowDomains: readonly string[]): boolean {
+  return linkHosts.some((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 도박 단어가 실제 연락 수단과 함께 있는지 본다. 연락 수단은 messenger 아이디, "@아이디", 휴대전화 번호, 허용되지 않은 링크 중 하나다.
+ * 단순히 "가입·문의·@"만 있는 것은 일반 대화와 구분되지 않으므로 세지 않는다.
+ * 허용 도메인 링크는 연락 수단으로 세지 않는다(S10, M09). 왜: 홀덤·슬롯 방송에서 "홀덤 하이라이트 youtube.com/…" 같은 정상 채팅이
+ * 되돌릴 수 없는 자동 숨김이 됐다. 채널이 허용한 주소는 광고 연락처가 아니다.
+ * @param linkText prepareLinkText를 거친 텍스트
+ * @param linkHosts extractLinkHosts 결과
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function hasRealContact(linkText: string, linkHosts: readonly string[], allowDomains: readonly string[]): boolean {
+  return MESSENGER_ID_PATTERN.test(linkText) || HANDLE_PATTERN.test(linkText) || containsPhoneNumber(linkText) || hasBlockedHost(linkHosts, allowDomains);
 }
 
 /**
@@ -128,10 +145,10 @@ function hasRealContact(text: string): boolean {
  */
 export function containsBlockedLink(text: string, allowDomains: readonly string[]): boolean {
   const linkText = prepareLinkText(text);
-  const linkHosts = extractHostCandidates(linkText).filter(isLinkCandidate).map((candidate) => stripLeadingWww(candidate.host));
-  if (linkHosts.some((host) => !isAllowedHost(host, allowDomains))) return true;
+  const linkHosts = extractLinkHosts(linkText);
+  if (hasBlockedHost(linkHosts, allowDomains)) return true;
   if (TELEGRAM_HANDLE_PATTERN.test(linkText)) return true;
-  return GAMBLING_PATTERN.test(linkText) && hasRealContact(linkText);
+  return GAMBLING_PATTERN.test(linkText) && hasRealContact(linkText, linkHosts, allowDomains);
 }
 
 /**

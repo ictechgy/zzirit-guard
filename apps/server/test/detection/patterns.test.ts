@@ -52,6 +52,18 @@ describe("containsBlockedLink", () => {
     expect(containsBlockedLink("fakeyoutube.com/abc", ["youtube.com"])).toBe(true);
   });
 
+  it("도박 단어와 함께여도 허용 도메인 링크는 연락 수단으로 세지 않는다(S10, M09)", () => {
+    expect(containsBlockedLink("홀덤 방송 youtube.com/abc 보러 와", ["youtube.com"])).toBe(false);
+    expect(containsBlockedLink("슬롯 하이라이트 https://www.youtube.com/watch?v=1", ["youtube.com"])).toBe(false);
+    expect(containsBlockedLink("카지노 브금 m.youtube.com/abc", ["youtube.com"])).toBe(false);
+  });
+
+  it("허용 도메인 링크가 있어도 다른 연락 수단이 함께면 도박 광고로 잡는다(S10)", () => {
+    expect(containsBlockedLink("토토 youtube.com/abc 010-1234-5678", ["youtube.com"])).toBe(true);
+    expect(containsBlockedLink("카지노 youtube.com/abc 카톡 abc123", ["youtube.com"])).toBe(true);
+    expect(containsBlockedLink("홀덤 youtube.com/abc spam.ru", ["youtube.com"])).toBe(true);
+  });
+
   it("허용 도메인 뒤에 다른 도메인을 붙인 우회는 막는다", () => {
     expect(containsBlockedLink("youtube.com.de/x", ["youtube.com"])).toBe(true);
   });
