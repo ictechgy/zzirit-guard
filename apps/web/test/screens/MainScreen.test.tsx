@@ -158,3 +158,15 @@ describe("MainScreen 기본 성공 안내(F9)", () => {
     await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("무시했습니다."));
   });
 });
+
+describe("MainScreen 임시 제한 요청(S13)", () => {
+  it("판정 번호만 보내고 채팅 채널은 보내지 않는다(서버가 판정에서 읽는다)", async () => {
+    const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() };
+    const fetchMock = stubFetch({ "POST /api/senders/bad/temporary-restrict": () => json(200, { ok: true, note: null }) });
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
+    render(<MainScreen me={{ ...me, permissions: ["temporary_restrict"] }} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ verdictId: 7 });
+  });
+});

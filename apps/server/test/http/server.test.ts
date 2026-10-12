@@ -543,6 +543,33 @@ describe("로그인 state 묶기", () => {
   });
 });
 
+describe("임시 제한의 채팅 채널(S13, M12)", () => {
+  const temporaryUrl = "/api/senders/bad/temporary-restrict";
+
+  it("판정 ID가 없으면 400이고 실행하지 않는다", async () => {
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    const missing = await harness.app.inject({ method: "POST", url: temporaryUrl, headers, payload: { chatChannelId: "chat-1" } });
+    const nullId = await harness.app.inject({ method: "POST", url: temporaryUrl, headers, payload: { chatChannelId: "chat-1", verdictId: null } });
+    expect([missing.statusCode, nullId.statusCode]).toEqual([400, 400]);
+    expect(harness.submit).not.toHaveBeenCalled();
+  });
+
+  it("채팅 채널은 저장된 판정의 값을 쓰고, 본문에 다른 값을 넣어도 따르지 않는다", async () => {
+    const verdict = insertCandidate();
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    const response = await harness.app.inject({ method: "POST", url: temporaryUrl, headers, payload: { chatChannelId: "attacker-chat", verdictId: verdict.id } });
+    expect(response.statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledWith("c1", { kind: "temporary_restrict", targetChannelId: "bad", chatChannelId: "chat-1", verdictId: verdict.id }, expect.anything());
+  });
+
+  it("판정 ID만 보내도 된다", async () => {
+    const verdict = insertCandidate();
+    const response = await harness.app.inject({ method: "POST", url: temporaryUrl, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")), payload: { verdictId: verdict.id } });
+    expect(response.statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledWith("c1", expect.objectContaining({ chatChannelId: "chat-1" }), expect.anything());
+  });
+});
+
 describe("판정 ID 검증", () => {
   const restrictUrl = "/api/senders/bad/restrict";
 

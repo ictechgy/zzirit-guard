@@ -17,8 +17,6 @@ export interface SenderGroup {
   senderChannelId: string;
   /** 보낸 사람 닉네임(가장 최근 판정의 값). */
   senderNickname: string;
-  /** 임시 제한 API에 넘길 채팅 채널 ID. */
-  chatChannelId: string;
   /** 이 사람의 판정(최신순). */
   verdicts: VerdictDto[];
   /** 가장 최근 판정 시각. 묶음 정렬에 쓴다. */
@@ -134,7 +132,7 @@ function groupBySender(verdicts: readonly VerdictDto[]): SenderGroup[] {
   const groups = new Map<string, SenderGroup>();
   for (const verdict of [...verdicts].sort(newestFirst)) {
     const group = groups.get(verdict.senderChannelId) ?? {
-      senderChannelId: verdict.senderChannelId, senderNickname: verdict.senderNickname, chatChannelId: verdict.chatChannelId, verdicts: [], latestAt: verdict.createdAt,
+      senderChannelId: verdict.senderChannelId, senderNickname: verdict.senderNickname, verdicts: [], latestAt: verdict.createdAt,
     };
     group.verdicts.push(verdict);
     groups.set(verdict.senderChannelId, group);

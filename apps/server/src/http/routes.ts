@@ -108,8 +108,12 @@ const chatSettingsBodySchema = z.object({
   chatSlowModeSec: z.number().refine((value) => ALLOWED_SLOW_MODE_SECONDS.includes(value), "치지직이 허용하지 않는 값입니다"),
   chatEmojiMode: z.boolean(),
 });
-/** 임시 제한 본문. 판정 ID는 선택이며 서버가 보낸 사람과 일치하는지 확인한다. */
-const temporaryRestrictBodySchema = z.object({ chatChannelId: z.string().min(1).max(MAX_CHANNEL_ID_LENGTH), verdictId: z.number().int().nullable().optional() });
+/**
+ * 임시 제한 본문. 판정 ID가 꼭 있어야 하고, 서버가 보낸 사람·채널과 일치하는지 확인한다(S13, M12).
+ * 채팅 채널 ID는 받지 않고 저장된 판정에서 읽는다. 왜: 본문 값을 그대로 치지직에 넘기면 매니저가 다른 채팅 채널을 지정할 수 있다.
+ * 예전 화면이 보내는 chatChannelId는 zod가 알 수 없는 키로 버린다(따르지 않는다).
+ */
+const temporaryRestrictBodySchema = z.object({ verdictId: z.number().int().positive() });
 /** 활동 제한 본문(본문 자체도 생략 가능). */
 const restrictBodySchema = z.object({ verdictId: z.number().int().nullable().optional() }).optional();
 /** 푸시 구독 본문. 길이 상한으로 과대 입력을 막는다. */
@@ -220,9 +224,8 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
     "/api/senders/:senderChannelId/temporary-restrict",
     guarded(services, "temporary_restrict", async ({ request, reply, manager, channelId }) => {
       const { senderChannelId } = senderParamSchema.parse(request.params);
-      const body = temporaryRestrictBodySchema.parse(request.body);
-      const verdictId = resolveVerdictId(services, body.verdictId, senderChannelId, channelId);
-      const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: body.chatChannelId, verdictId };
+      const verdict = findSenderVerdict(services, temporaryRestrictBodySchema.parse(request.body).verdictId, senderChannelId, channelId);
+      const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: verdict.chatChannelId, verdictId: verdict.id };
       return sendOutcome(reply, await services.executor.submit(channelId, action, actorOf(manager)));
     }),
   );
@@ -366,14 +369,22 @@ function findVerdict(services: RouteServices, params: unknown, channelId: string
 }
 
 /**
- * 본문의 판정 ID가 이 채널의 것이고 대상 사용자의 판정인지 확인한다.
+ * 본문의 판정 ID가 이 채널의 것이고 대상 사용자의 판정인지 확인한다. 판정 ID가 없으면(활동 제한은 선택) null.
  * 왜: 실행기는 판정 상태를 그대로 바꾸고 방송하므로, 다른 사용자·채널의 판정을 가리키면 엉뚱한 기록이 바뀐다.
  */
 function resolveVerdictId(services: RouteServices, verdictId: number | null | undefined, senderChannelId: string, channelId: string): number | null {
   if (verdictId === null || verdictId === undefined) return null;
+  return findSenderVerdict(services, verdictId, senderChannelId, channelId).id;
+}
+
+/**
+ * 판정을 찾고, 대상 사용자의 판정인지 확인한다. 임시 제한은 이 판정에서 채팅 채널을 읽는다(S13).
+ * @throws RouteError 없거나 다른 채널이면 404, 보낸 사람이 다르면 400
+ */
+function findSenderVerdict(services: RouteServices, verdictId: number, senderChannelId: string, channelId: string) {
   const verdict = findVerdict(services, { id: verdictId }, channelId);
   if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. '다시 불러오기'를 누른 뒤 다시 시도하세요.");
-  return verdict.id;
+  return verdict;
 }
 
 /**

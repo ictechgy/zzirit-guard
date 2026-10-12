@@ -49,8 +49,9 @@ function createCandidateActions(onSignedOut: (message: string | null) => void): 
     });
   return {
     hide: async (verdict) => (await send(`/api/verdicts/${verdict.id}/hide`)).note ?? HIDE_DONE,
+    // 판정 번호만 보낸다. 채팅 채널은 서버가 저장된 판정에서 읽는다(S13). 묶음에는 판정이 늘 하나 이상 있다(groupBySender).
     temporaryRestrict: async (group) =>
-      (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { chatChannelId: group.chatChannelId, verdictId: group.verdicts[0]?.id ?? null })).note ?? TEMPORARY_RESTRICT_DONE,
+      (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { verdictId: group.verdicts[0]?.id })).note ?? TEMPORARY_RESTRICT_DONE,
     ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? IGNORE_DONE,
     reportFalsePositive: async (verdict) => (await send(`/api/verdicts/${verdict.id}/false-positive`)).note ?? FALSE_POSITIVE_DONE,
     setAutoHide: async (enabled) => (await send("/api/auto-hide", { enabled })).note ?? null,
