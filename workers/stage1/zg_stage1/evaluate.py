@@ -398,13 +398,16 @@ def build_report(
 
 
 def build_scores_payload(report: dict, inputs: EvaluationInputs, scores: EvaluationScores) -> dict:
-    """validation-scores.json 내용(점수·이진 라벨만, 원문 없음)을 만든다. thresholds CLI가 읽는다."""
+    """validation-scores.json 내용(점수·이진 라벨만, 원문 없음)을 만든다. thresholds CLI가 읽는다.
+
+    점수는 반올림하지 않는다. 반올림하면 같은 파일로 임계값을 다시 골랐을 때 evaluation.json과 결과가 달라질 수 있다.
+    """
     return {
         "schema_version": EVALUATION_SCHEMA_VERSION,
         "model_directory_name": report["model"]["directory_name"],
         "validation_file": report["data"]["validation"],
         "limit": report["settings"]["limit"],
-        "scores": [round(score, 6) for score in scores.validation],
+        "scores": list(scores.validation),
         "binary_labels": scores.validation_labels(inputs),
     }
 

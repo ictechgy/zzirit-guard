@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from zg_stage1.errors import DatasetFormatError, MetricError
-from zg_stage1.thresholds import SPEC_STAGE1_THRESHOLD, build_argument_parser, main, select_threshold_for_recall
+from zg_stage1.metrics import summarize_at_threshold
+from zg_stage1.thresholds import SPEC_STAGE1_THRESHOLD, build_argument_parser, format_selection_markdown, main, select_threshold_for_recall
 
 # 유해 5건(0.9·0.8·0.7·0.6·0.1)과 정상 3건(0.65·0.3·0.02)으로 만든 작은 예제.
 EXAMPLE_SCORES = [0.9, 0.8, 0.7, 0.6, 0.1, 0.65, 0.3, 0.02]
@@ -87,7 +88,7 @@ def test_cli_prints_selection(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     path = tmp_path / "validation-scores.json"
     path.write_text(json.dumps({"scores": EXAMPLE_SCORES, "binary_labels": EXAMPLE_LABELS}), encoding="utf-8")
     main(["--scores-file", str(path), "--target-recall", "0.8"])
-    assert "0.6000" in capsys.readouterr().out
+    assert "0.600000" in capsys.readouterr().out
 
 
 def test_cli_rejects_malformed_scores_file(tmp_path: Path) -> None:
@@ -96,3 +97,39 @@ def test_cli_rejects_malformed_scores_file(tmp_path: Path) -> None:
     path.write_text(json.dumps({"scores": [0.1]}), encoding="utf-8")
     with pytest.raises(DatasetFormatError, match="evaluate로 다시"):
         main(["--scores-file", str(path)])
+
+
+def test_reported_threshold_is_rounded_down_and_self_consistent() -> None:
+    """보고하는 임계값은 소수 6자리로 내림하고, 재현율·2차 전달율·정밀도는 그 값에서 다시 계산한다.
+
+    반올림(0.1234568 → 0.123457)하면 보고한 임계값을 그대로 쓸 때 유해 1건을 놓치게 된다.
+    """
+    scores = [0.9, 0.1234568, 0.1234561, 0.01]
+    labels = [1, 1, 0, 0]
+    selection = select_threshold_for_recall(scores, labels, target_recall=1.0)
+    assert selection.threshold == 0.123456
+    recomputed = summarize_at_threshold(scores, labels, selection.threshold)
+    assert (selection.achieved_recall, selection.forward_rate, selection.precision) == (
+        recomputed["toxic_recall"],
+        recomputed["forward_rate"],
+        recomputed["precision"],
+    )
+    assert selection.achieved_recall == 1.0
+    assert selection.forward_rate == 0.75
+
+
+def test_rounding_down_never_exceeds_exact_score() -> None:
+    """이진 부동소수 표현 때문에 내림 결과가 원래 점수보다 커지는 일이 없다(재현율 목표를 항상 지킨다)."""
+    tricky_scores = [0.3303879999999999, 0.7, 0.1 + 0.2, 0.000001, 1.0]
+    for score in tricky_scores:
+        selection = select_threshold_for_recall([score, 0.0], [1, 0], target_recall=1.0)
+        assert selection.threshold <= score
+        assert selection.achieved_recall == 1.0
+
+
+def test_markdown_shows_reported_threshold_without_rounding_up() -> None:
+    """요약에는 보고한 임계값(내림한 6자리)을 그대로 보여 준다. 4자리로 반올림해 올려 보이지 않는다."""
+    selection = select_threshold_for_recall([0.9, 0.33038812, 0.1], [1, 1, 0], target_recall=1.0)
+    markdown = format_selection_markdown(selection)
+    assert "0.330388" in markdown
+    assert "0.3304" not in markdown

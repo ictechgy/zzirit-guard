@@ -5,7 +5,15 @@ from __future__ import annotations
 import pytest
 
 from zg_stage1.data import ChatSample, LabeledText
-from zg_stage1.evaluate import summarize_by_label, summarize_chat, summarize_chat_group, summarize_regression_sample
+from zg_stage1.evaluate import (
+    EvaluationInputs,
+    EvaluationScores,
+    build_scores_payload,
+    summarize_by_label,
+    summarize_chat,
+    summarize_chat_group,
+    summarize_regression_sample,
+)
 
 
 def make_record(identifier: int, label: str) -> LabeledText:
@@ -50,3 +58,14 @@ def test_regression_sample_reuses_test_scores() -> None:
     assert summary["count"] == 10
     assert summary["auc"] == pytest.approx(1.0)
     assert len(summary["sample_ids"]) == 10
+
+
+def test_validation_scores_file_keeps_full_precision() -> None:
+    """validation-scores.json에는 점수를 반올림하지 않고 그대로 쓴다(임계값 선택을 다시 할 때 값이 바뀌지 않게)."""
+    records = [make_record(1, "normal"), make_record(2, "offensive")]
+    inputs = EvaluationInputs(test_records=records, validation_records=records, chat_samples=[], max_length=128)
+    scores = EvaluationScores(test=[0.1, 0.9], validation=[0.12345678912345, 0.98765432198765], chat=[])
+    report = {"model": {"directory_name": "run"}, "data": {"validation": {"file_name": "val_v2.jsonl"}}, "settings": {"limit": None}}
+    payload = build_scores_payload(report, inputs, scores)
+    assert payload["scores"] == [0.12345678912345, 0.98765432198765]
+    assert payload["binary_labels"] == [0, 1]

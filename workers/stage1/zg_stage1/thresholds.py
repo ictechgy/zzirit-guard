@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 from collections.abc import Sequence
+from decimal import ROUND_FLOOR, Decimal
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -25,6 +26,9 @@ DEFAULT_TARGET_RECALL = 0.97
 
 # 스펙 §5.2 ④가 정한 1차 통과 임계값. 고른 값과 나란히 보여 줘 비교하게 한다.
 SPEC_STAGE1_THRESHOLD = 0.05
+
+# 보고하는 임계값의 소수 자릿수. 이 자릿수로 '내림'해서, 보고한 값을 그대로 써도 재현율 목표를 지키게 한다.
+THRESHOLD_DECIMALS = 6
 
 # 부동소수 곱셈 오차로 필요한 건수가 1 늘어나는 것을 막는 여유값(예: 0.97 × 100 = 97.00000000000001).
 CEILING_TOLERANCE = 1e-9
@@ -53,6 +57,19 @@ def validate_target_recall(target_recall: float) -> None:
         raise MetricError(f"재현율 목표 {target_recall}는 0보다 크고 1 이하여야 합니다. 예: 0.97")
 
 
+def round_down_threshold(score: float) -> float:
+    """점수를 소수 THRESHOLD_DECIMALS자리로 내림한다. 결과는 항상 원래 점수 이하인, 그런 6자리 값 중 가장 큰 값이다.
+
+    가장 가까운 6자리 값이 점수 이하면 그대로 쓴다(예: 0.6은 0.6). 점수보다 크면 내림한다(예: 0.1234568 → 0.123456).
+    왜 Decimal인가: float에 10^6을 곱해 floor하면 이진 표현 오차로 원래 점수보다 큰 값이 나올 수 있다.
+    float의 정확한 값을 Decimal로 내림하면 결과가 원래 점수를 넘지 않는다.
+    """
+    nearest = round(score, THRESHOLD_DECIMALS)
+    if nearest <= score:
+        return nearest
+    return float(Decimal(score).quantize(Decimal(1).scaleb(-THRESHOLD_DECIMALS), rounding=ROUND_FLOOR))
+
+
 def collect_toxic_scores_descending(scores: Sequence[float], labels: Sequence[int]) -> list[float]:
     """유해(라벨 1) 문장의 점수만 내림차순으로 모은다. 유해 문장이 없으면 재현율을 정의할 수 없어 오류를 낸다."""
     if len(scores) != len(labels):
@@ -68,17 +85,19 @@ def select_threshold_for_recall(scores: Sequence[float], labels: Sequence[int], 
 
     원리: 유해 점수를 내림차순으로 놓고, 필요한 건수 k = ceil(목표 × 유해 수)번째 점수를 임계값으로 쓰면
     점수 ≥ 임계값인 유해가 k개 이상이 된다. 이보다 큰 값은 k개를 채우지 못한다.
+    보고하는 임계값은 소수 THRESHOLD_DECIMALS자리로 내림하고, 재현율·통과율·정밀도는 그 내림한 값에서 계산한다.
+    그래서 보고한 숫자를 그대로 설정에 넣어도 같은 결과가 나온다(반올림해 올리면 유해를 놓칠 수 있다).
     반환: ThresholdSelection(고른 값과 그때의 재현율·통과율·정밀도, 스펙 기본값 0.05일 때의 값).
     """
     validate_target_recall(target_recall)
     toxic_scores = collect_toxic_scores_descending(scores, labels)
     required_count = math.ceil(target_recall * len(toxic_scores) - CEILING_TOLERANCE)
-    threshold = toxic_scores[required_count - 1]
+    threshold = round_down_threshold(toxic_scores[required_count - 1])
     selected = summarize_at_threshold(scores, labels, threshold)
     spec_default = summarize_at_threshold(scores, labels, SPEC_STAGE1_THRESHOLD)
     return ThresholdSelection(
         target_recall=target_recall,
-        threshold=round(threshold, 6),
+        threshold=threshold,
         achieved_recall=selected["toxic_recall"],
         forward_rate=selected["forward_rate"],
         precision=selected["precision"],
@@ -99,7 +118,7 @@ def format_selection_markdown(selection: ThresholdSelection) -> str:
     """선택 결과를 사람이 읽을 Markdown 몇 줄로 만든다."""
     return "\n".join(
         [
-            f"- 재현율 목표 {selection.target_recall:.2f} → 임계값 **{selection.threshold:.4f}** "
+            f"- 재현율 목표 {selection.target_recall:.2f} → 임계값 **{selection.threshold:.{THRESHOLD_DECIMALS}f}**(내림) "
             f"(재현율 {selection.achieved_recall:.4f}, 통과율 {selection.forward_rate:.4f}, 정밀도 {selection.precision:.4f})",
             f"- 스펙 기본값 {selection.spec_default_threshold} → 재현율 {selection.spec_default_recall:.4f}, 통과율 {selection.spec_default_forward_rate:.4f}",
             "- 참고용이다. 운영 임계값은 스펙 §5.2 ④의 0.05를 기본으로 두고, 바꾸는 결정은 사람이 한다.",
