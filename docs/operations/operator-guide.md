@@ -68,6 +68,11 @@ cd ~/Library/Logs/zzirit-guard && for name in server server.err; do [[ -f $name.
 chmod 600 server*.log   # 옮긴 파일도 소유자만 읽게(새 파일은 install-launchd.sh가 600으로 만든다)
 <설치 경로>/ops/scripts/install-launchd.sh
 ```
+- **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 한 달에 한 번, 그리고 로그를 옮길 때마다 아래 한 줄을 실행한다. 지금 쓰는 `server.log`·`server.err.log`는 이름에 날짜가 없어 지워지지 않는다.
+```bash
+find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
+```
+- 운영을 끝내면 운영 합의서 종료 조항에서 정한 기간(기본 7일) 안에 DB·백업과 함께 이 폴더의 로그를 모두 지운다.
 
 ## 9. 첫 연결(스트리머)
 1. 스트리머와 **운영 합의서**(`streamer-agreement-template.md`)를 먼저 주고받는다.
