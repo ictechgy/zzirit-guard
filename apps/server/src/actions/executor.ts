@@ -24,8 +24,8 @@ export interface Actor {
 export type ActionOutcome = { ok: true; note: string | null } | { ok: false; message: string };
 
 /**
- * submit 추가 옵션. shouldRun은 치지직을 부르는 시도마다(첫 시도와 재시도 직전, 토큰을 받기 전) 확인한다.
- * 이유: 자동 숨김은 되돌릴 수 없으므로, 대기 중이거나 재시도를 기다리는 중에 스위치가 꺼졌다면 더 보내지 않아야 한다(F9.1).
+ * submit 추가 옵션. shouldRun은 시도마다 두 번 확인한다: 토큰을 받기 전, 그리고 토큰을 받은 뒤 치지직 쓰기를 부르기 직전.
+ * 이유: 자동 숨김은 되돌릴 수 없으므로, 대기 중이거나 재시도·토큰 갱신을 기다리는 중에 스위치가 꺼졌다면 더 보내지 않아야 한다(F9.1, S2).
  */
 export interface SubmitOptions {
   shouldRun?: () => boolean;
@@ -74,8 +74,8 @@ type FailureDecision = { kind: "done"; outcome: ActionOutcome } | { kind: "retry
  */
 type FailurePhase = "token" | "write";
 
-/** 시도 한 번의 결과. 성공(sent)이거나, 실패한 단계와 오류를 담는다. */
-type AttemptResult = { kind: "sent" } | { kind: "failed"; phase: FailurePhase; error: unknown };
+/** 시도 한 번의 결과. 성공(sent), 토큰을 받은 뒤 shouldRun이 false여서 멈춤(cancelled), 또는 실패한 단계와 오류. */
+type AttemptResult = { kind: "sent" } | { kind: "cancelled" } | { kind: "failed"; phase: FailurePhase; error: unknown };
 
 /**
  * 요청이 나가기 전에 났다고 확실히 말할 수 있는 네트워크 오류 코드: 연결 거부와 DNS 실패.
@@ -154,7 +154,8 @@ class SerialExecutor implements Executor {
   private async performWithRetry(request: ActionRequest, options?: SubmitOptions): Promise<ActionOutcome | null> {
     for (let attempt = 0; ; attempt += 1) {
       if (options?.shouldRun?.() === false) return null;
-      const result = await this.attemptOnce(request);
+      const result = await this.attemptOnce(request, options);
+      if (result.kind === "cancelled") return null;
       if (result.kind === "sent") return { ok: true, note: null };
       const decision = await this.decideAfterFailure(request, result.phase, result.error, attempt);
       if (decision.kind === "done") return decision.outcome;
@@ -164,15 +165,18 @@ class SerialExecutor implements Executor {
   /**
    * 토큰을 받고 치지직을 한 번 부른다. 실패는 던지지 않고 어느 단계에서 났는지와 함께 돌려준다.
    * 왜 단계를 가르나: 쓰기 호출 중의 실패만 '이미 처리됐을 수 있음'으로 다뤄야 하기 때문이다(FailurePhase).
+   * 토큰을 받은 뒤 쓰기 직전에 shouldRun을 다시 본다. 토큰 갱신은 수 초 걸릴 수 있어, 그사이 꺼진 스위치를 놓치면 안 된다(S2).
    * @param request 보낼 요청
+   * @param options shouldRun(자동 숨김 스위치 확인)
    */
-  private async attemptOnce(request: ActionRequest): Promise<AttemptResult> {
+  private async attemptOnce(request: ActionRequest, options?: SubmitOptions): Promise<AttemptResult> {
     let token: string;
     try {
       token = await this.options.tokenManager.getAccessToken();
     } catch (error) {
       return { kind: "failed", phase: "token", error };
     }
+    if (options?.shouldRun?.() === false) return { kind: "cancelled" };
     try {
       await performRequest(this.options.api, token, request);
       return { kind: "sent" };

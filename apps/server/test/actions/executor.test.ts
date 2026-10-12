@@ -163,6 +163,22 @@ describe("Executor", () => {
     expect(auditLog.list("c1", 10, null)).toEqual([expect.objectContaining({ action: "hide", result: "error", error: "자동 숨김이 꺼져 보내지 않았습니다" })]);
   });
 
+  it("토큰을 받는(갱신하는) 동안 스위치가 꺼지면 치지직을 부르지 않고 취소로 끝낸다(S2, X02)", async () => {
+    const blindMessage = vi.fn(async () => undefined);
+    let isSwitchOn = true;
+    // 토큰 갱신을 기다리는 사이 매니저가 스위치를 끈 상황을 흉내 낸다.
+    const getAccessToken = vi.fn(async () => {
+      isSwitchOn = false;
+      return "owner-token";
+    });
+    const { executor, verdicts, statusEvents, verdict, hide } = setup({ blindMessage }, { getAccessToken });
+    await expect(executor.submit("c1", hide, manager, { shouldRun: () => isSwitchOn })).resolves.toEqual({ ok: false, message: "자동 숨김이 꺼져 보내지 않았습니다" });
+    expect(getAccessToken).toHaveBeenCalledTimes(1);
+    expect(blindMessage).not.toHaveBeenCalled();
+    expect(verdicts.get(verdict.id)?.status).toBe("pending");
+    expect(statusEvents).toEqual([]);
+  });
+
   it("취소가 12건 쌓여도 실패율 알림은 울리지 않는다", async () => {
     const blindMessage = vi.fn(async () => undefined);
     const { executor, hide } = setup({ blindMessage });
