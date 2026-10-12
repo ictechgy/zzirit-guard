@@ -180,10 +180,13 @@ describe("주기 작업은 이전 실행이 끝나기 전에 겹쳐 돌지 않�
     control.backupGate = slow.promise;
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(control.calls.retention).toBe(1);
-    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    // 하루는 동기로 흘린다. 비동기로 흘리면 20초 상태 방송 등 수천 번의 타이머마다 마이크로태스크를 비워 10초 넘게 걸려,
+    // 부하가 큰 기계에서 테스트 제한 시간(15초)을 넘긴다. 겹침 방지는 타이머가 불리는 순간 동기로 판단하므로 결과는 같다.
+    vi.advanceTimersByTime(24 * 60 * 60_000);
     expect(control.calls.retention).toBe(1);
     slow.open();
-    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    await vi.advanceTimersByTimeAsync(0);
+    vi.advanceTimersByTime(24 * 60 * 60_000);
     expect(control.calls.retention).toBe(2);
   });
 
