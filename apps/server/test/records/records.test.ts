@@ -53,6 +53,27 @@ describe("AuditLog", () => {
   });
 });
 
+describe("AuditLog 페이지 크기(S19, M18)", () => {
+  /** 감사 기록 n건을 넣은 저장소. */
+  function auditLogWith(count: number) {
+    const auditLog = createAuditLog(openDatabase(":memory:"), () => 0);
+    for (let index = 0; index < count; index += 1) {
+      auditLog.record({ channelId: "c1", actorType: "rule", actorChannelId: null, action: "hide", targetSenderChannelId: "s", verdictId: null, result: "ok", error: null });
+    }
+    return auditLog;
+  }
+
+  it.each([
+    ["음수(SQLite에서는 무제한)", -1, 1],
+    ["0", 0, 1],
+    ["상한(200)보다 큰 값", 1000, 200],
+    ["정수가 아닌 값", 2.7, 2],
+    ["숫자가 아닌 값(NaN)", Number.NaN, 1],
+  ])("limit이 %s이면 1~200 사이로 맞춘다", (_label, limit, expected) => {
+    expect(auditLogWith(250).list("c1", limit, null)).toHaveLength(expected);
+  });
+});
+
 describe("MinuteStats", () => {
   it("메모리에 모았다가 분 단위로 더해 저장한다", () => {
     let now = 61_000;

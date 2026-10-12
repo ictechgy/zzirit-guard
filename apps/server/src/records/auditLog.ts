@@ -22,6 +22,12 @@ export interface AuditLog {
   deleteOlderThan(cutoffMs: number): number;
 }
 
+/**
+ * 한 번에 읽는 감사 기록 수의 범위(1~200, S19). HTTP 쿼리(auditQuerySchema)와 같은 범위를 저장소에서도 지킨다.
+ * 왜: SQLite의 LIMIT -1은 무제한이라, 내부 호출자가 잘못된 값을 넘기면 표 전체를 한 번에 읽는다.
+ */
+const AUDIT_PAGE_LIMIT = { min: 1, max: 200 };
+
 /** 요주의 사용자로 볼 '실제 조치' 종류. 실패한 조치는 세지 않는다. */
 const ENFORCED_ACTIONS = ["hide", "temporary_restrict", "restrict"] as const;
 
@@ -62,11 +68,20 @@ function insertAudit(database: Database, entry: AuditRecord, now: number): void 
     .run(entry.channelId, entry.actorType, entry.actorChannelId, entry.action, entry.targetSenderChannelId, entry.verdictId, entry.result, entry.error, now);
 }
 
-/** 최신순 목록. beforeId로 이어 읽는다(무한 스크롤). */
+/**
+ * 페이지 크기를 1~200 정수로 맞춘다. 소수는 버리고, 숫자가 아니면(NaN 등) 가장 작은 값으로 본다.
+ * @param limit 호출자가 넘긴 값(믿지 않는다)
+ */
+function clampAuditLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return AUDIT_PAGE_LIMIT.min;
+  return Math.min(AUDIT_PAGE_LIMIT.max, Math.max(AUDIT_PAGE_LIMIT.min, Math.trunc(limit)));
+}
+
+/** 최신순 목록. beforeId로 이어 읽는다(무한 스크롤). limit은 1~200으로 맞춘다(S19). */
 function listAudit(database: Database, channelId: string, limit: number, beforeId: number | null): AuditEntryDto[] {
   const rows = database
     .prepare("SELECT * FROM audit_log WHERE channel_id = ? AND id < ? ORDER BY id DESC LIMIT ?")
-    .all(channelId, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as AuditRow[];
+    .all(channelId, beforeId ?? Number.MAX_SAFE_INTEGER, clampAuditLimit(limit)) as AuditRow[];
   return rows.map((row) => ({
     id: row.id, actorType: row.actor_type, actorChannelId: row.actor_channel_id, action: row.action,
     targetSenderChannelId: row.target_sender_channel_id, verdictId: row.verdict_id, result: row.result, error: row.error, createdAt: row.created_at,
