@@ -87,14 +87,47 @@ describe("DecisionHandler", () => {
     expect(flushedStats()).toMatchObject({ shadow: 1, auto_hidden: 0 });
   });
 
-  it("스위치가 켜져 있으면 실행기로 숨기고, 떼도배의 앞선 메시지도 함께 숨긴다", () => {
+  it("스위치가 켜져 있으면 실행기로 숨기고, 떼도배의 앞선 메시지도 함께 숨긴다", async () => {
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
     handler.handle(chat("도배 문장"), result("auto_hide", "도배 문장", { earlierFloodRefs: [ref("user-1", "도배 문장"), ref("user-2", "도배 문장")] }));
     expect(submit).toHaveBeenCalledTimes(3);
     expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["viewer-1", "user-1", "user-2"]);
     expect(submit.mock.calls[0]?.[2]).toEqual({ type: "rule", channelId: null });
     expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.decision)).toEqual(["auto_hide", "auto_hide", "auto_hide"]);
+    // 자동 숨김 통계는 실행기가 성공을 알린 뒤에 센다(S5).
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(flushedStats()).toMatchObject({ auto_hidden: 3 });
+  });
+
+  it("자동 숨김 통계는 숨김이 성공한 뒤에만 센다(S5, M01)", async () => {
+    let finish: (outcome: { ok: boolean; note?: null; message?: string }) => void = () => undefined;
+    submit.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    expect(flushedStats()?.auto_hidden ?? 0).toBe(0);
+    finish({ ok: true, note: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flushedStats()).toMatchObject({ auto_hidden: 1 });
+  });
+
+  it.each([
+    ["실패", { ok: false, message: "치지직 서버 오류로 실패했습니다." }],
+    ["취소", { ok: false, message: "자동 숨김이 꺼져 보내지 않았습니다" }],
+  ])("자동 숨김이 %s로 끝나면 auto_hidden을 세지 않는다(S5, M01)", async (_label, outcome) => {
+    submit.mockImplementation(async () => outcome);
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flushedStats()).toMatchObject({ auto_hidden: 0, shadow: 0 });
+  });
+
+  it("폭주 한도에 걸려 섀도로 저장되는 메시지는 실시간 채팅 줄도 shadow로 보인다(S5, M02)", () => {
+    settingsBreaker(1);
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("첫 금칙어"), result("auto_hide", "첫 금칙어"));
+    handler.handle(chat("둘째 금칙어"), result("auto_hide", "둘째 금칙어"));
+    expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.decision)).toEqual(["auto_hide", "shadow"]);
+    expect(chatLines).toEqual(["auto_hide:첫 금칙어", "shadow:둘째 금칙어"]);
   });
 
   it("후보 판정(권한자)이어도 떼도배의 앞선 메시지는 규칙 이유로 숨긴다", () => {

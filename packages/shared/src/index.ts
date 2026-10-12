@@ -131,7 +131,7 @@ export interface MinuteStatDto {
   stage2_dropped: number;
   /** 후보로 올린 수. */
   candidates: number;
-  /** 자동 숨김을 보낸 수. */
+  /** 자동 숨김에 성공한 수. 취소(스위치 꺼짐)·실패는 세지 않는다(S5). */
   auto_hidden: number;
   /** 스위치가 꺼져 섀도로 기록한 수. */
   shadow: number;
