@@ -406,8 +406,9 @@ class TrainingSession:
         )
 
     def save_best_model(self) -> None:
-        """현재 가중치를 저장하고, 저장한 토크나이저가 메모리의 것과 같은 토큰을 내는지 다시 불러와 확인한다."""
-        modeling.save_classifier(self.model, self.tokenizer, modeling.copy_state_to_cpu(self.model), self.paths.output_directory)
+        """현재 가중치를 원자적으로 저장하고, 저장한 토크나이저가 메모리의 것과 같은 토큰을 내는지 다시 불러와 확인한다."""
+        state_dict = modeling.copy_state_to_cpu(self.model)
+        modeling.save_classifier_atomically(self.model, self.tokenizer, state_dict, self.paths.output_directory)
         modeling.verify_saved_tokenizer_round_trip(self.tokenizer, self.paths.output_directory, self.arguments.max_length)
 
     def record_epoch(self, epoch: int, mean_loss: float, metrics: dict, is_best: bool, validation_seconds: float) -> None:

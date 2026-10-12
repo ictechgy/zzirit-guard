@@ -8,7 +8,10 @@ torch·transformers에 기대는 코드를 이 모듈에 모은다. 학습(train
 
 from __future__ import annotations
 
+import os
 import random
+import shutil
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -41,6 +44,12 @@ INPUT_FORMAT_DESCRIPTION = "[CLS] 문장 [SEP] — 저장한 tokenizer.json의 p
 
 # 토크나이저가 특수 토큰을 붙이는지 확인할 때 쓰는 아주 짧은 문장(데이터 원문이 아니다).
 SPECIAL_TOKEN_PROBE_TEXT = "가"
+
+# 최고 epoch를 저장할 때 쓰는 임시 하위 디렉터리 이름 접두사. 점으로 시작해 결과 파일과 구분한다.
+STAGING_DIRECTORY_PREFIX = ".saving-"
+
+# 임시 디렉터리에서 옮길 때 가장 마지막에 옮기는 파일. 가중치가 바뀌는 순간을 하나로 만들기 위해서다.
+WEIGHTS_FILE_NAME = "model.safetensors"
 
 # 저장한 토크나이저를 다시 불러와 비교할 고정 탐침 문장(데이터 원문이 아니다).
 # 보통 문장·빈 문장·숫자와 영문 섞임·max_length(128)보다 긴 문장을 넣어 잘림까지 같게 나오는지 본다.
@@ -270,10 +279,34 @@ def copy_state_to_cpu(model: PreTrainedModel) -> dict[str, torch.Tensor]:
 
 
 def save_classifier(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, state_dict: dict[str, torch.Tensor], output_directory: Path) -> None:
-    """가중치(safetensors)·config·토크나이저를 output_directory에 저장한다.
+    """가중치(safetensors)·config·토크나이저를 output_directory에 바로 저장한다.
 
-    주의: 같은 학습 실행 안에서 더 나은 epoch가 나오면 이 디렉터리의 파일을 덮어쓴다. 다른 실행의 디렉터리는
-    create_new_output_directory가 처음부터 거부하므로 덮어쓰지 않는다.
+    주의: 중간에 끊기면 반쯤 쓴 파일이 남으므로 학습 결과에는 save_classifier_atomically를 쓴다.
+    이 함수는 그 안에서 임시 디렉터리에 쓰는 단계로만 쓴다.
     """
     model.save_pretrained(str(output_directory), state_dict=state_dict)
     tokenizer.save_pretrained(str(output_directory))
+
+
+def move_staged_files(staging_directory: Path, output_directory: Path) -> None:
+    """임시 디렉터리의 파일을 출력 디렉터리로 하나씩 os.replace로 옮긴다. 가중치 파일은 맨 마지막에 옮긴다.
+
+    os.replace는 같은 파일 시스템 안에서 원자적이라, 출력 디렉터리의 각 파일은 '이전 것' 아니면 '새 것'이다.
+    """
+    staged_files = sorted(staging_directory.iterdir(), key=lambda path: (path.name == WEIGHTS_FILE_NAME, path.name))
+    for staged_file in staged_files:
+        os.replace(staged_file, output_directory / staged_file.name)
+
+
+def save_classifier_atomically(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, state_dict: dict[str, torch.Tensor], output_directory: Path) -> None:
+    """출력 디렉터리 안의 임시 하위 디렉터리에 먼저 저장한 뒤 파일을 옮겨 넣는다.
+
+    왜: 저장 도중 중단(디스크 부족·강제 종료)되면 반쯤 쓴 model.safetensors가 '최고 epoch'로 남을 수 있다.
+    임시 디렉터리는 성공·실패와 관계없이 지운다. 저장 중 난 예외는 삼키지 않고 그대로 올린다.
+    """
+    staging_directory = Path(tempfile.mkdtemp(prefix=STAGING_DIRECTORY_PREFIX, dir=output_directory))
+    try:
+        save_classifier(model, tokenizer, state_dict, staging_directory)
+        move_staged_files(staging_directory, output_directory)
+    finally:
+        shutil.rmtree(staging_directory)
