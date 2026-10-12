@@ -81,6 +81,20 @@ describe("DetectionPipeline", () => {
     expect(result.ref.privileged).toBe(true);
   });
 
+  it.each(["", "unknown_role_code"])("역할 코드가 '%s'(없거나 모름)면 자동 숨김 대신 후보로 낮추고 이유에 :unknown_role을 붙인다(S18, X08)", (userRoleCode) => {
+    const result = pipeline.evaluate(chat("느금마 진짜 웃기네", { senderChannelId: "someone", userRoleCode }));
+    expect(result).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:strong:\d+:unknown_role$/) });
+  });
+
+  it("역할을 모르는 사람의 앞선 떼도배 메시지는 숨김 대상으로 넘기지 않는다(S18)", () => {
+    const text = "구독하면 선물 드려요 진짜로";
+    for (let user = 1; user <= 3; user += 1) pipeline.evaluate(chat(text, { senderChannelId: `user-${user}` }));
+    pipeline.evaluate(chat(text, { senderChannelId: "role-missing", userRoleCode: "" }));
+    const fifth = pipeline.evaluate(chat(text, { senderChannelId: "user-5" }));
+    expect(fifth).toMatchObject({ decision: "auto_hide", reason: "rule:group_flood" });
+    expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["user-1", "user-2", "user-3"]);
+  });
+
   it("떼도배는 다섯 번째에 앞선 메시지까지 넘긴다(권한자 메시지는 빼고)", () => {
     const text = "구독하면 선물 드려요 진짜로";
     for (let user = 1; user <= 3; user += 1) pipeline.evaluate(chat(text, { senderChannelId: `user-${user}` }));

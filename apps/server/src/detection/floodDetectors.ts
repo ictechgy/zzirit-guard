@@ -1,4 +1,7 @@
-/** 숨기기에 필요한 메시지 식별값과 화면 표시용 정보. privileged는 스트리머·매니저 여부다. */
+/**
+ * 숨기기에 필요한 메시지 식별값과 화면 표시용 정보. privileged는 스트리머·매니저 여부다.
+ * isRoleUnknown은 역할 코드가 빠졌거나 처음 보는 값이라 권한자인지 알 수 없는지다(S18). 둘 중 하나라도 참이면 자동 숨김하지 않는다.
+ */
 export interface MessageRef {
   chatChannelId: string;
   messageTime: number;
@@ -6,6 +9,7 @@ export interface MessageRef {
   nickname: string;
   content: string;
   privileged: boolean;
+  isRoleUnknown: boolean;
 }
 
 /** 떼도배 관측 결과. earlierRefs는 이번에 처음 조건을 넘었을 때 함께 숨길 앞선 메시지들이다. */

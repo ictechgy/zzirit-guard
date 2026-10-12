@@ -1,4 +1,4 @@
-import { isPrivilegedRole, type ChatEvent } from "../chat/chatEvent.js";
+import { isKnownRole, isPrivilegedRole, type ChatEvent } from "../chat/chatEvent.js";
 import type { AuditLog } from "../records/auditLog.js";
 import type { GroupFloodDetector, MessageRef, PersonalFloodDetector } from "./floodDetectors.js";
 import { isTrivialMessage, type DuplicateTracker } from "./messageTraits.js";
@@ -67,7 +67,7 @@ function evaluate(deps: DetectionPipelineDeps, event: ChatEvent): DetectionResul
   const context = buildContext(deps, event, normalized, flood.triggered);
   const outcome = decide(deps, context);
   const traits = { trivial: isTrivialMessage(normalized), duplicate: deps.duplicates.seen(normalized, event.receivedAt) };
-  const earlierFloodRefs = flood.triggered ? flood.earlierRefs.filter((item) => !item.privileged) : [];
+  const earlierFloodRefs = flood.triggered ? flood.earlierRefs.filter(canAutoHide) : [];
   const result = applyPrivilege({ ...outcome, ref, earlierFloodRefs, ...traits });
   markAutoHiddenFloodEntry(deps.groupFlood, result);
   return result;
@@ -141,24 +141,36 @@ function isWatched(deps: DetectionPipelineDeps, event: ChatEvent): boolean {
 }
 
 /**
- * 스트리머·매니저 본인 메시지만 자동 숨김 대신 후보로 낮춘다(Global Constraints).
- * 앞선 떼도배 메시지는 다른 시청자의 도배이므로 earlierFloodRefs를 그대로 둔다.
- * 권한자 보호는 권한자 본인 메시지에만 적용되기 때문이다.
+ * 보낸 사람 메시지를 자동 숨김해도 되는지 본다: 권한자가 아니고 역할을 알아야 한다(Global Constraints, S18).
+ * @param ref 메시지 참조
+ */
+function canAutoHide(ref: MessageRef): boolean {
+  return !ref.privileged && !ref.isRoleUnknown;
+}
+
+/**
+ * 스트리머·매니저 본인 메시지와 역할을 모르는 사람의 메시지는 자동 숨김 대신 후보로 낮춘다(Global Constraints, S18).
+ * 이유 꼬리표로 둘을 가린다: 권한자는 :privileged, 역할 코드가 빠졌거나 처음 보는 값이면 :unknown_role.
+ * 왜 모르는 역할도 낮추나: 역할 코드가 빠진 매니저 메시지를 일반 시청자로 보고 되돌릴 수 없게 숨기면 안 된다.
+ * 앞선 떼도배 메시지(earlierFloodRefs)는 다른 사람의 도배이므로 여기서 바꾸지 않는다(evaluate가 canAutoHide로 이미 걸렀다).
  */
 function applyPrivilege(result: DetectionResult): DetectionResult {
-  if (result.decision !== "auto_hide" || !result.ref.privileged) return result;
-  return { ...result, decision: "candidate", reason: `${result.reason}:privileged` };
+  if (result.decision !== "auto_hide" || canAutoHide(result.ref)) return result;
+  const suffix = result.ref.privileged ? "privileged" : "unknown_role";
+  return { ...result, decision: "candidate", reason: `${result.reason}:${suffix}` };
 }
 
 /**
  * 채팅 이벤트에서 숨기기·표시에 필요한 값만 뽑는다.
- * 권한자 여부는 역할 코드와 함께 "보낸 사람이 채널 주인인가"로도 본다. 왜: 역할 코드가 빠지면 common_user로 채워지므로,
- * 그것만 믿으면 스트리머 본인 메시지가 자동 숨김될 수 있다(Global Constraints, F9.5).
+ * 권한자 여부는 역할 코드와 함께 "보낸 사람이 채널 주인인가"로도 본다. 왜: 역할 코드가 빠지거나 틀리면
+ * 그것만 믿어서는 스트리머 본인 메시지가 자동 숨김될 수 있다(Global Constraints, F9.5).
+ * 권한자가 아닌데 역할 코드가 빠졌거나 처음 보는 값이면 isRoleUnknown이다(S18).
  */
 function toMessageRef(event: ChatEvent): MessageRef {
+  const privileged = isPrivilegedRole(event.userRoleCode) || event.senderChannelId === event.channelId;
   return {
     chatChannelId: event.chatChannelId, messageTime: event.messageTime, senderChannelId: event.senderChannelId,
     nickname: event.nickname, content: event.content,
-    privileged: isPrivilegedRole(event.userRoleCode) || event.senderChannelId === event.channelId,
+    privileged, isRoleUnknown: !privileged && !isKnownRole(event.userRoleCode),
   };
 }

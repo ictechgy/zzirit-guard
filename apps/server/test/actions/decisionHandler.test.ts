@@ -44,7 +44,7 @@ beforeEach(() => {
 
 /** 메시지 참조. */
 function ref(sender: string, content: string): MessageRef {
-  return { chatChannelId: "chat-1", messageTime: 1, senderChannelId: sender, nickname: sender, content, privileged: false };
+  return { chatChannelId: "chat-1", messageTime: 1, senderChannelId: sender, nickname: sender, content, privileged: false, isRoleUnknown: false };
 }
 
 /** 채팅 이벤트. */
@@ -187,6 +187,14 @@ describe("DecisionHandler", () => {
     }));
     expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["viewer-1", "user-1"]);
     expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.senderChannelId)).toEqual(["viewer-1", "user-1"]);
+  });
+
+  it("역할을 모르는 사람의 앞선 메시지는 떼도배 숨김에서 빠진다(S18)", () => {
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("도배 문장"), result("auto_hide", "도배 문장", {
+      earlierFloodRefs: [ref("user-1", "도배 문장"), { ...ref("role-missing", "도배 문장"), isRoleUnknown: true }],
+    }));
+    expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["viewer-1", "user-1"]);
   });
 
   it("자동 숨김 요청이 거절되면 예외를 로그로 남기고 처리를 끝낸다", async () => {

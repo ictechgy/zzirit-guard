@@ -51,9 +51,9 @@ export function createDecisionHandler(deps: DecisionHandlerDeps): DecisionHandle
       if (result.decision === "candidate") saveCandidate(deps, event.channelId, result);
       if (result.decision === "auto_hide") recordAutoHide(deps, event.channelId, result.ref, result.reason, isAutoHideAllowed);
       // 떼도배 발동은 한 번뿐이라 현재 메시지의 판정과 무관하게 앞선 메시지를 숨긴다(R17). 현재 메시지보다 뒤에 처리한다.
-      // 파이프라인이 이미 권한자를 빼지만, 권한자 자동 숨김 금지(Global Constraints)를 여기서도 한 번 더 막는다.
+      // 파이프라인이 이미 권한자·역할 모르는 사람을 빼지만, 그들의 자동 숨김 금지(Global Constraints, S18)를 여기서도 한 번 더 막는다.
       result.earlierFloodRefs
-        .filter((ref) => !ref.privileged)
+        .filter((ref) => !ref.privileged && !ref.isRoleUnknown)
         .forEach((ref) => recordAutoHide(deps, event.channelId, ref, GROUP_FLOOD_REASON, consumeAutoHide(deps, event.channelId)));
     },
   };
