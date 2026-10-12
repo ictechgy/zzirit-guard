@@ -164,7 +164,7 @@ describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 �
     expect(containsBlockedLink(text, allow)).toBe(false);
   });
 
-  it.each(["evil.zzz:80", "evil.zzz:8080/x", "spam.bet:443"])("두 자리 이상 포트는 계속 링크 단서로 본다(N2): %s", (text) => {
+  it.each(["evil.zzz:80", "evil.zzz:8080/x", "spam.bet:443", "evil.dev:8/x"])("두 자리 이상 포트, 또는 경로가 뒤따르는 한 자리 포트는 계속 링크 단서로 본다(N2): %s", (text) => {
     expect(containsBlockedLink(text, allow)).toBe(true);
   });
 
