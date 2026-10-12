@@ -230,6 +230,24 @@ describe("한글 낱말 + 알려진 최상위 도메인(N1): 단서가 없으면
   });
 });
 
+describe("NFKC가 호스트·번호 경계를 옮겨 생긴 우회(B1): NFKC 한 형태와 하지 않은 형태를 모두 본다", () => {
+  it.each(["evil.com™", "spam.ru① 접속", "…evil.com", "…t.me/abc", "①https://evil.zzz", "open.kakao.com™ 들어와", "t.me①/abc", "bit.ly™/abc"])(
+    "main에서 막던 링크를 계속 막는다: %s",
+    (text) => {
+      expect(containsBlockedLink(text, [])).toBe(true);
+    },
+  );
+
+  it.each(["010-1234-5678①", "①010-1234-5678", "01012345678™", "010-1234-5678²"])("main에서 막던 번호를 계속 막는다: %s", (text) => {
+    expect(containsPhoneNumber(text)).toBe(true);
+  });
+
+  it("NFKC로만 보이는 우회(동그라미·수학 글자)도 계속 막는다", () => {
+    expect(containsBlockedLink("ⓔⓥⓘⓛ.ⓒⓞⓜ", [])).toBe(true);
+    expect(containsPhoneNumber("𝟎𝟏𝟎-𝟏𝟐𝟑𝟒-𝟓𝟔𝟕𝟖")).toBe(true);
+  });
+});
+
 describe("bidi·서식 제어 문자로 끊은 링크·전화번호(S9, M08)", () => {
   it.each([
     ["LRE·PDF(U+202A·U+202C)", "evil\u202A.\u202Ccom/x"],

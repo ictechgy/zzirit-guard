@@ -103,13 +103,28 @@ interface HostCandidate {
 }
 
 /**
- * 검사 전 공통 전처리. 보이지 않는 문자·전각을 걷어내고, 호환 문자를 기본 문자로 바꾼 뒤(NFKC) 소문자로 맞춘다.
- * 이유: 채팅 UI는 이런 문자를 건너뛰고 링크로 그리므로, 패턴이 보는 문자열도 같아야 우회를 막는다.
- * NFKC는 브라우저 주소 처리(UTS 46)처럼 "ⓔⓥⓘⓛ.ⓒⓞⓜ"·"𝐞𝐯𝐢𝐥.𝐜𝐨𝐦"·"evil․com"(한 점 리더)·"𝟎𝟏𝟎…"를 기본 글자로 맞춘다(적대적 재점검).
- * 금칙어 비교(normalize.ts)에는 넣지 않는다: 호환 자모가 조합형으로 바뀌어 자모 조합 단계가 달라지기 때문이다.
+ * 검사할 전처리 형태들. 읽기 순서(원문·RLO 화면 순서)마다 두 형태를 만든다: 보이지 않는 문자·전각을 걷어내고 소문자로 맞춘 형태(main과 같다)와,
+ * 거기에 호환 문자를 기본 문자로 바꾼(NFKC) 형태. 하나라도 걸리면 걸린 것으로 본다(B1).
+ * 왜 NFKC를 쓰나: 브라우저 주소 처리(UTS 46)처럼 "ⓔⓥⓘⓛ.ⓒⓞⓜ"·"𝐞𝐯𝐢𝐥.𝐜𝐨𝐦"·"evil․com"(한 점 리더)·"𝟎𝟏𝟎…"를 기본 글자로 맞춰야 이런 우회를 막는다(적대적 재점검).
+ * 왜 NFKC만 쓰지 않나: NFKC는 경계를 옮긴다. 끝에 붙은 ™·①이 "comtm"·"com1"이 되어 최상위 도메인을 못 알아보고, 앞의 "…"는 "..."가 되며,
+ * 번호 앞뒤의 ①은 숫자로 붙는다. 그래서 main이 막던 "evil.com™", "…evil.com", "010-1234-5678①"이 빠졌다.
+ * 금칙어 비교(normalize.ts)에는 NFKC를 넣지 않는다: 호환 자모가 조합형으로 바뀌어 자모 조합 단계가 달라지기 때문이다.
+ * @param text 원문
  */
-function prepareText(text: string): string {
-  return stripInvisibleAndFullwidth(text).normalize("NFKC").toLowerCase();
+function preparedReadings(text: string): string[] {
+  return readingOrders(text).flatMap((reading) => {
+    const stripped = stripInvisibleAndFullwidth(reading);
+    return [stripped.toLowerCase(), stripped.normalize("NFKC").toLowerCase()];
+  });
+}
+
+/**
+ * 링크 검사용 전처리 형태들(preparedReadings마다 가운데 점과 [.] (.) 표기를 "."로 바꾼 것).
+ * 이유: "spam[.]com"처럼 점을 가려 쓴 주소는 사람에게는 링크로 보이므로, 호스트 추출 전에 같은 모양으로 맞춘다.
+ * @param text 원문
+ */
+function linkReadings(text: string): string[] {
+  return preparedReadings(text).map((prepared) => prepared.replace(IDEOGRAPHIC_DOT_PATTERN, ".").replace(BRACKETED_DOT_PATTERN, "."));
 }
 
 /**
@@ -140,14 +155,6 @@ function reverseOverriddenPart(segment: string): string {
   const end = segment.search(OVERRIDE_END_PATTERN);
   const overridden = end === -1 ? segment : segment.slice(0, end);
   return [...overridden].reverse().join("") + (end === -1 ? "" : segment.slice(end));
-}
-
-/**
- * 링크 검사용 전처리. 공통 전처리 뒤에 가운데 점과 [.] (.) 표기를 "."로 바꾼다.
- * 이유: "spam[.]com"처럼 점을 가려 쓴 주소는 사람에게는 링크로 보이므로, 호스트 추출 전에 같은 모양으로 맞춘다.
- */
-function prepareLinkText(text: string): string {
-  return prepareText(text).replace(IDEOGRAPHIC_DOT_PATTERN, ".").replace(BRACKETED_DOT_PATTERN, ".");
 }
 
 /**
@@ -228,7 +235,7 @@ function isAllowedHost(host: string, allowDomains: readonly string[]): boolean {
 
 /**
  * 텍스트에서 자동 숨김할 링크 호스트를 모두 뽑는다(맨 앞 www. 제거). 단서 없는 한글 호스트는 빼고 후보 신호로만 쓴다(N1).
- * @param linkText prepareLinkText를 거친 텍스트
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
  */
 function extractLinkHosts(linkText: string): string[] {
   return extractHostCandidates(linkText)
@@ -252,7 +259,7 @@ function isBareHangulHost(candidate: HostCandidate): boolean {
 
 /**
  * 읽기 순서 하나에서 허용되지 않은 단서 없는 한글 링크 호스트를 뽑는다(N1).
- * @param linkText prepareLinkText를 거친 텍스트
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
  * @param allowDomains 채널이 허용한 도메인
  */
 function bareHangulHostsIn(linkText: string, allowDomains: readonly string[]): string[] {
@@ -268,7 +275,7 @@ function bareHangulHostsIn(linkText: string, allowDomains: readonly string[]): s
  * @param allowDomains 채널이 허용한 도메인
  */
 export function containsBareHangulLink(text: string, allowDomains: readonly string[]): boolean {
-  return readingOrders(text).some((reading) => bareHangulHostsIn(prepareLinkText(reading), allowDomains).length > 0);
+  return linkReadings(text).some((linkText) => bareHangulHostsIn(linkText, allowDomains).length > 0);
 }
 
 /**
@@ -285,7 +292,7 @@ function hasBlockedHost(linkHosts: readonly string[], allowDomains: readonly str
  * 단순히 "가입·문의·@"만 있는 것은 일반 대화와 구분되지 않으므로 세지 않는다.
  * 허용 도메인 링크는 연락 수단으로 세지 않는다(S10, M09). 왜: 홀덤·슬롯 방송에서 "홀덤 하이라이트 youtube.com/…" 같은 정상 채팅이
  * 되돌릴 수 없는 자동 숨김이 됐다. 채널이 허용한 주소는 광고 연락처가 아니다.
- * @param linkText prepareLinkText를 거친 텍스트
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
  * @param linkHosts extractLinkHosts 결과
  * @param allowDomains 채널이 허용한 도메인
  */
@@ -299,12 +306,12 @@ function hasRealContact(linkText: string, linkHosts: readonly string[], allowDom
  * @param allowDomains 채널이 허용한 도메인(소문자, www 제거). 하위 도메인까지 허용한다.
  */
 export function containsBlockedLink(text: string, allowDomains: readonly string[]): boolean {
-  return readingOrders(text).some((reading) => hasBlockedLinkIn(prepareLinkText(reading), allowDomains));
+  return linkReadings(text).some((linkText) => hasBlockedLinkIn(linkText, allowDomains));
 }
 
 /**
  * 읽기 순서 하나에서 광고·외부 링크·연락처 유도를 찾는다(containsBlockedLink 본체).
- * @param linkText prepareLinkText를 거친 텍스트
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
  * @param allowDomains 채널이 허용한 도메인
  */
 function hasBlockedLinkIn(linkText: string, allowDomains: readonly string[]): boolean {
@@ -324,12 +331,12 @@ function hasBlockedLinkIn(linkText: string, allowDomains: readonly string[]): bo
  * @param allowDomains 채널이 허용한 도메인
  */
 export function containsGluedAllowedLink(text: string, allowDomains: readonly string[]): boolean {
-  return readingOrders(text).some((reading) => hasGluedAllowedHost(prepareLinkText(reading), allowDomains));
+  return linkReadings(text).some((linkText) => hasGluedAllowedHost(linkText, allowDomains));
 }
 
 /**
  * 읽기 순서 하나에서 한글이 붙은 허용 도메인 링크를 찾는다(containsGluedAllowedLink 본체).
- * @param linkText prepareLinkText를 거친 텍스트
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
  * @param allowDomains 채널이 허용한 도메인
  */
 function hasGluedAllowedHost(linkText: string, allowDomains: readonly string[]): boolean {
@@ -357,7 +364,7 @@ function gluedHangulPrefix(text: string, hostStart: number): string {
  * @param text 원문(정규화 전)
  */
 export function containsPhoneNumber(text: string): boolean {
-  return readingOrders(text).some((reading) => PHONE_PATTERN.test(prepareText(reading)));
+  return preparedReadings(text).some((prepared) => PHONE_PATTERN.test(prepared));
 }
 
 /**
@@ -365,8 +372,5 @@ export function containsPhoneNumber(text: string): boolean {
  * @param text 원문(정규화 전)
  */
 export function looksLikeAddress(text: string): boolean {
-  return readingOrders(text).some((reading) => {
-    const prepared = prepareText(reading);
-    return NEIGHBORHOOD_BUILDING_PATTERN.test(prepared) || UNIT_NUMBER_PATTERN.test(prepared);
-  });
+  return preparedReadings(text).some((prepared) => NEIGHBORHOOD_BUILDING_PATTERN.test(prepared) || UNIT_NUMBER_PATTERN.test(prepared));
 }
