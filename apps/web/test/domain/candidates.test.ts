@@ -65,6 +65,17 @@ describe("판정 목록 갱신", () => {
     expect(merged.map((item) => [item.id, item.status])).toEqual([[1, "hidden"], [2, "pending"], [3, "pending"]]);
   });
 
+  it("REST 스냅숏이 더 새로 받은 처리 상태(hidden 등)를 pending으로 되돌리지 않는다(W3, X36)", () => {
+    const current = [verdict(1, { status: "hidden" }), verdict(2, { status: "restricted" }), verdict(3)];
+    const loaded = [verdict(1), verdict(2), verdict(3)];
+    expect(mergeVerdicts(current, loaded).map((item) => [item.id, item.status])).toEqual([[1, "hidden"], [2, "restricted"], [3, "pending"]]);
+  });
+
+  it("처리 상태끼리는 REST 스냅숏 값을 따른다(서버가 정한 최신 상태)", () => {
+    const merged = mergeVerdicts([verdict(1, { status: "hidden" })], [verdict(1, { status: "false_positive" })]);
+    expect(merged[0]?.status).toBe("false_positive");
+  });
+
   it("상태만 바꾼다", () => {
     expect(applyVerdictStatus([verdict(1)], 1, "ignored")[0]?.status).toBe("ignored");
     expect(applyVerdictStatus([verdict(1)], 9, "ignored")[0]?.status).toBe("pending");
