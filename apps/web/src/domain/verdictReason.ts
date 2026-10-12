@@ -7,6 +7,7 @@ const RULE_LABELS: ReadonlyMap<string, string> = new Map([
   ["group_flood", "떼도배"], ["personal_flood", "개인 도배"], ["link", "광고 링크"], ["phone", "전화번호"], ["address", "주소"],
   ["watch_user", "요주의 사용자(최근 180일 조치 이력)"], ["allow", "허용어"],
   ["link_glued", "광고 링크 의심(허용 주소 앞에 한글이 붙어 다른 주소일 수 있음)"], ["link_idn", "한글 주소(후보)"],
+  ["link_port", "포트가 붙은 주소(후보)"],
 ]);
 /**
  * 자동 숨김 대신 후보로 낮췄다는 꼬리표와 화면 문구(pipeline.ts applyPrivilege).

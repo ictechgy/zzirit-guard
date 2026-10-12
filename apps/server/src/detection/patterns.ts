@@ -1,14 +1,14 @@
 import { stripInvisibleAndFullwidth } from "./normalize.js";
 
 /**
- * 호스트 바로 뒤에 경로("/")나 포트(":8080")가 오는지 보는 앞쪽 탐색. 3번 그룹으로 잡는다.
- * 왜 포트도 보나: "evil.zzz:8080/x"처럼 포트를 끼우면 경로 휴리스틱(word.word/…)을 피해 갔다(적대적 재점검).
- * 포트는 두 자리 이상만 본다(N2): "T1 vs.GEN:2", "t1.faker:3킬" 같은 점수·횟수 표기를 되돌릴 수 없는 숨김으로 보지 않기 위해서다.
- * 한 자리 포트라도 바로 뒤에 경로("/")가 오면 주소다("evil.dev:8/x", 적대적 재점검). 점수 표기에는 경로가 붙지 않는다.
+ * 호스트 바로 뒤의 경로·포트를 보는 앞쪽 탐색. 3번 그룹은 경로 단서("/", 또는 ":포트/"), 4번 그룹은 경로 없는 포트(":8080")다.
+ * 왜 포트를 따로 보나(U3): "evil.zzz:8080/x"처럼 포트 뒤에 경로가 오면 주소가 분명하지만, 경로 없는 두 자리 이상 포트는
+ * "T1 vs.GEN:13", "t1.faker:12킬" 같은 게임 점수·횟수와 모양이 같다. 그래서 경로 없는 포트는 알려진 최상위 도메인일 때만 링크로 보고,
+ * 모르는 최상위 도메인이면 후보(rule:link_port)로만 올린다. 한 자리 숫자 콜론은 포트로 보지 않는다(N2).
  */
-const PATH_OR_PORT_LOOKAHEAD = String.raw`(?=(\/|:\d{2,5}(?!\d)|:\d\/)?)`;
+const PATH_AND_PORT_LOOKAHEAD = String.raw`(?=(\/|:\d{1,5}\/)?)(?=(:\d{2,5}(?![\d\/]))?)`;
 /**
- * 호스트 후보를 전부 뽑는 패턴. 1번 그룹은 http(s):// 접두, 2번 그룹은 전체 호스트, 3번 그룹은 바로 뒤의 "/"(경로)나 ":포트"다.
+ * 호스트 후보를 전부 뽑는 패턴. 1번 그룹은 http(s):// 접두, 2번 그룹은 전체 호스트, 3번 그룹은 경로 단서, 4번 그룹은 경로 없는 포트다.
  * 최상위 도메인을 미리 정해 두지 않고 모양만 보는 이유: 목록에 없는 TLD(.bet, .casino)나 IP도 빠짐없이 잡기 위해서다.
  * 앞뒤에 호스트 글자가 이어지면 잘린 조각으로 보지 않도록 막는다.
  * 점 바로 뒤는 그 점 앞 글자가 호스트 글자일 때만 막는다(B2). 왜: "a.b.com"의 중간 라벨 "b.com"을 따로 뽑지 않으려는 규칙이었는데,
@@ -16,7 +16,7 @@ const PATH_OR_PORT_LOOKAHEAD = String.raw`(?=(\/|:\d{2,5}(?!\d)|:\d\/)?)`;
  * 뒤에 ".한글"이 와도 끊는다: "spam.com.진짜 좋음"처럼 문장 끝 마침표 뒤에 한글을 붙인 주소를 놓치지 않기 위해서다.
  */
 const HOST_CANDIDATE_PATTERN = new RegExp(
-  String.raw`(?<![a-z0-9-])(?<![a-z0-9-]\.)(https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z0-9-]+)(?![a-z0-9-]|\.[a-z0-9])` + PATH_OR_PORT_LOOKAHEAD,
+  String.raw`(?<![a-z0-9-])(?<![a-z0-9-]\.)(https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z0-9-]+)(?![a-z0-9-]|\.[a-z0-9])` + PATH_AND_PORT_LOOKAHEAD,
   "g",
 );
 /**
@@ -36,7 +36,7 @@ const HANGUL_TOP_LEVEL_DOMAINS = ["한국", "닷컴", "닷넷"] as const;
 const HANGUL_HOST_CANDIDATE_PATTERN = new RegExp(
   String.raw`(?<![a-z0-9가-힣-])(?<![a-z0-9가-힣-]\.)(https?:\/\/)?((?:(?:[a-z0-9-]+|(?=[가-힣0-9-]*[가-힣])[가-힣0-9-]+)\.)+` +
     String.raw`(?:(?:${HANGUL_TOP_LEVEL_DOMAINS.join("|")})(?![a-z0-9가-힣-])|[a-z0-9-]+(?![a-z0-9-])))(?!\.[a-z0-9가-힣])` +
-    PATH_OR_PORT_LOOKAHEAD,
+    PATH_AND_PORT_LOOKAHEAD,
   "g",
 );
 /** 한글 음절. 한글 호스트 후보만 골라낼 때 쓴다(영문 호스트는 HOST_CANDIDATE_PATTERN이 맡는다). */
@@ -99,12 +99,14 @@ const OVERRIDE_END_PATTERN = /[\u202C\u2069]/;
 
 /**
  * 호스트 후보 하나. hasExplicitPrefix는 http(s):// 또는 www. 로 시작하거나 URL 사용자 정보(…@) 뒤에 와서 링크임이 분명한지,
- * isFollowedBySlash는 바로 뒤에 "/"나 ":포트"가 오는지, start는 텍스트에서 호스트가 시작하는 위치다.
+ * hasPathCue는 바로 뒤에 경로("/" 또는 ":포트/")가 오는지, hasPortCue는 경로 없는 두 자리 이상 포트가 오는지(U3),
+ * start는 텍스트에서 호스트가 시작하는 위치다.
  */
 interface HostCandidate {
   readonly host: string;
   readonly hasExplicitPrefix: boolean;
-  readonly isFollowedBySlash: boolean;
+  readonly hasPathCue: boolean;
+  readonly hasPortCue: boolean;
   readonly start: number;
 }
 
@@ -173,7 +175,7 @@ function extractHostCandidates(text: string): HostCandidate[] {
 }
 
 /**
- * 패턴 하나로 호스트 후보를 뽑는다. 두 패턴은 그룹 번호(1: 접두, 2: 호스트, 3: 뒤따르는 "/")가 같다.
+ * 패턴 하나로 호스트 후보를 뽑는다. 두 패턴은 그룹 번호(1: 접두, 2: 호스트, 3: 경로 단서, 4: 경로 없는 포트)가 같다.
  * @param text 링크 검사용 전처리를 거친 텍스트
  * @param pattern HOST_CANDIDATE_PATTERN 또는 HANGUL_HOST_CANDIDATE_PATTERN(g 플래그)
  */
@@ -182,7 +184,7 @@ function matchHostCandidates(text: string, pattern: RegExp): HostCandidate[] {
     const host = match[2] ?? "";
     const start = match.index + (match[1]?.length ?? 0);
     const hasExplicitPrefix = match[1] !== undefined || host.startsWith("www.") || isAfterUrlUserinfo(text, start);
-    return { host, hasExplicitPrefix, isFollowedBySlash: match[3] !== undefined, start };
+    return { host, hasExplicitPrefix, hasPathCue: match[3] !== undefined, hasPortCue: match[4] !== undefined, start };
   });
 }
 
@@ -215,14 +217,15 @@ function hasKnownTopLevelDomain(host: string): boolean {
  * 후보가 링크인지 본다.
  * 1) 접두가 있으면 TLD와 상관없이 링크(.bet, IP 포함).
  * 2) 퓨니코드 라벨(xn--)이 있으면 링크(S11).
- * 3) 접두가 없어도 "word.word/..."·"word.word:8080"(접두 없이 경로·포트가 붙은 호스트)은 거의 항상 URL이라 링크로 본다.
+ * 3) 접두가 없어도 "word.word/..."·"word.word:8080/..."(접두 없이 경로가 붙은 호스트)는 거의 항상 URL이라 링크로 본다.
+ *    경로 없는 포트("word.word:8080")만으로는 링크로 보지 않는다(U3, 게임 점수와 모양이 같다). 알려진 최상위 도메인이면 4)에서 링크가 된다.
  *    단, 마지막 라벨이 영문자로 시작하는 두 글자 이상이어야 한다("3.5/2 정도" 같은 숫자 표기, "a.m:10" 같은 한 글자 약어, "그래.그래/…" 같은 한글 표기는 제외).
  * 4) 그 밖에는 첫 라벨 뒤에 알려진 TLD(.한국 포함)가 있을 때만 링크다("3.5", "ver.2", "안녕.하세요" 같은 표기를 거르기 위해).
  */
 function isLinkCandidate(candidate: HostCandidate): boolean {
   if (candidate.hasExplicitPrefix || hasPunycodeLabel(candidate.host)) return true;
   const lastLabel = candidate.host.split(".").at(-1) ?? "";
-  if (candidate.isFollowedBySlash && TOP_LEVEL_DOMAIN_SHAPE_PATTERN.test(lastLabel)) return true;
+  if (candidate.hasPathCue && TOP_LEVEL_DOMAIN_SHAPE_PATTERN.test(lastLabel)) return true;
   return hasKnownTopLevelDomain(candidate.host);
 }
 
@@ -258,7 +261,7 @@ function extractLinkHosts(linkText: string): string[] {
  * @param candidate 호스트 후보
  */
 function isBareHangulHost(candidate: HostCandidate): boolean {
-  if (candidate.hasExplicitPrefix || candidate.isFollowedBySlash || hasPunycodeLabel(candidate.host)) return false;
+  if (candidate.hasExplicitPrefix || candidate.hasPathCue || candidate.hasPortCue || hasPunycodeLabel(candidate.host)) return false;
   const registrableLabel = candidate.host.split(".").at(-2) ?? "";
   return HANGUL_SYLLABLE_PATTERN.test(registrableLabel);
 }
@@ -273,6 +276,38 @@ function bareHangulHostsIn(linkText: string, allowDomains: readonly string[]): s
     .filter((candidate) => isLinkCandidate(candidate) && isBareHangulHost(candidate))
     .map((candidate) => stripLeadingWww(candidate.host))
     .filter((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 모르는 최상위 도메인(최상위 도메인 모양: 영문자로 시작하는 두 글자 이상)에 경로 없는 포트만 붙은 호스트인지 본다(U3).
+ * 예: "evil.zzz:8080", "T1 vs.GEN:13". 알려진 최상위 도메인·경로·접두가 있으면 이미 링크라 여기 들지 않는다.
+ * @param candidate 호스트 후보
+ */
+function isPortOnlyHost(candidate: HostCandidate): boolean {
+  const lastLabel = candidate.host.split(".").at(-1) ?? "";
+  return candidate.hasPortCue && TOP_LEVEL_DOMAIN_SHAPE_PATTERN.test(lastLabel) && !isLinkCandidate(candidate);
+}
+
+/**
+ * 읽기 순서 하나에서 허용되지 않은, 포트만 붙은 모르는 최상위 도메인 호스트를 뽑는다(U3).
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function portOnlyHostsIn(linkText: string, allowDomains: readonly string[]): string[] {
+  return extractHostCandidates(linkText)
+    .filter(isPortOnlyHost)
+    .map((candidate) => stripLeadingWww(candidate.host))
+    .filter((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 모르는 최상위 도메인에 포트만 붙은 주소(예: "evil.zzz:8080")가 있는지 본다. 파이프라인은 자동 숨김이 아니라 후보(rule:link_port)로 올린다(U3).
+ * 왜: 게임 점수("T1 vs.GEN:13")와 모양이 같아 확실하지 않지만, 매니저에게는 보여야 한다.
+ * @param text 원문(정규화 전)
+ * @param allowDomains 채널이 허용한 도메인
+ */
+export function containsPortOnlyLink(text: string, allowDomains: readonly string[]): boolean {
+  return linkReadings(text).some((linkText) => portOnlyHostsIn(linkText, allowDomains).length > 0);
 }
 
 /**
@@ -325,8 +360,9 @@ function hasBlockedLinkIn(linkText: string, allowDomains: readonly string[]): bo
   if (hasBlockedHost(linkHosts, allowDomains)) return true;
   if (TELEGRAM_HANDLE_PATTERN.test(linkText)) return true;
   if (!GAMBLING_PATTERN.test(linkText)) return false;
-  // 도박 단어와 함께면 단서 없는 한글 링크("카지노.kr", "토토사이트.net")도 광고 연락 수단으로 센다(N1).
-  return hasRealContact(linkText, linkHosts, allowDomains) || bareHangulHostsIn(linkText, allowDomains).length > 0;
+  // 도박 단어와 함께면 단서 없는 한글 링크("카지노.kr", N1)와 포트만 붙은 주소("토토 evil.zzz:8080", U3)도 광고 연락 수단으로 센다.
+  const uncertainHosts = [...bareHangulHostsIn(linkText, allowDomains), ...portOnlyHostsIn(linkText, allowDomains)];
+  return hasRealContact(linkText, linkHosts, allowDomains) || uncertainHosts.length > 0;
 }
 
 /**

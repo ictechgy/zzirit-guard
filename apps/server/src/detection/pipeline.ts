@@ -3,7 +3,7 @@ import type { AuditLog } from "../records/auditLog.js";
 import type { GroupFloodDetector, MessageRef, PersonalFloodDetector } from "./floodDetectors.js";
 import { isTrivialMessage, type DuplicateTracker } from "./messageTraits.js";
 import { normalizeForMatching, normalizeKeepingWhitespace } from "./normalize.js";
-import { containsBareHangulLink, containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, looksLikeAddress } from "./patterns.js";
+import { containsBareHangulLink, containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, containsPortOnlyLink, looksLikeAddress } from "./patterns.js";
 import type { RuleEntry, RuleRepository, RuleSnapshot } from "./ruleRepository.js";
 import { findFirstIntactMatch, findFirstMatch, locateExceptions, locateExceptionsKeepingWhitespace, type ExceptionAwareText } from "./wordMatch.js";
 
@@ -101,8 +101,8 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
  * 금칙어 강은 공백을 남긴 문장에서 단어 안에 그대로 있을 때만 auto_hide다. 공백을 지워야만 걸리는 일치(단어를 걸친 우연한 일치,
  * 글자마다 띄운 우회)는 되돌릴 수 없는 숨김 대신 후보(rule:strong_spanning)로 낮춘다(F4). 이 후보 검사는 떼도배·광고·전화번호의
  * auto_hide를 가리지 않도록 그 뒤에, 금칙어 강의 일종이라 허용어보다는 앞에 둔다.
- * 허용 도메인 앞에 한글을 붙여 다른 주소일 수 있는 링크(rule:link_glued)와 단서 없는 한글 링크(rule:link_idn, "좋아요.me")도
- * 광고 링크의 일종이라 같은 자리(허용어 앞)에서 후보로 올린다(N1).
+ * 허용 도메인 앞에 한글을 붙여 다른 주소일 수 있는 링크(rule:link_glued), 단서 없는 한글 링크(rule:link_idn, "좋아요.me"),
+ * 모르는 최상위 도메인에 포트만 붙은 주소(rule:link_port, "evil.zzz:8080")도 광고 링크의 일종이라 같은 자리(허용어 앞)에서 후보로 올린다(N1, U3).
  */
 function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: DetectionResult["decision"]; reason: string } {
   const checks: Array<(context: RuleContext) => RuleOutcome> = [
@@ -112,6 +112,7 @@ function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: 
     (c) => (containsPhoneNumber(c.event.content) ? { decision: "auto_hide", reason: "rule:phone" } : null),
     (c) => (containsGluedAllowedLink(c.event.content, c.snapshot.allowDomains) ? { decision: "candidate", reason: "rule:link_glued" } : null),
     (c) => (containsBareHangulLink(c.event.content, c.snapshot.allowDomains) ? { decision: "candidate", reason: "rule:link_idn" } : null),
+    (c) => (containsPortOnlyLink(c.event.content, c.snapshot.allowDomains) ? { decision: "candidate", reason: "rule:link_port" } : null),
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.strong), "candidate", "strong_spanning"),
     (c) => (c.snapshot.allow.has(c.normalized) ? { decision: "pass", reason: "rule:allow" } : null),
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.weak), "candidate", "weak"),

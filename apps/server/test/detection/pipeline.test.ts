@@ -65,6 +65,12 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat("카지노.kr"))).toMatchObject({ decision: "auto_hide", reason: "rule:link" });
   });
 
+  it("모르는 최상위 도메인에 포트만 붙으면 후보(rule:link_port), 경로가 붙으면 자동 숨김이다(U3)", () => {
+    expect(pipeline.evaluate(chat("T1 vs.GEN:13"))).toMatchObject({ decision: "candidate", reason: "rule:link_port" });
+    expect(pipeline.evaluate(chat("evil.zzz:8080"))).toMatchObject({ decision: "candidate", reason: "rule:link_port" });
+    expect(pipeline.evaluate(chat("evil.zzz:8080/x"))).toMatchObject({ decision: "auto_hide", reason: "rule:link" });
+  });
+
   it("허용어는 메시지 전체가 같을 때만 통과시킨다", () => {
     expect(pipeline.evaluate(chat("적팀 죽여버려!!")).decision).toBe("pass");
     expect(pipeline.evaluate(chat("적팀 죽여버려 시발")).decision).toBe("candidate");

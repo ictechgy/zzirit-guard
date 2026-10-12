@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsBareHangulLink, containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, looksLikeAddress } from "../../src/detection/patterns.js";
+import { containsBareHangulLink, containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, containsPortOnlyLink, looksLikeAddress } from "../../src/detection/patterns.js";
 
 describe("containsBlockedLink", () => {
   it.each([
@@ -120,7 +120,6 @@ describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 �
     ["한 점 리더(U+2024)", "evil\u2024com/x"],
     ["작은 마침표(U+FE52)", "evil\uFE52com/x"],
     ["포트가 붙은 호스트", "evil.zzz:8080/x"],
-    ["포트만 붙은 호스트", "evil.zzz:8080"],
   ])("우회를 막는다: %s", (_label, text) => {
     expect(containsBlockedLink(text, allow)).toBe(true);
   });
@@ -164,7 +163,7 @@ describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 �
     expect(containsBlockedLink(text, allow)).toBe(false);
   });
 
-  it.each(["evil.zzz:80", "evil.zzz:8080/x", "spam.bet:443", "evil.dev:8/x"])("두 자리 이상 포트, 또는 경로가 뒤따르는 한 자리 포트는 계속 링크 단서로 본다(N2): %s", (text) => {
+  it.each(["evil.zzz:8080/x", "evil.com:8080", "spam.bet:443", "evil.dev:8/x"])("알려진 최상위 도메인이거나 포트 뒤에 경로가 오면 자동 숨김 대상이다(N2, U3): %s", (text) => {
     expect(containsBlockedLink(text, allow)).toBe(true);
   });
 
@@ -227,6 +226,33 @@ describe("한글 낱말 + 알려진 최상위 도메인(N1): 단서가 없으면
   it("영문 호스트는 한글 주소 후보 신호를 내지 않는다", () => {
     expect(containsBareHangulLink("spam.com", allow)).toBe(false);
     expect(containsBareHangulLink("안녕.하세요", allow)).toBe(false);
+  });
+});
+
+describe("포트만 붙은 모르는 최상위 도메인(U3): 자동 숨김 대신 후보(rule:link_port)", () => {
+  it.each(["T1 vs.GEN:13", "t1.faker:12킬", "dk.showmaker:15킬", "lv.max:99", "evil.zzz:8080", "evil.zzz:80"])(
+    "자동 숨김하지 않고 포트 주소 후보 신호만 낸다: %s",
+    (text) => {
+      expect(containsBlockedLink(text, [])).toBe(false);
+      expect(containsPortOnlyLink(text, [])).toBe(true);
+    },
+  );
+
+  it.each(["evil.zzz:8080/x", "evil.com:8080", "https://evil.zzz:8080", "토토 evil.zzz:8080"])(
+    "경로·알려진 최상위 도메인·접두·도박 단어가 있으면 자동 숨김 대상이다: %s",
+    (text) => {
+      expect(containsBlockedLink(text, [])).toBe(true);
+    },
+  );
+
+  it("포트가 없거나 한 자리 숫자 콜론이면 포트 주소 후보 신호도 내지 않는다", () => {
+    expect(containsPortOnlyLink("evil.zzz", [])).toBe(false);
+    expect(containsPortOnlyLink("T1 vs.GEN:2", [])).toBe(false);
+    expect(containsPortOnlyLink("a.m:10", [])).toBe(false);
+  });
+
+  it("허용한 도메인에 포트만 붙으면 후보 신호를 내지 않는다", () => {
+    expect(containsPortOnlyLink("my.stream:8080", ["my.stream"])).toBe(false);
   });
 });
 
