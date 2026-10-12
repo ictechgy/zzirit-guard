@@ -30,7 +30,12 @@ $ZG_DATA_DIR/ml/
 
 ## 기반 모델과 데이터 받기
 
-[hf CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) 2.x로 받는다(스파이크는 huggingface_hub 2.2.0을 썼다). **리비전을 고정**해서 받는다. 저장소의 `main`은 언제든 바뀔 수 있고, 바뀌면 같은 스크립트로도 결과가 달라진다. 아래 리비전은 2026-10-12에 확인한 값이다. 다른 리비전을 쓰면 모델 카드의 `matches_reference`가 `false`로 남는다.
+[hf CLI](https://huggingface.co/docs/huggingface_hub/guides/cli) 2.x로 받는다. **리비전을 고정**해서 받는다. 저장소의 `main`은 언제든 바뀔 수 있고, 바뀌면 같은 스크립트로도 결과가 달라진다. 아래 리비전은 2026-10-12에 확인한 값이다. 다른 리비전을 쓰면 모델 카드의 `matches_reference`가 `false`로 남는다.
+
+`hf`는 이 프로젝트의 의존성이 아니다(학습·평가는 네트워크에 접속하지 않는다). 받을 때만 쓰므로 둘 중 하나로 준비한다. 아래 명령은 huggingface_hub 2.0.0으로 2026-10-12에 확인했다(`--dry-run`으로 받을 파일 목록을 먼저 볼 수 있다).
+
+- 설치 없이 한 번만 쓰기: `uvx --from "huggingface_hub==2.0.0" hf download …` (아래 예시가 이 형태다)
+- 계속 쓰기: `uv tool install "huggingface_hub==2.0.0"`로 설치한 뒤 `hf download …`
 
 hf CLI 2.x에서는 **패턴마다 `--include`를 따로** 붙인다. `--include a b`처럼 쓰면 두 번째부터는 파일 이름으로 해석되어 일부만 받는다.
 
@@ -38,7 +43,7 @@ hf CLI 2.x에서는 **패턴마다 `--include`를 따로** 붙인다. `--include
 ML_DIR="$ZG_DATA_DIR/ml"
 
 # 기반 모델: safetensors만 받는다(pytorch_model.bin은 pickle이라 받지 않는다. 있으면 학습 스크립트가 거부한다)
-hf download beomi/KcELECTRA-base \
+uvx --from "huggingface_hub==2.0.0" hf download beomi/KcELECTRA-base \
   --revision 681201a097b8120e6dd2a2e63a3e13d338736f88 \
   --include config.json \
   --include model.safetensors \
@@ -48,7 +53,7 @@ hf download beomi/KcELECTRA-base \
   --local-dir "$ML_DIR/base/kcelectra-base"
 
 # 학습 데이터: K-HATERS v2
-hf download humane-lab/K-HATERS --repo-type dataset \
+uvx --from "huggingface_hub==2.0.0" hf download humane-lab/K-HATERS --repo-type dataset \
   --revision b96dc29e056eda8e658d740444b8baf95e226cee \
   --include train_v2.jsonl \
   --include val_v2.jsonl \
@@ -80,11 +85,12 @@ uv run python -m zg_stage1.train
 - 기본값: 최대 3 epoch, 배치 32, 학습률 5e-5(선형 워밍업 6% 뒤 선형 감쇠), max_length 128, 시드 20261011, 장치 auto(MPS가 되면 MPS).
 - 길이가 비슷한 문장끼리 배치를 만들어 패딩 낭비를 줄인다.
 - epoch마다 검증 AUC를 재고 **가장 높은 epoch만** fp32 safetensors로 남긴다. 최고치를 넘지 못한 epoch가 연속 2번 나오면 멈춘다(`--early-stop-patience`).
-- 출력 디렉터리(`--out-dir`, 기본 `$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>`)가 **이미 있으면 거부**한다. 앞선 결과를 덮어쓰지 않기 위해서다.
+- 출력 디렉터리(`--out-dir`, 기본 `$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>`)가 **이미 있거나 저장소 안이면 거부**한다. 앞선 결과를 덮어쓰지 않고, 가중치가 실수로 커밋되지 않게 하기 위해서다.
+- 최고 epoch는 출력 디렉터리 안의 임시 하위 디렉터리에 먼저 저장한 뒤 옮겨 넣는다. 저장 중에 끊겨도 반쯤 쓴 가중치가 남지 않는다. 저장 직후에는 토크나이저를 다시 불러와 학습 중인 것과 같은 토큰을 내는지 확인한다.
 - 로그에는 진행 상황과 지표만 찍고 데이터 원문은 찍지 않는다.
 - 빠른 확인(스모크): `uv run python -m zg_stage1.train --max-steps 50 --epochs 1 --out-dir <임시 위치>`
 
-**걸리는 시간(맥 미니 M4 Pro, MPS, 2026-10-12 측정)**: 약 2.6스텝/s(배치 32)였다. epoch당 5,381스텝이라 3 epoch(16,143스텝)는 학습만 **약 1시간 45분**이고, epoch마다 검증·저장에 약 20초가 더 든다. 다른 작업이 GPU를 쓰면 더 느려진다. 진행 로그의 `남은예상`을 본다.
+**걸리는 시간(맥 미니 M4 Pro, MPS, 2026-10-12 실측)**: 약 2.57스텝/s(배치 32)다. epoch당 5,380스텝이라 3 epoch는 16,140스텝이고, 실제 전체 학습은 검증·저장을 포함해 **104.8분**이 걸렸다(epoch마다 검증 약 16~23초). 다른 작업이 GPU를 쓰면 더 느려진다. 진행 로그의 `남은예상`을 본다. 결과는 [1차 분류기 학습 결과](../../docs/ml/stage1-classifier-results.md)에 정리했다.
 
 출력 파일:
 
@@ -131,7 +137,7 @@ CPU에서 돌고(워커와 같은 조건), 결과를 모델 디렉터리의 `eva
 | K-HATERS test(1만 건) | AUC, F1@0.5, 임계값 0.01·0.02·0.05·0.1·0.2·0.3·0.5별 유해 재현율·2차 전달율(2차로 보내는 비율)·정밀도, 원래 라벨별 표시 비율 |
 | K-HATERS 회귀 표본 400건 | 라벨별 100건, 시드 20261011. 스파이크의 kanana 측정과 같은 표본이다([스펙 §13](../../docs/superpowers/specs/2026-10-11-zzirit-guard-design.md)) |
 | 채팅 회귀 72문장 | 문장별 점수(**id로만** 표시), 범주별 재현율(임계값 0.05) |
-| CPU 처리량 | 16건 묶음, max_length 128, 고정 표본(채팅 72문장 × 20) |
+| CPU 처리량 | 16건 묶음, max_length 128, 고정 표본(채팅 72문장 × 20). **다른 작업이 없는 상태**(학습·2차 워커·무거운 앱을 끈 상태)에서 잰 값만 비교한다 |
 | 임계값 선택(참고용) | 검증셋에서 유해 재현율 0.97 이상을 지키는 가장 큰 임계값 |
 
 평가는 약 1~2분 걸린다. 빠른 확인은 `--limit 500`(test·검증 앞 500줄)을 준다.
