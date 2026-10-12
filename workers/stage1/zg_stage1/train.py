@@ -371,7 +371,7 @@ class TrainingSession:
         metrics = self.validate()
         is_best = self.progress.record_validation(epoch, metrics["auc"])
         if is_best:
-            modeling.save_classifier(self.model, self.tokenizer, modeling.copy_state_to_cpu(self.model), self.paths.output_directory)
+            self.save_best_model()
         self.record_epoch(epoch, mean_loss, metrics, is_best, time.perf_counter() - started_clock)
         at_threshold = metrics["at_stage1_threshold"]
         print(
@@ -380,6 +380,11 @@ class TrainingSession:
             f"{' (최고, 저장함)' if is_best else ''}",
             flush=True,
         )
+
+    def save_best_model(self) -> None:
+        """현재 가중치를 저장하고, 저장한 토크나이저가 메모리의 것과 같은 토큰을 내는지 다시 불러와 확인한다."""
+        modeling.save_classifier(self.model, self.tokenizer, modeling.copy_state_to_cpu(self.model), self.paths.output_directory)
+        modeling.verify_saved_tokenizer_round_trip(self.tokenizer, self.paths.output_directory, self.arguments.max_length)
 
     def record_epoch(self, epoch: int, mean_loss: float, metrics: dict, is_best: bool, validation_seconds: float) -> None:
         """epoch 결과를 카드에 덧붙이고 최고 epoch 정보를 갱신해 저장한다."""

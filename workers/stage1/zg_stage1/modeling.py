@@ -42,6 +42,16 @@ INPUT_FORMAT_DESCRIPTION = "[CLS] 문장 [SEP] — 저장한 tokenizer.json의 p
 # 토크나이저가 특수 토큰을 붙이는지 확인할 때 쓰는 아주 짧은 문장(데이터 원문이 아니다).
 SPECIAL_TOKEN_PROBE_TEXT = "가"
 
+# 저장한 토크나이저를 다시 불러와 비교할 고정 탐침 문장(데이터 원문이 아니다).
+# 보통 문장·빈 문장·숫자와 영문 섞임·max_length(128)보다 긴 문장을 넣어 잘림까지 같게 나오는지 본다.
+ROUND_TRIP_PROBE_TEXTS: tuple[str, ...] = (
+    "가",
+    "안녕하세요 반갑습니다",
+    "",
+    "ㅋㅋㅋ 진짜?? 123 abc",
+    "가나다라마바사 " * 40,
+)
+
 
 def resolve_device(requested_device: str) -> str:
     """사용할 장치를 정한다. auto면 MPS가 되면 mps, 아니면 cpu다.
@@ -110,6 +120,24 @@ def load_trained_tokenizer(model_directory: Path) -> PreTrainedTokenizerBase:
     tokenizer = load_tokenizer(model_directory)
     ensure_tokenizer_wraps_special_tokens(tokenizer)
     return tokenizer
+
+
+def verify_saved_tokenizer_round_trip(tokenizer: PreTrainedTokenizerBase, model_directory: Path, max_length: int) -> None:
+    """저장한 토크나이저를 다시 불러와, 고정 탐침 문장의 토큰 ID가 메모리의 토크나이저와 같은지 확인한다.
+
+    왜: 워커는 저장된 토크나이저만 쓴다. 저장 과정에서 [CLS]·[SEP] 규칙이나 어휘가 바뀌면 학습 때와 다른 입력으로
+    점수를 내게 되는데, 겉으로는 드러나지 않는다. 그래서 저장 직후에 확인하고, 다르면 학습을 멈춘다.
+    max_length: 학습 때의 최대 토큰 수(잘림 동작까지 같은지 본다).
+    """
+    reloaded = load_trained_tokenizer(model_directory)
+    expected = encode_texts(tokenizer, ROUND_TRIP_PROBE_TEXTS, max_length)
+    actual = encode_texts(reloaded, ROUND_TRIP_PROBE_TEXTS, max_length)
+    mismatched = [index for index, (left, right) in enumerate(zip(expected, actual, strict=True)) if left != right]
+    if mismatched:
+        raise ModelFormatError(
+            f"다시 불러온 토크나이저의 토큰이 학습 중인 토크나이저와 다릅니다(탐침 {mismatched}번). "
+            "transformers·tokenizers 버전이 uv.lock과 같은지 확인하고 다시 학습하세요."
+        )
 
 
 def ensure_binary_classifier(model: PreTrainedModel) -> None:
