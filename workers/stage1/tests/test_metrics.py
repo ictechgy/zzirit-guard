@@ -43,7 +43,7 @@ def test_auc_rejects_length_mismatch() -> None:
 
 
 def test_summarize_at_threshold_counts() -> None:
-    """임계값 0.5: 유해 3건 중 2건 표시(재현율 2/3), 표시 3건 중 유해 2건(정밀도 2/3), 통과율 3/5."""
+    """임계값 0.5: 유해 3건 중 2건 표시(재현율 2/3), 표시 3건 중 유해 2건(정밀도 2/3), 2차 전달율 3/5."""
     summary = summarize_at_threshold([0.9, 0.6, 0.1, 0.7, 0.2], [1, 1, 1, 0, 0], 0.5)
     assert summary["toxic_recall"] == pytest.approx(0.6667)
     assert summary["precision"] == pytest.approx(0.6667)
@@ -64,7 +64,7 @@ def test_summarize_with_nothing_flagged_has_zero_precision() -> None:
 
 
 def test_threshold_table_keeps_order_and_is_monotonic() -> None:
-    """임계값 표는 주어진 순서를 지키고, 임계값이 커질수록 재현율·통과율이 줄거나 같다."""
+    """임계값 표는 주어진 순서를 지키고, 임계값이 커질수록 재현율·2차 전달율이 줄거나 같다."""
     scores = [0.005, 0.015, 0.04, 0.08, 0.15, 0.25, 0.4, 0.6, 0.03, 0.9]
     labels = [0, 1, 0, 1, 0, 1, 1, 1, 0, 1]
     table = build_threshold_table(scores, labels)

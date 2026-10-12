@@ -3,7 +3,7 @@
 사용 예: uv run python -m zg_stage1.evaluate --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>"
 기본 장치는 CPU다. 워커가 CPU로 돌기 때문이다(스펙 §4: GPU는 2차 kanana가 쓴다).
 보고 내용:
-  - K-HATERS test: AUC, F1@0.5, 임계값 표(유해 재현율·통과율·정밀도), 원래 라벨별 표시 비율
+  - K-HATERS test: AUC, F1@0.5, 임계값 표(유해 재현율·2차 전달율·정밀도), 원래 라벨별 표시 비율
   - K-HATERS 회귀 표본 400건(스펙 §13, 라벨별 100건·시드 20261011): AUC와 임계값 표
   - 채팅 회귀 72문장: 문장별 점수(id로만 표시), 범주별 재현율(임계값 0.05)
   - CPU 처리량: 16건 묶음, max_length 128, 고정 표본(채팅 72문장 × 20)
@@ -83,6 +83,9 @@ THROUGHPUT_BATCH_SIZE = 16
 
 # 처리량 측정 max_length: 학습 기본값과 같게 해서 워커 조건을 재현한다.
 THROUGHPUT_MAX_LENGTH = 128
+
+# 처리량 결과에 붙이는 주의 문구. 학습·2차 워커·다른 앱이 CPU를 쓰면 값이 낮게 나와 용량 판단을 그르친다.
+THROUGHPUT_IDLE_NOTE = "처리량은 다른 작업이 없는 상태(학습·2차 워커·무거운 앱을 끈 상태)에서 잰 값만 비교한다."
 
 # 처리량 표본: 채팅 72문장을 이만큼 반복한다(72 × 20 = 1,440건, 스파이크와 같은 조건).
 THROUGHPUT_REPEAT = 20
@@ -448,7 +451,7 @@ def format_chat_markdown(report: dict) -> list[str]:
     lines = [
         "",
         f"### 채팅 회귀 {chat['count']}문장(임계값 {chat['threshold']}): AUC {chat['auc']:.4f}, "
-        f"재현율 {chat['at_threshold']['toxic_recall']:.4f}, 통과율 {chat['at_threshold']['forward_rate']:.4f}",
+        f"재현율 {chat['at_threshold']['toxic_recall']:.4f}, 2차 전달율 {chat['at_threshold']['forward_rate']:.4f}",
         "",
         "| 범주 | 문장 | 유해 | 재현율 | 표시 비율 |",
         "|---|---|---|---|---|",
@@ -476,6 +479,7 @@ def format_tail_markdown(report: dict, selection_markdown: str) -> list[str]:
         f"- {throughput['messages']}건, {throughput['batch_size']}건 묶음, max_length {throughput['max_length']}, "
         f"스레드 {throughput['torch_threads']}: **{throughput['messages_per_second']}건/s** "
         f"(묶음 중앙값 {throughput['median_batch_ms']}ms, p95 {throughput['p95_batch_ms']}ms)",
+        f"- {THROUGHPUT_IDLE_NOTE}",
     ]
 
 

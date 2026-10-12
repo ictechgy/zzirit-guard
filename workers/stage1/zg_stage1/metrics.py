@@ -1,8 +1,8 @@
-"""이진 분류 지표: ROC AUC, 임계값별 재현율·통과율·정밀도·F1, 임계값 표.
+"""이진 분류 지표: ROC AUC, 임계값별 재현율·2차 전달율·정밀도·F1, 임계값 표.
 
 scikit-learn을 쓰지 않는 이유: 필요한 지표가 몇 개뿐이라 직접 쓰는 편이 운영자 설치를 가볍게 한다.
 대신 알려진 예제로 단위 테스트한다(tests/test_metrics.py).
-점수(score)는 '유해일 확률'이고, 점수가 임계값 이상이면 '표시(2차로 보냄)'로 본다(스펙 §5.2 ④의 '0.05 이상').
+점수(score)는 '유해일 확률'이고, 점수가 임계값 이상이면 '표시(2차로 전달)'로 본다(스펙 §5.2 ④의 '0.05 이상').
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def count_confusion(scores: Sequence[float], labels: Sequence[int], threshold: f
 
 
 def summarize_at_threshold(scores: Sequence[float], labels: Sequence[int], threshold: float) -> dict:
-    """한 임계값에서의 유해 재현율·통과율(2차로 보내는 비율)·정밀도·F1을 계산한다.
+    """한 임계값에서의 유해 재현율·2차 전달율(forward_rate: 2차로 보내는 비율)·정밀도·F1을 계산한다.
 
     반환 키: threshold, toxic_recall, forward_rate, precision, f1, flagged_count, toxic_count, total_count.
     """

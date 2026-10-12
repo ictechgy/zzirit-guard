@@ -85,9 +85,9 @@ def select_threshold_for_recall(scores: Sequence[float], labels: Sequence[int], 
 
     원리: 유해 점수를 내림차순으로 놓고, 필요한 건수 k = ceil(목표 × 유해 수)번째 점수를 임계값으로 쓰면
     점수 ≥ 임계값인 유해가 k개 이상이 된다. 이보다 큰 값은 k개를 채우지 못한다.
-    보고하는 임계값은 소수 THRESHOLD_DECIMALS자리로 내림하고, 재현율·통과율·정밀도는 그 내림한 값에서 계산한다.
+    보고하는 임계값은 소수 THRESHOLD_DECIMALS자리로 내림하고, 재현율·2차 전달율·정밀도는 그 내림한 값에서 계산한다.
     그래서 보고한 숫자를 그대로 설정에 넣어도 같은 결과가 나온다(반올림해 올리면 유해를 놓칠 수 있다).
-    반환: ThresholdSelection(고른 값과 그때의 재현율·통과율·정밀도, 스펙 기본값 0.05일 때의 값).
+    반환: ThresholdSelection(고른 값과 그때의 재현율·2차 전달율·정밀도, 스펙 기본값 0.05일 때의 값).
     """
     validate_target_recall(target_recall)
     toxic_scores = collect_toxic_scores_descending(scores, labels)
@@ -119,8 +119,9 @@ def format_selection_markdown(selection: ThresholdSelection) -> str:
     return "\n".join(
         [
             f"- 재현율 목표 {selection.target_recall:.2f} → 임계값 **{selection.threshold:.{THRESHOLD_DECIMALS}f}**(내림) "
-            f"(재현율 {selection.achieved_recall:.4f}, 통과율 {selection.forward_rate:.4f}, 정밀도 {selection.precision:.4f})",
-            f"- 스펙 기본값 {selection.spec_default_threshold} → 재현율 {selection.spec_default_recall:.4f}, 통과율 {selection.spec_default_forward_rate:.4f}",
+            f"(재현율 {selection.achieved_recall:.4f}, 2차 전달율 {selection.forward_rate:.4f}, 정밀도 {selection.precision:.4f})",
+            f"- 스펙 기본값 {selection.spec_default_threshold} → 재현율 {selection.spec_default_recall:.4f}, "
+            f"2차 전달율 {selection.spec_default_forward_rate:.4f}",
             "- 참고용이다. 운영 임계값은 스펙 §5.2 ④의 0.05를 기본으로 두고, 바꾸는 결정은 사람이 한다.",
         ]
     )
@@ -128,7 +129,7 @@ def format_selection_markdown(selection: ThresholdSelection) -> str:
 
 def format_threshold_table_markdown(table: list[dict]) -> str:
     """임계값 표(build_threshold_table 결과)를 Markdown 표로 만든다."""
-    lines = ["| 임계값 | 유해 재현율 | 통과율(2차로 보냄) | 정밀도 |", "|---|---|---|---|"]
+    lines = ["| 임계값 | 유해 재현율 | 2차 전달율 | 정밀도 |", "|---|---|---|---|"]
     for row in table:
         lines.append(f"| {row['threshold']} | {row['toxic_recall']:.4f} | {row['forward_rate']:.4f} | {row['precision']:.4f} |")
     return "\n".join(lines)

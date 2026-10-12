@@ -9,6 +9,7 @@ from zg_stage1.evaluate import (
     EvaluationInputs,
     EvaluationScores,
     build_scores_payload,
+    format_report_markdown,
     summarize_by_label,
     summarize_chat,
     summarize_chat_group,
@@ -69,3 +70,30 @@ def test_validation_scores_file_keeps_full_precision() -> None:
     payload = build_scores_payload(report, inputs, scores)
     assert payload["scores"] == [0.12345678912345, 0.98765432198765]
     assert payload["binary_labels"] == [0, 1]
+
+
+def test_report_markdown_uses_forwarding_wording_and_idle_note() -> None:
+    """평가 요약은 '2차 전달율'이라고 쓰고, 처리량은 다른 작업이 없는 상태에서 재야 한다고 알린다."""
+    table_row = {"threshold": 0.5, "toxic_recall": 1.0, "forward_rate": 0.5, "precision": 1.0}
+    chat = {"count": 1, "threshold": 0.05, "auc": 1.0, "at_threshold": {"toxic_recall": 1.0, "forward_rate": 1.0}, "by_group": {}, "sentences": []}
+    report = {
+        "model": {"directory_name": "run", "card_status": "completed", "chosen_epoch": 1, "best_validation_auc": 0.9},
+        "settings": {"device": "cpu", "limit": None, "max_length": 128},
+        "khaters_test": {"count": 2, "auc": 1.0, "at_0_5": {"f1": 1.0, "precision": 1.0, "toxic_recall": 1.0}, "threshold_table": [table_row], "by_label": {}},
+        "validation": {"count": 2, "auc": 1.0},
+        "khaters_regression_sample": {"count": 2, "per_label": 100, "auc": 1.0, "threshold_table": [table_row]},
+        "chat_regression": chat,
+        "throughput": {
+            "messages": 16,
+            "batch_size": 16,
+            "max_length": 128,
+            "torch_threads": 8,
+            "messages_per_second": 500.0,
+            "median_batch_ms": 1.0,
+            "p95_batch_ms": 2.0,
+        },
+    }
+    markdown = format_report_markdown(report, "- 선택 결과")
+    assert "2차 전달율" in markdown
+    assert "통과율" not in markdown
+    assert "다른 작업이 없는" in markdown

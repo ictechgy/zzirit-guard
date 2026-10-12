@@ -9,7 +9,14 @@ import pytest
 
 from zg_stage1.errors import DatasetFormatError, MetricError
 from zg_stage1.metrics import summarize_at_threshold
-from zg_stage1.thresholds import SPEC_STAGE1_THRESHOLD, build_argument_parser, format_selection_markdown, main, select_threshold_for_recall
+from zg_stage1.thresholds import (
+    SPEC_STAGE1_THRESHOLD,
+    build_argument_parser,
+    format_selection_markdown,
+    format_threshold_table_markdown,
+    main,
+    select_threshold_for_recall,
+)
 
 # 유해 5건(0.9·0.8·0.7·0.6·0.1)과 정상 3건(0.65·0.3·0.02)으로 만든 작은 예제.
 EXAMPLE_SCORES = [0.9, 0.8, 0.7, 0.6, 0.1, 0.65, 0.3, 0.02]
@@ -54,7 +61,7 @@ def test_ties_keep_target() -> None:
 
 
 def test_reports_spec_default_alongside() -> None:
-    """스펙 기본값 0.05일 때의 재현율·통과율을 함께 보고하고, 결과는 참고용으로 표시한다."""
+    """스펙 기본값 0.05일 때의 재현율·2차 전달율을 함께 보고하고, 결과는 참고용으로 표시한다."""
     selection = select_threshold_for_recall(EXAMPLE_SCORES, EXAMPLE_LABELS, target_recall=0.8)
     assert selection.spec_default_threshold == SPEC_STAGE1_THRESHOLD
     assert selection.spec_default_recall == pytest.approx(1.0)
@@ -133,3 +140,11 @@ def test_markdown_shows_reported_threshold_without_rounding_up() -> None:
     markdown = format_selection_markdown(selection)
     assert "0.330388" in markdown
     assert "0.3304" not in markdown
+
+
+def test_markdown_uses_forwarding_rate_wording() -> None:
+    """요약은 '2차 전달율'이라고 쓴다. '통과율'은 스펙의 판정 pass(문제없음)와 헷갈린다."""
+    selection = select_threshold_for_recall(EXAMPLE_SCORES, EXAMPLE_LABELS, target_recall=0.8)
+    markdown = format_selection_markdown(selection) + format_threshold_table_markdown([summarize_at_threshold(EXAMPLE_SCORES, EXAMPLE_LABELS, 0.5)])
+    assert "2차 전달율" in markdown
+    assert "통과율" not in markdown
