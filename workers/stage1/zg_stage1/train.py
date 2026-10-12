@@ -125,6 +125,31 @@ class EncodedSplit:
         return [len(tokens) for tokens in self.token_lists]
 
 
+@dataclass(frozen=True)
+class ValidationOutcome:
+    """epoch 검증 결과. 최고 epoch·조기 종료 비교는 unrounded_auc로 하고, 카드·로그에는 display_metrics(4자리)를 쓴다.
+
+    왜 나누나: 4자리로 반올림한 값끼리 비교하면 실제로 나아진 epoch를 '같음'으로 보거나 작은 하락을 놓친다.
+    """
+
+    unrounded_auc: float
+    display_metrics: dict
+
+
+def summarize_validation(scores: Sequence[float], labels: Sequence[int]) -> ValidationOutcome:
+    """검증 점수로 AUC(반올림 안 함)와 표시용 지표(AUC 4자리, 임계값 0.5·0.05에서의 지표)를 만든다."""
+    unrounded_auc = compute_roc_auc(scores, labels)
+    return ValidationOutcome(
+        unrounded_auc=unrounded_auc,
+        display_metrics={
+            "auc": round(unrounded_auc, METRIC_DECIMALS),
+            "auc_unrounded": unrounded_auc,
+            "at_0_5": summarize_at_threshold(scores, labels, STANDARD_THRESHOLD),
+            "at_stage1_threshold": summarize_at_threshold(scores, labels, SPEC_STAGE1_THRESHOLD),
+        },
+    )
+
+
 @dataclass
 class TrainingProgress:
     """학습 진행 상태: 스텝 예산과 지금까지의 스텝, 최고 검증 AUC와 그 epoch, 개선 없는 epoch 수."""
@@ -354,25 +379,21 @@ class TrainingSession:
             flush=True,
         )
 
-    def validate(self) -> dict:
-        """검증셋 AUC와 임계값 0.5·0.05(스펙 기본)에서의 지표를 계산한다."""
+    def validate(self) -> ValidationOutcome:
+        """검증셋 점수를 계산해 비교용(반올림 안 함)·표시용 지표로 요약한다."""
         scores = modeling.predict_toxic_probabilities(
             self.model, self.validation_split.token_lists, self.tokenizer.pad_token_id, self.device, VALIDATION_BATCH_SIZE
         )
-        labels = self.validation_split.labels
-        return {
-            "auc": round(compute_roc_auc(scores, labels), METRIC_DECIMALS),
-            "at_0_5": summarize_at_threshold(scores, labels, STANDARD_THRESHOLD),
-            "at_stage1_threshold": summarize_at_threshold(scores, labels, SPEC_STAGE1_THRESHOLD),
-        }
+        return summarize_validation(scores, self.validation_split.labels)
 
     def finish_epoch(self, epoch: int, mean_loss: float) -> None:
         """검증하고, 최고 AUC면 가중치를 저장한 뒤 카드에 epoch 결과를 남긴다(저장 → 카드 순서라 카드가 앞서지 않는다)."""
         started_clock = time.perf_counter()
-        metrics = self.validate()
-        is_best = self.progress.record_validation(epoch, metrics["auc"])
+        outcome = self.validate()
+        is_best = self.progress.record_validation(epoch, outcome.unrounded_auc)
         if is_best:
             self.save_best_model()
+        metrics = outcome.display_metrics
         self.record_epoch(epoch, mean_loss, metrics, is_best, time.perf_counter() - started_clock)
         at_threshold = metrics["at_stage1_threshold"]
         print(
@@ -400,7 +421,12 @@ class TrainingSession:
                 "finished_at": utc_timestamp(),
             }
         )
-        self.model_card.update(chosen_epoch=self.progress.best_epoch, best_validation_auc=self.progress.best_auc)
+        best_auc = self.progress.best_auc
+        self.model_card.update(
+            chosen_epoch=self.progress.best_epoch,
+            best_validation_auc=None if best_auc is None else round(best_auc, METRIC_DECIMALS),
+            best_validation_auc_unrounded=best_auc,
+        )
         self.write_model_card()
 
     def finalize(self, stop_reason: str) -> None:
