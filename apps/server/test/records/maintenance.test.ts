@@ -225,6 +225,28 @@ describe("runBackup", () => {
     expect(existsSync(join(directory, "other.partial"))).toBe(true);
   });
 
+  it("겹쳐 돈 백업이 진행 중인 다른 백업의 부분 파일(.partial)을 지우지 않는다(S15, M19)", async () => {
+    const directory = makeTemporaryDirectory();
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let calls = 0;
+    // 첫 백업은 부분 파일을 쓴 채 멈춰 있고, 그사이 두 번째 백업이 시작해 끝난다.
+    const slowDatabase = {
+      backup: async (path: string) => {
+        calls += 1;
+        writeFileSync(path, "backup");
+        if (calls === 1) await firstGate;
+      },
+    } as unknown as Parameters<typeof runBackup>[0];
+    const first = runBackup(slowDatabase, directory, () => Date.UTC(2026, 9, 11, 0, 0, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(runBackup(slowDatabase, directory, () => Date.UTC(2026, 9, 11, 0, 0, 1))).resolves.toMatch(/000001\.sqlite$/);
+    releaseFirst();
+    const firstPath = await first;
+    expect(existsSync(firstPath)).toBe(true);
+    expect(readdirSync(directory).filter((name) => name.endsWith(".partial"))).toEqual([]);
+  });
+
   it("방금 만든 백업은 보존 개수 정리에서 지우지 않는다(미래 시각 백업이 있어도)", async () => {
     const directory = makeTemporaryDirectory();
     writeFileSync(join(directory, "zzirit-guard-20990101-000000.sqlite"), "");

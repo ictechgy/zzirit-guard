@@ -42,6 +42,12 @@ const STALE_PARTIAL_PATTERN = /^zzirit-guard-\d{8}-\d{6}\.sqlite\.partial$/;
 const BACKUP_DIRECTORY_MODE = 0o700;
 /** 백업 파일 권한(소유자만 읽기·쓰기). 이유는 BACKUP_DIRECTORY_MODE와 같다. */
 const BACKUP_FILE_MODE = 0o600;
+/**
+ * 지금 쓰고 있는 임시 백업 파일 경로들(S15, M19).
+ * 왜: 백업이 겹쳐 돌면 나중 백업의 "죽은 임시 파일 정리"가 앞선 백업이 쓰는 중인 파일을 지워 그 백업이 실패한다.
+ * 이 프로세스가 쓰는 중인 파일은 정리 대상에서 뺀다(앱은 주기 작업을 runOneAtATime으로도 막는다).
+ */
+const inProgressPartialPaths = new Set<string>();
 
 /**
  * 보관 기한이 지난 기록을 지운다(매일 실행).
@@ -126,6 +132,7 @@ export async function runBackup(database: Database, backupDirectory: string, clo
  */
 async function writeBackupFile(database: Database, finalPath: string): Promise<void> {
   const partialPath = `${finalPath}${PARTIAL_SUFFIX}`;
+  inProgressPartialPaths.add(partialPath);
   try {
     await database.backup(partialPath);
     // umask에 따라 넓게 열릴 수 있으므로 이름을 바꾸기 전에 소유자 전용으로 고친다.
@@ -134,6 +141,8 @@ async function writeBackupFile(database: Database, finalPath: string): Promise<v
   } catch (error) {
     rmSync(partialPath, { force: true });
     throw error;
+  } finally {
+    inProgressPartialPaths.delete(partialPath);
   }
 }
 
@@ -147,13 +156,13 @@ function prepareBackupDirectory(backupDirectory: string): void {
 }
 
 /**
- * 이전 실행이 백업 도중 죽어 남긴 임시 파일을 지운다.
+ * 이전 실행이 백업 도중 죽어 남긴 임시 파일을 지운다. 지금 다른 백업이 쓰고 있는 임시 파일은 건드리지 않는다(S15).
  * 왜: 임시 파일에도 원문이 들어 있는데 BACKUP_PATTERN에 맞지 않아 보존 개수 정리에 걸리지 않으므로, 그대로 두면 보관 기한 없이 남는다(F5).
  * @param backupDirectory 백업 디렉터리
  */
 function removeStalePartials(backupDirectory: string): void {
   readdirSync(backupDirectory)
-    .filter((name) => STALE_PARTIAL_PATTERN.test(name))
+    .filter((name) => STALE_PARTIAL_PATTERN.test(name) && !inProgressPartialPaths.has(join(backupDirectory, name)))
     .forEach((name) => rmSync(join(backupDirectory, name), { force: true }));
 }
 

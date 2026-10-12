@@ -29,6 +29,7 @@ import { runBackup, runRetention } from "./records/maintenance.js";
 import { createMinuteStats } from "./records/minuteStats.js";
 import { createSettingsRepository } from "./records/settingsRepository.js";
 import { createVerdictRepository } from "./records/verdictRepository.js";
+import { runOneAtATime } from "./runOneAtATime.js";
 import { createTokenCipher } from "./security/tokenCipher.js";
 import { systemClock, type Clock } from "./time.js";
 
@@ -303,14 +304,27 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     await recheckSessionRoles({ sessions, roleVerifier, logger, onRevoked: handleRevokedSessions });
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
+  /**
+   * 오래 걸릴 수 있는 주기 작업을 한 번에 하나만 돌게 감싼다(S15). 건너뛴 차례는 정보 로그로만 남긴다.
+   * @param name 로그에 쓸 작업 이름
+   * @param task 감쌀 비동기 작업
+   */
+  const oneAtATime = (name: string, task: () => Promise<void>): (() => Promise<void>) =>
+    runOneAtATime(task, () => logger.info("이전 실행이 아직 끝나지 않아 이번 차례를 건너뜁니다", { task: name }));
+  /** 토큰 선제 갱신(겹침 방지). */
+  const refreshTokenOnce = oneAtATime("토큰 선제 갱신", refreshTokenQuietly);
+  /** 역할 재확인과 만료 세션 소켓 종료(겹침 방지). */
+  const recheckRolesOnce = oneAtATime("역할 재확인", recheckRolesAndCloseExpired);
+  /** 보관 기한 정리와 백업(겹침 방지). 첫 실행 타이머와 하루 주기 타이머가 이 함수 하나를 함께 써야 서로 겹치지 않는다. */
+  const runMaintenanceOnce = oneAtATime("정리·백업", runMaintenance);
   /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
   const startTimers = (): void => {
     intervalTimers.push(setInterval(guarded("상태 방송 실패", broadcastStatus), STATUS_BROADCAST_MS));
-    intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenQuietly), INTERVALS.tokenCheckMs));
+    intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenOnce), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
-    intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesAndCloseExpired), INTERVALS.roleRecheckMs));
-    timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenance), INTERVALS.firstMaintenanceDelayMs));
-    intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenance), INTERVALS.maintenanceMs));
+    intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesOnce), INTERVALS.roleRecheckMs));
+    timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.firstMaintenanceDelayMs));
+    intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.maintenanceMs));
   };
   /** 등록한 모든 타이머를 해제하고 목록을 비운다. */
   const clearTimers = (): void => {
