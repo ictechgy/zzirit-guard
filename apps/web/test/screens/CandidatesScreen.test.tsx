@@ -204,10 +204,20 @@ describe("CandidatesScreen", () => {
     expect(actions.temporaryRestrict).toHaveBeenCalledWith(expect.objectContaining({ senderChannelId: "bad" }));
   });
 
-  it("카드에는 메시지를 최대 3건만 보여 준다", () => {
+  it("카드에는 처음에 메시지를 3건만 보여 주고, '더 보기 (N건)'을 누르면 그 사람의 대기 중 판정을 모두 보여 준다(W2, X34)", async () => {
     renderScreen([verdict(1), verdict(2), verdict(3), verdict(4), verdict(5)]);
     expect(screen.getByText("5건")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ })).toHaveLength(3);
+    await userEvent.click(screen.getByRole("button", { name: "더 보기 (2건)" }));
+    expect(screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ })).toHaveLength(5);
+    expect(screen.getByText("나쁜 말 5")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "접기" }));
+    expect(screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ })).toHaveLength(3);
+  });
+
+  it("3건 이하면 '더 보기'를 두지 않는다", () => {
+    renderScreen([verdict(1), verdict(2), verdict(3)]);
+    expect(screen.queryByRole("button", { name: /더 보기/ })).toBeNull();
   });
 
   it("동기로 던지는 동작도 오류를 보여 주고 버튼을 풀며 다시 누를 수 있다", async () => {
@@ -420,9 +430,12 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     expect(hide).toHaveBeenCalledTimes(2);
   });
 
-  it("시간 초과된 임시 제한은 그 판정의 상태가 바뀌면(서버가 처리했으면) 60초를 기다리지 않고 풀린다", async () => {
+  it.each([
+    ["성공한", async (): Promise<string | null> => null],
+    ["시간 초과된", async (): Promise<string | null> => { throw timeoutError(); }],
+  ])("%s 임시 제한은 첫 판정의 상태가 바뀌어도 60초 동안 그 사람의 임시 제한을 다시 보내지 않는다(W2, M20)", async (_label, outcome) => {
     vi.useFakeTimers();
-    const temporaryRestrict = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
+    const temporaryRestrict = vi.fn(outcome);
     const actions = fakeActions({ temporaryRestrict });
     const screenFor = (verdicts: VerdictDto[]) => <CandidatesScreen me={chatManager} status={status} sections={buildSections(verdicts, NOW)} realtimeConnected actions={actions} onReload={vi.fn()} {...noNotice} />;
     const { rerender } = render(screenFor([verdict(1), verdict(2)]));
@@ -430,9 +443,13 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     fireEvent.click(restrictButton());
     await act(async () => undefined);
     expect(restrictButton().disabled).toBe(true);
-    rerender(screenFor([verdict(1), verdict(2)]));
-    expect(restrictButton().disabled).toBe(true);
+    // 서버가 첫 판정만 restricted로 바꾸므로, 남은 판정 때문에 묶음 카드는 그대로 남는다.
     rerender(screenFor([verdict(1, { status: "restricted" }), verdict(2)]));
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(restrictButton());
+    expect(temporaryRestrict).toHaveBeenCalledTimes(1);
+    expect(restrictButton().disabled).toBe(true);
+    act(() => vi.advanceTimersByTime(1));
     expect(restrictButton().disabled).toBe(false);
   });
 

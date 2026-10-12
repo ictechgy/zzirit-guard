@@ -1,4 +1,5 @@
 import type { Permission, VerdictDto } from "@zzirit-guard/shared";
+import { useState } from "react";
 import type { SenderGroup } from "../domain/candidates";
 import { formatClockTime } from "../domain/timeFormat";
 import { describeReason } from "../domain/verdictReason";
@@ -44,29 +45,42 @@ interface MessageRowProps {
   actions: CandidateActions;
 }
 
-/** 카드에 보여 줄 최근 메시지 수(스펙 6장). */
+/** 카드에 처음 보여 줄 최근 메시지 수(스펙 6장). 나머지는 '더 보기'로 펼친다(W2). */
 const VISIBLE_MESSAGES = 3;
 
-/** 한 사람의 후보 묶음 카드. 메시지별 숨기기·무시(또는 오판), 사람 단위 임시 제한. */
+/**
+ * 한 사람의 후보 묶음 카드. 메시지별 숨기기·무시(또는 오판), 사람 단위 임시 제한.
+ * 처음에는 최근 3건만 보이고, 넘치면 '더 보기 (N건)'으로 그 사람의 대기 중 판정을 모두 펼친다(W2, X34).
+ * 왜: 3건만 보이면 나머지 판정은 숨기기·무시할 방법이 없어 10분 창이 지날 때까지 남는다.
+ * 임시 제한은 성공·시간 초과 뒤 60초 동안 다시 보내지 않는다(shouldHoldAfterDone, W2·M20).
+ */
 export function CandidateGroupCard({ group, kind, permissions, run, lockedKeys, handledIds, actions }: CandidateGroupCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const canHide = permissions.includes("hide_message");
   const restrictKey = senderLockKey(group.senderChannelId);
   // 묶음의 판정이 모두 처리됐으면 임시 제한도 잠근다: 고정이 풀리면 사라질 묶음이다.
   const isGroupHandled = group.verdicts.every((verdict) => handledIds.has(verdict.id));
+  const hiddenCount = Math.max(0, group.verdicts.length - VISIBLE_MESSAGES);
+  const shownVerdicts = isExpanded ? group.verdicts : group.verdicts.slice(0, VISIBLE_MESSAGES);
   return (
     <article className={`card card-${kind}`}>
       <header className="card-header">
         <strong>{group.senderNickname}</strong>
         <span className="count">{group.verdicts.length}건</span>
-        <button type="button" aria-label={`${group.senderNickname} 임시 제한`} disabled={!permissions.includes("temporary_restrict") || lockedKeys.has(restrictKey) || isGroupHandled} onClick={() => run(restrictKey, () => actions.temporaryRestrict(group), group.verdicts[0]?.id)}>
+        <button type="button" aria-label={`${group.senderNickname} 임시 제한`} disabled={!permissions.includes("temporary_restrict") || lockedKeys.has(restrictKey) || isGroupHandled} onClick={() => run(restrictKey, () => actions.temporaryRestrict(group), undefined, true)}>
           임시 제한
         </button>
       </header>
       <ul className="messages">
-        {group.verdicts.slice(0, VISIBLE_MESSAGES).map((verdict) => (
+        {shownVerdicts.map((verdict) => (
           <MessageRow key={verdict.id} verdict={verdict} kind={kind} canHide={canHide} run={run} isLocked={lockedKeys.has(verdictLockKey(verdict.id))} isHandled={handledIds.has(verdict.id)} actions={actions} />
         ))}
       </ul>
+      {hiddenCount > 0 && (
+        <button type="button" className="more" aria-expanded={isExpanded} onClick={() => setIsExpanded((value) => !value)}>
+          {isExpanded ? "접기" : `더 보기 (${hiddenCount}건)`}
+        </button>
+      )}
     </article>
   );
 }

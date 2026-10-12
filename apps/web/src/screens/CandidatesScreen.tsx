@@ -29,9 +29,10 @@ export interface CandidateActions {
  * 동작 하나를 실행하고 결과(안내 또는 오류)를 화면에 남기는 함수.
  * lockKey가 같은 동작이 진행 중이면 실행하지 않는다(두 번 보내기 방지). 열쇠가 다른 동작은 서로 막지 않는다(F2).
  * watchedVerdictId를 주면 시간이 초과됐을 때 그 판정의 상태가 바뀔 때까지(최대 60초) 잠금을 붙잡는다(B19-7).
- * 자동 숨김 스위치에는 주지 않는다: 끄기(안전장치)는 늦더라도 바로 다시 누를 수 있어야 한다.
+ * shouldHoldAfterDone이 참이면 성공하거나 시간이 초과된 뒤 상태 변화와 관계없이 60초 동안 잠금을 붙잡는다(사람 단위 임시 제한, W2).
+ * 자동 숨김 스위치에는 둘 다 주지 않는다: 끄기(안전장치)는 늦더라도 바로 다시 누를 수 있어야 한다.
  */
-export type ActionRunner = (lockKey: string, task: () => Promise<string | null>, watchedVerdictId?: number) => void;
+export type ActionRunner = (lockKey: string, task: () => Promise<string | null>, watchedVerdictId?: number, shouldHoldAfterDone?: boolean) => void;
 
 /** 후보 화면 속성. */
 export interface CandidatesScreenProps {
@@ -94,24 +95,50 @@ interface RunnerContext {
  * @param context 결과 표시·다시 읽기·잠금·판정 상태 조회
  */
 function createRunner(context: RunnerContext): ActionRunner {
-  return (lockKey, task, watchedVerdictId) => {
+  return (lockKey, task, watchedVerdictId, shouldHoldAfterDone = false) => {
     if (!context.locks.tryLock(lockKey)) return;
     const statusAtStart = watchedVerdictId === undefined ? null : context.statusOf(watchedVerdictId);
     context.setFeedback(null);
     let isHeld = false;
     startTask(task).then(
-      (message) => context.setFeedback(message ? { kind: "ok", message } : null),
-      (error: unknown) => {
-        if (error instanceof ApiError && error.code === "timeout" && watchedVerdictId !== undefined) {
+      (message) => {
+        if (shouldHoldAfterDone) {
+          context.holds.holdFor(lockKey);
           isHeld = true;
-          context.holds.hold(lockKey, watchedVerdictId, statusAtStart);
         }
+        context.setFeedback(message ? { kind: "ok", message } : null);
+      },
+      (error: unknown) => {
+        isHeld = holdAfterTimeout(context, error, { lockKey, watchedVerdictId, statusAtStart, shouldHoldAfterDone });
         reportFailure(context, error, isHeld);
       },
     ).finally(() => {
       if (!isHeld) context.locks.unlock(lockKey);
     });
   };
+}
+
+/** 시간 초과 뒤 붙잡기에 필요한 실행 정보. 필드 뜻은 ActionRunner와 같다. */
+interface TimeoutHoldRequest {
+  lockKey: string;
+  watchedVerdictId: number | undefined;
+  statusAtStart: VerdictStatus | null;
+  shouldHoldAfterDone: boolean;
+}
+
+/**
+ * 시간이 초과됐으면 잠금을 붙잡는다(B19-7). 사람 단위 동작은 60초 고정으로, 판정을 지켜보는 동작은 그 판정 상태가 바뀔 때까지 붙잡는다.
+ * @param context 붙잡기 도구(holds)
+ * @param error 동작이 던진 오류
+ * @param request 열쇠와 붙잡기 방식
+ * @returns 붙잡았으면 true(호출부가 잠금을 풀지 않는다)
+ */
+function holdAfterTimeout(context: RunnerContext, error: unknown, request: TimeoutHoldRequest): boolean {
+  if (!(error instanceof ApiError && error.code === "timeout")) return false;
+  if (request.shouldHoldAfterDone) context.holds.holdFor(request.lockKey);
+  else if (request.watchedVerdictId !== undefined) context.holds.hold(request.lockKey, request.watchedVerdictId, request.statusAtStart);
+  else return false;
+  return true;
 }
 
 /**
