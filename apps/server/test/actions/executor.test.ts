@@ -40,6 +40,26 @@ function setup(api: Partial<ChzzkApi>, tokenOverrides = {}, logger: Logger = sil
 /** 매니저 행위자. */
 const manager = { type: "manager" as const, channelId: "manager-1" };
 
+/**
+ * undici fetch가 던지는 모양의 네트워크 오류(TypeError "fetch failed" + cause.code).
+ * @param code 원인 오류의 code(ECONNREFUSED·ECONNRESET 등)
+ */
+function fetchFailure(code: string): TypeError {
+  return new TypeError("fetch failed", { cause: Object.assign(new Error(`connect ${code} 10.0.0.7:443`), { code }) });
+}
+
+/** AbortSignal.timeout이 끊은 요청의 오류(이름이 TimeoutError인 DOMException). */
+function timeoutFailure(): DOMException {
+  return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+}
+
+/** 되돌릴 수 없는 쓰기 세 가지: 이름, 요청, 그 요청을 받는 가짜 API 메서드 이름. */
+const IRREVERSIBLE_REQUESTS: Array<[string, ActionRequest, keyof ChzzkApi]> = [
+  ["hide", { kind: "hide", target: { chatChannelId: "chat-1", messageTime: 7, senderChannelId: "bad" }, verdictId: null }, "blindMessage"],
+  ["temporary_restrict", { kind: "temporary_restrict", targetChannelId: "bad", chatChannelId: "chat-1", verdictId: null }, "addTemporaryRestriction"],
+  ["restrict", { kind: "restrict", targetChannelId: "bad", verdictId: null }, "addRestriction"],
+];
+
 describe("Executor", () => {
   it("숨기면 감사 기록을 남기고 판정 상태를 hidden으로 바꾼다", async () => {
     const blindMessage = vi.fn(async () => undefined);
@@ -207,12 +227,68 @@ describe("Executor", () => {
 
 describe("Executor 사용자 문구(F10)", () => {
   it("치지직 오류가 아닌 실패(네트워크 등)는 내부 내용을 문구에 넣지 않고, 자세한 내용은 경고 로그로 남긴다", async () => {
-    const internal = () => new Error("connect ECONNREFUSED 10.0.0.7:443");
-    const blindMessage = failingThenOk([internal(), internal(), internal(), internal()]);
+    const blindMessage = failingThenOk([fetchFailure("ECONNREFUSED"), fetchFailure("ECONNREFUSED"), fetchFailure("ECONNREFUSED"), fetchFailure("ECONNREFUSED")]);
     const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const { executor, hide } = setup({ blindMessage }, {}, logger);
     const outcome = await executor.submit("c1", hide, manager);
     expect(outcome).toEqual({ ok: false, message: "치지직에 연결하지 못했습니다. 네트워크를 확인하세요." });
-    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ action: "hide", error: "Error: connect ECONNREFUSED 10.0.0.7:443" }));
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ action: "hide", error: "TypeError: fetch failed", errorCode: "ECONNREFUSED" }));
+  });
+});
+
+describe("Executor 재시도 범위(S1): 요청이 나갔을 수 있는 실패는 다시 보내지 않는다", () => {
+  /** 실패 하나를 낸 뒤 성공하는 쓰기 API를 그 메서드 이름으로 만든다. */
+  function apiFailingOnce(method: keyof ChzzkApi, error: unknown) {
+    const call = vi.fn(failingThenOk([error]) as (...args: unknown[]) => Promise<void>);
+    return { call, api: { [method]: call } as Partial<ChzzkApi> };
+  }
+
+  describe.each(IRREVERSIBLE_REQUESTS)("%s", (_name, request, method) => {
+    it.each([
+      ["응답 시간 초과(TimeoutError)", timeoutFailure()],
+      ["연결 리셋(ECONNRESET)", fetchFailure("ECONNRESET")],
+      ["소켓 끊김(UND_ERR_SOCKET)", fetchFailure("UND_ERR_SOCKET")],
+    ])("%s는 한 번만 보내고 결과를 알 수 없으니 확인하라고 알린다", async (_label, error) => {
+      const { call, api } = apiFailingOnce(method, error);
+      const { executor, sleeps } = setup(api);
+      const outcome = await executor.submit("c1", request, manager);
+      expect(call).toHaveBeenCalledTimes(1);
+      expect(sleeps).toEqual([]);
+      expect(outcome).toEqual({ ok: false, message: expect.stringMatching(/결과를 알 수 없습니다.*확인/) });
+    });
+  });
+
+  it.each(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"])("요청이 나가기 전 실패(%s)는 기다렸다가 다시 시도한다", async (code) => {
+    const blindMessage = failingThenOk([fetchFailure(code)]);
+    const { executor, sleeps, hide } = setup({ blindMessage });
+    await expect(executor.submit("c1", hide, manager)).resolves.toEqual({ ok: true, note: null });
+    expect(blindMessage).toHaveBeenCalledTimes(2);
+    expect(sleeps).toEqual([1000]);
+  });
+
+  it("원인 코드가 없는 내부 오류(TypeError)도 다시 보내지 않는다", async () => {
+    const blindMessage = failingThenOk([new TypeError("Cannot read properties of undefined")]);
+    const { executor, sleeps, hide } = setup({ blindMessage });
+    await expect(executor.submit("c1", hide, manager)).resolves.toMatchObject({ ok: false });
+    expect(blindMessage).toHaveBeenCalledTimes(1);
+    expect(sleeps).toEqual([]);
+  });
+
+  it("토큰을 받다가 난 네트워크 실패는 쓰기 요청이 나가지 않았으므로 다시 시도하고, 끝내 실패하면 연결 실패로 알린다", async () => {
+    const blindMessage = vi.fn(async () => undefined);
+    const getAccessToken = vi.fn(async () => { throw timeoutFailure(); });
+    const { executor, sleeps, hide } = setup({ blindMessage }, { getAccessToken });
+    await expect(executor.submit("c1", hide, manager)).resolves.toEqual({ ok: false, message: "치지직에 연결하지 못했습니다. 네트워크를 확인하세요." });
+    expect(getAccessToken).toHaveBeenCalledTimes(4);
+    expect(sleeps).toEqual([1000, 2000, 4000]);
+    expect(blindMessage).not.toHaveBeenCalled();
+  });
+
+  it("토큰 갱신 단계의 404는 '이미 사라진 메시지'로 오인하지 않는다", async () => {
+    const blindMessage = vi.fn(async () => undefined);
+    const getAccessToken = vi.fn(async () => { throw new ChzzkApiError(404, "NOT_FOUND", "/auth/v1/token"); });
+    const { executor, verdicts, verdict, hide } = setup({ blindMessage }, { getAccessToken });
+    await expect(executor.submit("c1", hide, manager)).resolves.toMatchObject({ ok: false });
+    expect(verdicts.get(verdict.id)?.status).toBe("pending");
   });
 });

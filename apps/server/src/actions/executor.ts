@@ -67,6 +67,31 @@ const FAILURE_RATE_LIMIT = 0.5;
 /** 실패 처리 결정: 끝내거나(done) 다시 시도(retry). */
 type FailureDecision = { kind: "done"; outcome: ActionOutcome } | { kind: "retry" };
 
+/**
+ * 실패가 난 단계. token은 토큰을 받다가(쓰기 요청은 아직 나가지 않음), write는 치지직 쓰기 호출 중이다.
+ * 왜 가르나: 쓰기 호출 중의 시간 초과·연결 끊김은 치지직이 이미 처리했을 수 있어 다시 보내면 되돌릴 수 없는 조치가 겹친다(S1).
+ * 토큰 단계 실패는 쓰기 요청이 나가지 않았으므로 다시 시도해도 겹치지 않는다.
+ */
+type FailurePhase = "token" | "write";
+
+/** 시도 한 번의 결과. 성공(sent)이거나, 실패한 단계와 오류를 담는다. */
+type AttemptResult = { kind: "sent" } | { kind: "failed"; phase: FailurePhase; error: unknown };
+
+/**
+ * 요청이 나가기 전에 났다고 확실히 말할 수 있는 네트워크 오류 코드: 연결 거부와 DNS 실패.
+ * 왜 이것만인가: 연결이 맺어지지 않았으니 치지직은 요청을 받지 못했다. 시간 초과·리셋 등은 요청이 이미 닿았을 수 있다(S1).
+ */
+const PRE_SEND_NETWORK_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
+/** 오류의 cause를 따라가 code를 찾을 때 볼 최대 깊이. 순환 참조에서 끝나지 않는 일을 막는다. */
+const MAX_CAUSE_DEPTH = 5;
+/**
+ * 쓰기 호출 중 응답을 받지 못했을 때(시간 초과·연결 끊김 등)의 매니저용 문구.
+ * 왜 "실패"라 하지 않나: 치지직이 이미 처리했을 수 있어, 확인 없이 다시 누르면 조치가 두 번 간다.
+ */
+const RESULT_UNKNOWN_MESSAGE = "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다. 치지직 채팅에서 실제로 처리됐는지 확인한 뒤, 안 됐을 때만 다시 시도하세요.";
+/** 요청이 나가기 전에 연결하지 못했을 때의 매니저용 문구. */
+const NETWORK_FAILURE_MESSAGE = "치지직에 연결하지 못했습니다. 네트워크를 확인하세요.";
+
 /** 실행기를 만든다. */
 export function createExecutor(options: ExecutorOptions): Executor {
   return new SerialExecutor(options);
@@ -129,26 +154,46 @@ class SerialExecutor implements Executor {
   private async performWithRetry(request: ActionRequest, options?: SubmitOptions): Promise<ActionOutcome | null> {
     for (let attempt = 0; ; attempt += 1) {
       if (options?.shouldRun?.() === false) return null;
-      try {
-        await performRequest(this.options.api, await this.options.tokenManager.getAccessToken(), request);
-        return { ok: true, note: null };
-      } catch (error) {
-        const decision = await this.decideAfterFailure(request, error, attempt);
-        if (decision.kind === "done") return decision.outcome;
-      }
+      const result = await this.attemptOnce(request);
+      if (result.kind === "sent") return { ok: true, note: null };
+      const decision = await this.decideAfterFailure(request, result.phase, result.error, attempt);
+      if (decision.kind === "done") return decision.outcome;
     }
   }
 
-  /** 실패 종류별 처리: 잠금·404·401·재시도 가능 오류·그 밖. */
-  private async decideAfterFailure(request: ActionRequest, error: unknown, attempt: number): Promise<FailureDecision> {
+  /**
+   * 토큰을 받고 치지직을 한 번 부른다. 실패는 던지지 않고 어느 단계에서 났는지와 함께 돌려준다.
+   * 왜 단계를 가르나: 쓰기 호출 중의 실패만 '이미 처리됐을 수 있음'으로 다뤄야 하기 때문이다(FailurePhase).
+   * @param request 보낼 요청
+   */
+  private async attemptOnce(request: ActionRequest): Promise<AttemptResult> {
+    let token: string;
+    try {
+      token = await this.options.tokenManager.getAccessToken();
+    } catch (error) {
+      return { kind: "failed", phase: "token", error };
+    }
+    try {
+      await performRequest(this.options.api, token, request);
+      return { kind: "sent" };
+    } catch (error) {
+      return { kind: "failed", phase: "write", error };
+    }
+  }
+
+  /**
+   * 실패 종류별 처리: 잠금·404·401·재시도 가능 오류·그 밖.
+   * 404·401은 쓰기 호출의 응답일 때만 본다. 토큰 갱신의 404를 '이미 사라진 메시지'로 오인하지 않기 위해서다.
+   */
+  private async decideAfterFailure(request: ActionRequest, phase: FailurePhase, error: unknown, attempt: number): Promise<FailureDecision> {
     if (error instanceof WriteLockedError) return { kind: "done", outcome: { ok: false, message: error.message } };
-    if (isStatus(error, 404) && request.kind === "hide") return { kind: "done", outcome: { ok: true, note: "이미 사라진 메시지입니다" } };
-    if (isStatus(error, 401) && attempt === 0) return this.refreshAfterUnauthorized(request);
-    if (isRetryable(error) && attempt < MAX_RETRIES) {
+    if (phase === "write" && isStatus(error, 404) && request.kind === "hide") return { kind: "done", outcome: { ok: true, note: "이미 사라진 메시지입니다" } };
+    if (phase === "write" && isStatus(error, 401) && attempt === 0) return this.refreshAfterUnauthorized(request);
+    if (isRetryable(error, phase) && attempt < MAX_RETRIES) {
       await this.sleep(RETRY_BASE_MS * 2 ** attempt);
       return { kind: "retry" };
     }
-    return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error) } };
+    return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error, phase) } };
   }
 
   /**
@@ -160,21 +205,23 @@ class SerialExecutor implements Executor {
       await this.options.tokenManager.forceRefresh();
       return { kind: "retry" };
     } catch (error) {
-      return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error) } };
+      return { kind: "done", outcome: { ok: false, message: this.describeFailure(request, error, "token") } };
     }
   }
 
   /**
    * 실패를 매니저용 문구로 바꾸고, 치지직 오류가 아니면(네트워크·내부 오류) 자세한 내용을 경고 로그로 남긴다.
    * 왜: 내부 오류 문구(주소·포트·스택 이름)는 화면에 보일 필요가 없고 운영자 로그에만 있어야 한다(F10).
+   * errorCode는 원인 오류의 code(ECONNRESET 등)다. undici는 "fetch failed"만 겉에 보여 원인을 따로 남긴다.
    * @param request 실패한 요청(종류만 로그에 남긴다. 채팅 원문은 남기지 않는다)
    * @param error 잡은 오류
+   * @param phase 실패한 단계(쓰기 호출 중이면 결과를 알 수 없다는 문구가 된다)
    */
-  private describeFailure(request: ActionRequest, error: unknown): string {
+  private describeFailure(request: ActionRequest, error: unknown, phase: FailurePhase): string {
     if (!(error instanceof ChzzkApiError) && !(error instanceof WriteLockedError)) {
-      this.options.logger.warn("치지직 호출 실패(치지직 응답이 아닌 오류)", { action: request.kind, error: describeError(error) });
+      this.options.logger.warn("치지직 호출 실패(치지직 응답이 아닌 오류)", { action: request.kind, phase, error: describeError(error), errorCode: networkErrorCode(error) });
     }
-    return toUserMessage(error);
+    return toUserMessage(error, phase);
   }
 
   /** 감사 기록·판정 상태·실패율을 갱신한다. 각 단계는 서로 영향을 주지 않도록 따로 보호한다. */
@@ -267,17 +314,49 @@ function isStatus(error: unknown, status: number): boolean {
   return error instanceof ChzzkApiError && error.status === status;
 }
 
-/** 다시 시도할 만한 오류: 429, 5xx, 그리고 네트워크 오류(치지직 오류가 아닌 예외). */
-function isRetryable(error: unknown): boolean {
+/**
+ * 다시 시도할 만한 오류인지 본다(S1): 치지직의 429·5xx, 요청이 나가기 전에 난 연결 거부·DNS 실패.
+ * 토큰 단계의 그 밖의 실패(시간 초과 등)도 쓰기 요청이 나가지 않았으므로 다시 시도한다.
+ * 쓰기 호출 중의 시간 초과·연결 끊김·내부 오류는 치지직이 이미 처리했을 수 있어 다시 보내지 않는다.
+ * @param error 잡은 오류
+ * @param phase 실패한 단계
+ */
+function isRetryable(error: unknown, phase: FailurePhase): boolean {
   if (error instanceof ChzzkApiError) return error.status === 429 || error.status >= 500;
-  return true;
+  return phase === "token" || isPreSendNetworkError(error);
 }
 
-/** 오류를 매니저에게 보여 줄 문장으로 바꾼다(원인과 해결 방향 포함). */
-function toUserMessage(error: unknown): string {
+/** 요청이 나가기 전에 난 네트워크 오류(연결 거부·DNS 실패)인지 본다. */
+function isPreSendNetworkError(error: unknown): boolean {
+  const code = networkErrorCode(error);
+  return code !== null && PRE_SEND_NETWORK_CODES.has(code);
+}
+
+/**
+ * 오류와 그 cause 사슬에서 처음 나오는 문자열 code를 찾는다. 없으면 null.
+ * 왜 cause까지 보나: Node fetch(undici)는 TypeError("fetch failed")로 감싸고 실제 원인(ECONNREFUSED 등)을 cause에 둔다.
+ * DOMException의 code는 숫자라 세지 않는다.
+ * @param error 잡은 오류
+ */
+function networkErrorCode(error: unknown): string | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && typeof current === "object" && current !== null; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/**
+ * 오류를 매니저에게 보여 줄 문장으로 바꾼다(원인과 해결 방향 포함).
+ * @param error 잡은 오류
+ * @param phase 실패한 단계. 쓰기 호출 중의 치지직 응답이 아닌 오류는 요청이 이미 닿았을 수 있어 확인하라고 안내한다
+ */
+function toUserMessage(error: unknown, phase: FailurePhase): string {
   if (error instanceof WriteLockedError) return error.message;
   // 내부 오류 내용은 넣지 않는다(describeFailure가 로그로 남긴다).
-  if (!(error instanceof ChzzkApiError)) return "치지직에 연결하지 못했습니다. 네트워크를 확인하세요.";
+  if (!(error instanceof ChzzkApiError)) return phase === "write" && !isPreSendNetworkError(error) ? RESULT_UNKNOWN_MESSAGE : NETWORK_FAILURE_MESSAGE;
   if (error.status === 429) return "치지직 호출 한도를 넘었습니다. 잠시 뒤 다시 시도하세요.";
   if (error.status === 403) return "치지직이 권한 없음으로 거부했습니다. 스트리머 연결 때 동의한 권한(Scope)을 확인하세요.";
   if (error.status >= 500) return "치지직 서버 오류로 실패했습니다. 잠시 뒤 다시 시도하세요.";
