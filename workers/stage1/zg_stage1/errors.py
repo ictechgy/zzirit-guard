@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 # 사용자 오류로 끝날 때의 종료 코드. argparse가 잘못된 인자에 쓰는 값(2)과 맞춰 스크립트에서 구분하기 쉽게 한다.
 USER_ERROR_EXIT_CODE = 2
@@ -42,6 +43,18 @@ class MetricError(Stage1Error, ValueError):
 
 class ModelFormatError(Stage1Error):
     """불러온 모델·토크나이저가 학습 때의 약속(라벨 2개, [CLS]·[SEP] 감싸기)과 다를 때 낸다."""
+
+
+def describe_failure(error: BaseException) -> str:
+    """모델 카드에 남길 실패 설명을 만든다.
+
+    Stage1Error는 원인과 해결 방향을 담도록 쓴 메시지라 그대로 남기되, 홈 경로는 ~로 가린다(카드를 공유할 때 사용자 이름이
+    새지 않게). 그 밖의 예외는 메시지에 무엇이 들어 있을지 몰라(데이터 조각 등) 종류 이름만 남긴다.
+    """
+    error_type = type(error).__name__
+    if not isinstance(error, Stage1Error):
+        return error_type
+    return f"{error_type}: {str(error).replace(str(Path.home()), '~')}"
 
 
 def run_command_line(entry_point: Callable[[], None]) -> None:

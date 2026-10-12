@@ -28,7 +28,7 @@ from zg_stage1.arguments import fraction_below_one, non_negative_float, non_nega
 from zg_stage1.batching import BUCKET_MULTIPLIER, build_length_bucketed_batches
 from zg_stage1.data import LabeledText, describe_file_provenance, load_labeled_texts
 from zg_stage1.inference_contract import build_inference_contract, write_inference_contract_file
-from zg_stage1.errors import run_command_line
+from zg_stage1.errors import describe_failure, run_command_line
 from zg_stage1.metrics import METRIC_DECIMALS, STANDARD_THRESHOLD, compute_roc_auc, summarize_at_threshold
 from zg_stage1.model_card import (
     MODEL_CARD_FILE_NAME,
@@ -314,7 +314,12 @@ class TrainingSession:
         try:
             self.run()
         except BaseException as error:
-            self.model_card.update(status="interrupted", stop_reason=f"{type(error).__name__}", finished_at=utc_timestamp())
+            self.model_card.update(
+                status="interrupted",
+                stop_reason=type(error).__name__,
+                failure_message=describe_failure(error),
+                finished_at=utc_timestamp(),
+            )
             self.write_model_card()
             print(f"[중단] {type(error).__name__}: 지금까지의 최고 epoch는 {self.progress.best_epoch}입니다. 카드에 기록했습니다.", flush=True)
             raise
