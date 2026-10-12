@@ -615,6 +615,19 @@ describe("푸시 구독 입력", () => {
     expect(response.json()).toEqual({ ok: true });
   });
 
+  it("구독 해제는 요청한 매니저의 구독만 지운다(S14, M13)", async () => {
+    const endpoint = "https://fcm.googleapis.com/fcm/send/owner";
+    const owner = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    const other = mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER"));
+    await harness.app.inject({ method: "POST", url: "/api/push/subscriptions", headers: owner, payload: { endpoint, keys: validKeys } });
+    const foreign = await harness.app.inject({ method: "DELETE", url: "/api/push/subscriptions", headers: other, payload: { endpoint } });
+    expect(foreign.statusCode).toBe(200);
+    const rows = () => harness.database.prepare("SELECT manager_channel_id AS owner FROM push_subscription").all() as Array<{ owner: string }>;
+    expect(rows()).toEqual([{ owner: "STREAMING_CHAT_MANAGER-id" }]);
+    await harness.app.inject({ method: "DELETE", url: "/api/push/subscriptions", headers: owner, payload: { endpoint } });
+    expect(rows()).toEqual([]);
+  });
+
   it("허용 목록에 없는 주소는 400과 이유를 준다", async () => {
     const response = await harness.app.inject({ method: "POST", url: "/api/push/subscriptions", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")), payload: { endpoint: "http://127.0.0.1/x", keys: validKeys } });
     expect(response.statusCode).toBe(400);

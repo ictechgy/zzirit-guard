@@ -286,8 +286,9 @@ function registerPushRoutes(app: FastifyInstance, services: RouteServices): void
   );
   app.delete(
     "/api/push/subscriptions",
-    guarded(services, null, ({ request }) => {
-      services.push.unsubscribe(pushDeleteSchema.parse(request.body).endpoint);
+    guarded(services, null, ({ request, manager }) => {
+      // 요청한 매니저의 구독만 지운다. 없거나 남의 것이면 아무것도 지우지 않고 똑같이 ok를 준다(구독 존재 여부를 드러내지 않는다).
+      services.push.unsubscribe(manager.managerChannelId, pushDeleteSchema.parse(request.body).endpoint);
       return { ok: true };
     }),
   );

@@ -71,5 +71,5 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
   const app = await buildHttpServer({ config: { publicOrigin: ORIGIN, webDistDirectory: options.webDistDirectory ?? "/nonexistent-web-dist" }, sessions, authFlow, hub, services, logger: silentLogger });
   /** 역할로 로그인한 세션의 쿠키 값. */
   const login = (role: ManagerRole) => sessions.create({ channelId: `${role}-id`, channelName: role, role }).rawId;
-  return { app, verdicts, auditLog, sessions, hub, services, submit, login, close: async () => { hub.stop(); await app.close(); } };
+  return { app, database, verdicts, auditLog, sessions, hub, services, submit, login, close: async () => { hub.stop(); await app.close(); } };
 }

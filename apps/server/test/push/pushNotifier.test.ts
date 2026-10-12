@@ -251,3 +251,19 @@ describe("해임된 매니저의 구독 삭제(F10)", () => {
     expect(send.mock.calls.map(([target]) => target.endpoint)).toEqual(["https://fcm.googleapis.com/fcm/send/kept"]);
   });
 });
+
+describe("구독 해제의 소유자 확인(S14, M13)", () => {
+  it("unsubscribe는 요청한 매니저의 구독만 지우고, 다른 매니저가 같은 주소를 보내도 지우지 않는다", async () => {
+    const database = openDatabase(":memory:");
+    const send = vi.fn<PushSender>(async () => ({}));
+    const notifier = createPushNotifier({ database, clock: () => 0, logger: silentTestLogger(), vapid, send });
+    notifier.subscribe("owner", subscription("https://fcm.googleapis.com/fcm/send/owner-phone"));
+    notifier.unsubscribe("someone-else", "https://fcm.googleapis.com/fcm/send/owner-phone");
+    await notifier.notifyAll({ title: "찌리릿 가드", body: "장애" });
+    expect(send.mock.calls.map(([target]) => target.endpoint)).toEqual(["https://fcm.googleapis.com/fcm/send/owner-phone"]);
+    notifier.unsubscribe("owner", "https://fcm.googleapis.com/fcm/send/owner-phone");
+    send.mockClear();
+    await notifier.notifyAll({ title: "찌리릿 가드", body: "장애" });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
