@@ -325,17 +325,19 @@ class TrainingSession:
         for epoch in range(1, self.arguments.epochs + 1):
             mean_loss = self.train_epoch(epoch)
             self.finish_epoch(epoch, mean_loss)
-            early_reason = self.decide_early_stop_reason()
+            early_reason = self.decide_early_stop_reason(epoch)
             if early_reason:
                 stop_reason = early_reason
                 break
         self.finalize(stop_reason)
 
-    def decide_early_stop_reason(self) -> str | None:
-        """--max-steps 예산을 다 썼거나, 개선 없는 epoch가 patience에 닿았으면 그 이유를 돌려준다."""
+    def decide_early_stop_reason(self, epoch: int) -> str | None:
+        """epoch를 마친 뒤 일찍 멈출 이유를 돌려준다. --max-steps 예산을 다 썼거나, 남은 epoch가 있는데
+        개선 없는 epoch가 patience에 닿았을 때다. 마지막 epoch는 조기 종료가 아니라 완료로 본다."""
         if self.arguments.max_steps and self.progress.is_step_budget_exhausted:
             return STOP_REASON_MAX_STEPS
-        if self.progress.epochs_without_improvement >= self.arguments.early_stop_patience:
+        has_remaining_epochs = epoch < self.arguments.epochs
+        if has_remaining_epochs and self.progress.epochs_without_improvement >= self.arguments.early_stop_patience:
             return STOP_REASON_EARLY_STOP
         return None
 

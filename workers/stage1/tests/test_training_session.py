@@ -75,3 +75,22 @@ def test_early_stop_counts_unrounded_drops(tmp_path: Path, monkeypatch: pytest.M
     session.finish_epoch(1, mean_loss=0.5)
     session.finish_epoch(2, mean_loss=0.4)
     assert (session.progress.best_epoch, session.progress.epochs_without_improvement) == (1, 1)
+
+
+def test_last_epoch_is_not_recorded_as_early_stop(tmp_path: Path) -> None:
+    """마지막 epoch까지 다 돌았으면, 개선 없는 epoch가 patience에 닿았어도 조기 종료가 아니라 완료로 기록한다.
+
+    실제 전체 학습(3 epoch, 2·3 epoch 하락)이 early_stopped로 기록된 문제를 막는다.
+    """
+    session = make_session(tmp_path, epochs=3, patience=2)
+    session.progress.epochs_without_improvement = 2
+    assert session.decide_early_stop_reason(3) is None
+    assert session.decide_early_stop_reason(2) == train.STOP_REASON_EARLY_STOP
+
+
+def test_max_steps_budget_stops_with_its_reason(tmp_path: Path) -> None:
+    """--max-steps 예산을 다 쓰면 그 이유로 멈춘다."""
+    session = make_session(tmp_path)
+    session.arguments.max_steps = 10
+    session.progress.completed_steps = 10
+    assert session.decide_early_stop_reason(1) == train.STOP_REASON_MAX_STEPS
