@@ -6,6 +6,19 @@ import { stripInvisibleAndFullwidth } from "./normalize.js";
  * 앞뒤에 호스트 글자가 이어지면 잘린 조각으로 보지 않도록 막는다.
  */
 const HOST_CANDIDATE_PATTERN = /(?<![a-z0-9.-])(https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z0-9-]+)(?![a-z0-9-]|\.[a-z0-9])(?=(\/)?)/g;
+/**
+ * 한글 라벨이 든 호스트(IDN) 후보를 뽑는 패턴(S11, X15). 그룹 번호는 HOST_CANDIDATE_PATTERN과 같다.
+ * 라벨은 영문·숫자 라벨이거나 한글이 하나 이상 든 한글·숫자 라벨이다(한 라벨에 영문과 한글을 섞지 않는다).
+ * 왜 섞지 않나: "링크youtube.com"처럼 한글 낱말에 붙여 쓴 주소를 "링크youtube.com" 호스트로 읽으면 허용 도메인 비교가 깨져 정상 채팅을 숨긴다.
+ * 마지막 라벨은 영문 TLD(뒤에 "에서" 같은 한글 조사가 붙어도 된다) 또는 "한국"(뒤에 한글이 이어지면 낱말로 보고 빼낸다)이다.
+ * 한글 라벨에는 앞쪽 탐색(?=…)으로 한글이 있는지 먼저 확인해, 긴 한글 입력에서 되돌아가기가 늘지 않게 한다.
+ */
+const HANGUL_HOST_CANDIDATE_PATTERN =
+  /(?<![a-z0-9가-힣.-])(https?:\/\/)?((?:(?:[a-z0-9-]+|(?=[가-힣0-9-]*[가-힣])[가-힣0-9-]+)\.)+(?:한국(?![a-z0-9가-힣-])|[a-z0-9-]+(?![a-z0-9-])))(?!\.[a-z0-9가-힣])(?=(\/)?)/g;
+/** 한글 음절. 한글 호스트 후보만 골라낼 때 쓴다(영문 호스트는 HOST_CANDIDATE_PATTERN이 맡는다). */
+const HANGUL_SYLLABLE_PATTERN = /[가-힣]/;
+/** 퓨니코드(IDN을 ASCII로 쓴 형태) 라벨 접두. "xn--3e0b707e"(한국)처럼 목록에 없는 TLD로도 링크를 만들 수 있다. */
+const PUNYCODE_LABEL_PREFIX = "xn--";
 /** 마지막 라벨이 영문자로 시작하는지. "3.5/2" 같은 숫자 표기를 경로 휴리스틱에서 빼기 위해 쓴다. */
 const STARTS_WITH_LETTER_PATTERN = /^[a-z]/;
 /**
@@ -16,6 +29,8 @@ const KNOWN_TOP_LEVEL_DOMAINS: ReadonlySet<string> = new Set([
   "com", "net", "org", "kr", "io", "me", "ly", "gg", "xyz", "co", "tv", "app", "link", "site", "shop", "top", "info", "biz", "cc", "to", "kim", "vip",
   "bet", "win", "club", "online", "casino", "live", "fun", "store", "cloud", "pro", "asia", "games", "poker",
   "de", "ru", "cn", "jp", "us", "uk", "vn", "ph", "tw", "hk", "sg", "su", "ws",
+  // 한글 최상위 도메인(.한국). 한글 호스트 후보에서만 나온다(S11).
+  "한국",
 ]);
 /** "텔레 @아이디", "텔레그램 아이디" 같은 연락처 유도(4자 이상 아이디). 도박 단어 없이도 광고로 본다. */
 const TELEGRAM_HANDLE_PATTERN = /텔레(?:그램)?\s{0,3}[:@]?\s{0,3}@?[a-z0-9_]{4,}/;
@@ -63,14 +78,29 @@ function prepareLinkText(text: string): string {
 }
 
 /**
- * 텍스트에서 호스트 후보를 모두 뽑는다.
+ * 텍스트에서 호스트 후보를 모두 뽑는다: 영문 호스트와, 한글 라벨이 든 호스트(IDN, S11).
  * @returns 호스트와 접두(scheme/www) 유무, 뒤따르는 경로 유무 목록
  */
 function extractHostCandidates(text: string): HostCandidate[] {
-  return [...text.matchAll(HOST_CANDIDATE_PATTERN)].map((match) => {
+  const hangulCandidates = matchHostCandidates(text, HANGUL_HOST_CANDIDATE_PATTERN).filter((candidate) => HANGUL_SYLLABLE_PATTERN.test(candidate.host));
+  return [...matchHostCandidates(text, HOST_CANDIDATE_PATTERN), ...hangulCandidates];
+}
+
+/**
+ * 패턴 하나로 호스트 후보를 뽑는다. 두 패턴은 그룹 번호(1: 접두, 2: 호스트, 3: 뒤따르는 "/")가 같다.
+ * @param text 링크 검사용 전처리를 거친 텍스트
+ * @param pattern HOST_CANDIDATE_PATTERN 또는 HANGUL_HOST_CANDIDATE_PATTERN(g 플래그)
+ */
+function matchHostCandidates(text: string, pattern: RegExp): HostCandidate[] {
+  return [...text.matchAll(pattern)].map((match) => {
     const host = match[2] ?? "";
     return { host, hasExplicitPrefix: match[1] !== undefined || host.startsWith("www."), isFollowedBySlash: match[3] !== undefined };
   });
+}
+
+/** 호스트에 퓨니코드 라벨(xn--)이 하나라도 있는지 본다. 사람이 IDN 주소를 ASCII로 옮겨 쓴 것이므로 링크로 본다(S11). */
+function hasPunycodeLabel(host: string): boolean {
+  return host.split(".").some((label) => label.startsWith(PUNYCODE_LABEL_PREFIX));
 }
 
 /**
@@ -84,12 +114,13 @@ function hasKnownTopLevelDomain(host: string): boolean {
 /**
  * 후보가 링크인지 본다.
  * 1) 접두가 있으면 TLD와 상관없이 링크(.bet, IP 포함).
- * 2) 접두가 없어도 "word.word/..."(접두 없이 경로가 붙은 호스트)는 거의 항상 URL이라 링크로 본다.
- *    단, 마지막 라벨이 영문자로 시작해야 한다("3.5/2 정도" 같은 숫자 표기는 제외).
- * 3) 그 밖에는 첫 라벨 뒤에 알려진 TLD가 있을 때만 링크다("3.5", "ver.2" 같은 숫자 표기를 거르기 위해).
+ * 2) 퓨니코드 라벨(xn--)이 있으면 링크(S11).
+ * 3) 접두가 없어도 "word.word/..."(접두 없이 경로가 붙은 호스트)는 거의 항상 URL이라 링크로 본다.
+ *    단, 마지막 라벨이 영문자로 시작해야 한다("3.5/2 정도" 같은 숫자 표기, "그래.그래/…" 같은 한글 표기는 제외).
+ * 4) 그 밖에는 첫 라벨 뒤에 알려진 TLD(.한국 포함)가 있을 때만 링크다("3.5", "ver.2", "안녕.하세요" 같은 표기를 거르기 위해).
  */
 function isLinkCandidate(candidate: HostCandidate): boolean {
-  if (candidate.hasExplicitPrefix) return true;
+  if (candidate.hasExplicitPrefix || hasPunycodeLabel(candidate.host)) return true;
   const lastLabel = candidate.host.split(".").at(-1) ?? "";
   if (candidate.isFollowedBySlash && STARTS_WITH_LETTER_PATTERN.test(lastLabel)) return true;
   return hasKnownTopLevelDomain(candidate.host);

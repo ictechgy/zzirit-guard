@@ -69,6 +69,41 @@ describe("containsBlockedLink", () => {
   });
 });
 
+describe("한글(IDN) 도메인(S11, X15)", () => {
+  it.each([
+    "카지노.kr",
+    "카지노.한국/abc",
+    "https://카지노.한국",
+    "가입은 카지노.kr에서",
+    "꽁머니123.com 들어와",
+    "xn--9n2bp8q.com",
+    "xn--9n2bp8q.xn--3e0b707e",
+    "spam.xn--3e0b707e/abc",
+    "토토사이트.net",
+  ])("링크로 잡는다: %s", (text) => {
+    expect(containsBlockedLink(text, [])).toBe(true);
+  });
+
+  it.each([
+    "그래.그래",
+    "안녕.하세요",
+    "진짜.한국사람 맞음",
+    "아 그렇구나.ㅋㅋ",
+    "오늘 방송 끝.내일 봐요",
+  ])("일반 대화는 링크로 보지 않는다: %s", (text) => {
+    expect(containsBlockedLink(text, [])).toBe(false);
+  });
+
+  it("한글이 붙은 허용 도메인은 그대로 허용한다(한글을 호스트에 붙여 읽지 않는다)", () => {
+    expect(containsBlockedLink("링크youtube.com/watch?v=1", ["youtube.com"])).toBe(false);
+    expect(containsBlockedLink("사이트는 youtube.com입니다", ["youtube.com"])).toBe(false);
+  });
+
+  it("허용 목록의 한글 도메인은 통과", () => {
+    expect(containsBlockedLink("카페.한국/공지", ["카페.한국"])).toBe(false);
+  });
+});
+
 describe("bidi·서식 제어 문자로 끊은 링크·전화번호(S9, M08)", () => {
   it.each([
     ["LRE·PDF(U+202A·U+202C)", "evil\u202A.\u202Ccom/x"],
