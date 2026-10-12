@@ -11,6 +11,8 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy==2.4.4",
     "safetensors==0.7.0",
+    # [CLS]·[SEP] 후처리 규칙(tokenizers.processors)을 직접 불러오므로 전이 의존성에 맡기지 않고 고정한다.
+    "tokenizers==0.22.2",
     "torch==2.12.0",
     "transformers==5.8.1",
 ]

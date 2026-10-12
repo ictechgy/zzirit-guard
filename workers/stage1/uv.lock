@@ -456,6 +456,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "numpy", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "safetensors", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "tokenizers", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "torch", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "transformers", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
 ]
@@ -471,6 +472,7 @@ dev = [
 requires-dist = [
     { name = "numpy", specifier = "==2.4.4" },
     { name = "safetensors", specifier = "==0.7.0" },
+    { name = "tokenizers", specifier = "==0.22.2" },
     { name = "torch", specifier = "==2.12.0" },
     { name = "transformers", specifier = "==5.8.1" },
 ]
