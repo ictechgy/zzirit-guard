@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsBlockedLink, containsPhoneNumber, looksLikeAddress } from "../../src/detection/patterns.js";
+import { containsBlockedLink, containsGluedAllowedLink, containsPhoneNumber, looksLikeAddress } from "../../src/detection/patterns.js";
 
 describe("containsBlockedLink", () => {
   it.each([
@@ -101,6 +101,76 @@ describe("한글(IDN) 도메인(S11, X15)", () => {
 
   it("허용 목록의 한글 도메인은 통과", () => {
     expect(containsBlockedLink("카페.한국/공지", ["카페.한국"])).toBe(false);
+  });
+});
+
+describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 재점검)", () => {
+  /** 채널이 허용한 도메인. */
+  const allow = ["youtube.com", "allowed.com"];
+
+  it.each([
+    ["URL 사용자 정보 뒤의 진짜 호스트", "https://allowed.com@evil.zzz"],
+    ["URL 사용자 정보(비밀번호 포함) 뒤의 진짜 호스트", "https://allowed.com:pw@evil.zzz"],
+    ["한글 최상위 도메인 .닷컴", "카지노.닷컴"],
+    ["한글 최상위 도메인 .닷넷", "spam.닷넷/x"],
+    ["허용 도메인 뒤에 붙인 .닷컴", "youtube.com.닷컴"],
+    ["RLO로 뒤집어 보이는 주소", "\u202Emoc.lebatsetnoc"],
+    ["동그라미 글자", "ⓔⓥⓘⓛ.ⓒⓞⓜ"],
+    ["수학 굵은 글자", "𝐞𝐯𝐢𝐥.𝐜𝐨𝐦"],
+    ["한 점 리더(U+2024)", "evil\u2024com/x"],
+    ["작은 마침표(U+FE52)", "evil\uFE52com/x"],
+    ["포트가 붙은 호스트", "evil.zzz:8080/x"],
+    ["포트만 붙은 호스트", "evil.zzz:8080"],
+  ])("우회를 막는다: %s", (_label, text) => {
+    expect(containsBlockedLink(text, allow)).toBe(true);
+  });
+
+  it.each([
+    ["RLO로 뒤집어 보이는 번호", "\u202E8765-4321-010"],
+    ["수학 숫자", "𝟎𝟏𝟎-𝟏𝟐𝟑𝟒-𝟓𝟔𝟕𝟖"],
+    ["동그라미 숫자", "⓪①⓪-①②③④-⑤⑥⑦⑧"],
+  ])("전화번호 우회를 막는다: %s", (_label, text) => {
+    expect(containsPhoneNumber(text)).toBe(true);
+  });
+
+  it.each([
+    "allowed.com.evil.com",
+    "evil.com/allowed.com",
+    "allowed.com@evil.com",
+    "allowed。com.evil.zzz/x",
+    "EVIL.COM/X",
+    "ｅｖｉｌ．ｃｏｍ",
+    "xn--9n2bp8q.xn--3e0b707e",
+    "evil.com.",
+    "youtube.com.카지노.kr",
+    "spam.com.진짜 좋음",
+    "evil\u202A.\u202Ccom",
+    "토토 youtube.com 텔레 @abc123",
+    "토토 youtube.com @abc123",
+    "토토 youtube.com 카톡 abc123",
+    "토토 youtube.com 010-1234-5678",
+  ])("이미 막던 모양은 계속 막는다: %s", (text) => {
+    expect(containsBlockedLink(text, allow)).toBe(true);
+  });
+
+  it.each(["YOUTUBE.COM/watch", "allowed。com/x", "youtube.com./x", "토토 youtube.com/watch", "역시.삼성", "오늘 ㏂ 10시 방송", "쉬는 시간 11.30:00"])(
+    "허용 링크와 일반 대화는 통과: %s",
+    (text) => {
+      expect(containsBlockedLink(text, allow)).toBe(false);
+    },
+  );
+
+  it("한글을 허용 도메인 앞에 붙여 다른 주소일 수 있는 링크는 자동 숨김하지 않고 후보 신호로만 낸다", () => {
+    expect(containsBlockedLink("카지노youtube.com/abc", allow)).toBe(false);
+    expect(containsGluedAllowedLink("카지노youtube.com/abc", allow)).toBe(true);
+    expect(containsGluedAllowedLink("링크YOUTUBE.COM", allow)).toBe(true);
+  });
+
+  it("한글을 붙여도 허용 도메인의 하위 도메인으로 읽히면 후보 신호를 내지 않는다", () => {
+    expect(containsGluedAllowedLink("카지노m.youtube.com/abc", allow)).toBe(false);
+    expect(containsGluedAllowedLink("링크 youtube.com/abc", allow)).toBe(false);
+    expect(containsGluedAllowedLink("youtube.com입니다", allow)).toBe(false);
+    expect(containsGluedAllowedLink("카지노evil.zzz", allow)).toBe(false);
   });
 });
 

@@ -53,6 +53,12 @@ describe("DetectionPipeline", () => {
     expect(result.reason).toMatch(reason);
   });
 
+  it("허용 도메인 앞에 한글을 붙인 링크는 다른 주소일 수 있어 후보(rule:link_glued)로 올린다", () => {
+    rules.add("c1", "allow_domain", "youtube.com", "m");
+    expect(pipeline.evaluate(chat("가입은 카지노youtube.com/abc"))).toMatchObject({ decision: "candidate", reason: "rule:link_glued" });
+    expect(pipeline.evaluate(chat("하이라이트 youtube.com/abc"))).toMatchObject({ decision: "pass" });
+  });
+
   it("허용어는 메시지 전체가 같을 때만 통과시킨다", () => {
     expect(pipeline.evaluate(chat("적팀 죽여버려!!")).decision).toBe("pass");
     expect(pipeline.evaluate(chat("적팀 죽여버려 시발")).decision).toBe("candidate");

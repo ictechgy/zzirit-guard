@@ -6,6 +6,7 @@ const RULE_LABELS: ReadonlyMap<string, string> = new Map([
   ["strong", "금칙어 강"], ["strong_spanning", "금칙어 강(띄어 쓰거나 단어를 걸침)"], ["weak", "금칙어 약"], ["threat", "협박 표현"],
   ["group_flood", "떼도배"], ["personal_flood", "개인 도배"], ["link", "광고 링크"], ["phone", "전화번호"], ["address", "주소"],
   ["watch_user", "요주의 사용자(최근 180일 조치 이력)"], ["allow", "허용어"],
+  ["link_glued", "광고 링크 의심(허용 주소 앞에 한글이 붙어 다른 주소일 수 있음)"],
 ]);
 /** 스트리머·매니저 본인 메시지라 자동 숨김 대신 후보로 낮췄다는 꼬리표(pipeline.ts applyPrivilege). */
 const PRIVILEGED_SUFFIX = ":privileged";

@@ -9,6 +9,7 @@ describe("describeReason", () => {
     ["rule:group_flood", "떼도배"],
     ["rule:group_flood:privileged", "떼도배 · 스트리머·매니저 메시지라 후보로 낮춤"],
     ["rule:watch_user", "요주의 사용자(최근 180일 조치 이력)"],
+    ["rule:link_glued", "광고 링크 의심(허용 주소 앞에 한글이 붙어 다른 주소일 수 있음)"],
     ["model:kanana", "model:kanana"],
     ["rule:toString", "rule:toString"],
   ])("%s → %s", (reason, expected) => {
