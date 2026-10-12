@@ -92,6 +92,7 @@ uv run python -m zg_stage1.train
 |---|---|
 | `model.safetensors`, `config.json` | 최고 epoch의 가중치(fp32)와 설정(라벨 이름 normal·toxic) |
 | `tokenizer.json`, `tokenizer_config.json` | 토크나이저. 문장을 `[CLS] … [SEP]`으로 감싸는 규칙이 들어 있다(아래 참고) |
+| `inference.json` | 워커용 추론 계약: `max_length`, 유해 칸 번호(`toxic_class_index`), `[CLS]`·`[SEP]` 요구와 토큰 번호(아래 참고) |
 | `model-card.json` | 기반 모델 이름과 `model.safetensors` sha256, 데이터 파일 sha256, 하이퍼파라미터·시드·라이브러리 버전, epoch별 검증 지표, 선택한 epoch, 시각, 라이선스·출처 표기 |
 
 학습이 중간에 끊기면 카드의 `status`가 `interrupted`로 남고, 그때까지의 최고 epoch 가중치가 남는다.
@@ -99,6 +100,23 @@ uv run python -m zg_stage1.train
 ### 입력 형식: `[CLS] 문장 [SEP]`
 
 `beomi/KcELECTRA-base`의 현재 리비전(v2023, 바이트 단위 BPE)의 `tokenizer.json`에는 특수 토큰을 붙이는 규칙이 없다. ELECTRA 분류 헤드는 첫 위치의 벡터로 판정하므로, 학습 스크립트가 토크나이저에 `[CLS] … [SEP]` 규칙을 넣고 그대로 저장한다. **워커는 학습 결과 디렉터리의 토크나이저를 그대로 써야 한다.** 평가 스크립트는 이 규칙이 없는 토크나이저를 거부한다. (스파이크 코드는 이 규칙 없이 학습했다.)
+
+**워커는 `inference.json`을 읽어 따라야 한다.** 학습 때의 값을 추측하면 점수가 조용히 어긋나기 때문이다.
+
+| 필드 | 뜻 |
+|---|---|
+| `max_length` | 이 값으로 자른다(`[CLS]`·`[SEP]` 포함). 학습·평가와 같은 값이다 |
+| `toxic_class_index` | softmax 출력에서 유해 확률 칸(1). 점수 = `softmax(logits)[toxic_class_index]` |
+| `special_tokens` | `requires_cls_sep_wrapping`이 `true`면, 토크나이저 결과가 `cls_token_id`로 시작하고 `sep_token_id`로 끝나는지 시작할 때 확인한다 |
+| `schema_version` | 모르는 버전이면 워커는 시작하지 않는다 |
+
+학습은 출력 디렉터리를 만들 때 `inference.json`을 쓴다. 이 파일이 생기기 전에 학습한 결과에는 다시 학습하지 않고 써 넣는다(`max_length`는 `model-card.json`에서 읽는다).
+
+```sh
+uv run python -m zg_stage1.write_inference_contract --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>"
+```
+
+평가도 `inference.json`의 `max_length`를 모델 카드보다 먼저 쓴다.
 
 ## 평가
 

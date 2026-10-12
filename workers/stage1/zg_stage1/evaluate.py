@@ -38,6 +38,7 @@ from zg_stage1.data import (
     select_regression_sample,
 )
 from zg_stage1.errors import OutputExistsError, run_command_line
+from zg_stage1.inference_contract import read_inference_contract
 from zg_stage1.metrics import (
     METRIC_DECIMALS,
     REPORT_THRESHOLDS,
@@ -157,8 +158,11 @@ def validate_evaluation_paths(paths: EvaluationPaths, should_overwrite: bool) ->
             raise OutputExistsError(f"{output.name}이 이미 있습니다: {output}. 앞선 평가를 지키려고 덮어쓰지 않습니다. 바꾸려면 --overwrite를 주세요.")
 
 
-def resolve_max_length(model_card: dict | None) -> int:
-    """학습 때 쓴 max_length를 카드에서 읽는다. 카드가 없으면 처리량 측정과 같은 128을 쓴다."""
+def resolve_max_length(model_directory: Path, model_card: dict | None) -> int:
+    """채점에 쓸 max_length를 정한다. 우선순위: inference.json(워커와 같은 값) → 모델 카드 → 128."""
+    contract = read_inference_contract(model_directory)
+    if contract is not None:
+        return int(contract["max_length"])
     if model_card is None:
         return THROUGHPUT_MAX_LENGTH
     return int(model_card.get("hyperparameters", {}).get("max_length", THROUGHPUT_MAX_LENGTH))
@@ -331,7 +335,7 @@ def load_evaluation_inputs(arguments: argparse.Namespace, paths: EvaluationPaths
         test_records=load_labeled_texts(paths.test_file, arguments.limit),
         validation_records=load_labeled_texts(paths.validation_file, arguments.limit),
         chat_samples=load_chat_samples(paths.chat_file),
-        max_length=resolve_max_length(model_card),
+        max_length=resolve_max_length(paths.model_directory, model_card),
     )
     print(
         f"[평가] test {len(inputs.test_records)}건, 검증 {len(inputs.validation_records)}건, 채팅 {len(inputs.chat_samples)}건, "

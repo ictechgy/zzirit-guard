@@ -27,6 +27,7 @@ from zg_stage1 import modeling
 from zg_stage1.arguments import fraction_below_one, non_negative_float, non_negative_integer, positive_float, positive_integer
 from zg_stage1.batching import BUCKET_MULTIPLIER, build_length_bucketed_batches
 from zg_stage1.data import LabeledText, describe_file_provenance, load_labeled_texts
+from zg_stage1.inference_contract import build_inference_contract, write_inference_contract_file
 from zg_stage1.errors import run_command_line
 from zg_stage1.metrics import METRIC_DECIMALS, STANDARD_THRESHOLD, compute_roc_auc, summarize_at_threshold
 from zg_stage1.model_card import (
@@ -452,6 +453,15 @@ def describe_inputs(paths: TrainingPaths, train_split: EncodedSplit, validation_
     return base_model, training_data
 
 
+def prepare_output_directory(output_directory: Path, tokenizer: PreTrainedTokenizerBase, max_length: int) -> None:
+    """출력 디렉터리를 새로 만들고(있으면 거부) 워커용 추론 계약(inference.json)을 먼저 써 둔다.
+
+    계약은 학습 내내 바뀌지 않으므로 처음에 한 번 쓴다. 워커는 이 파일의 max_length·입력 형식을 따른다.
+    """
+    create_new_output_directory(output_directory)
+    write_inference_contract_file(output_directory, build_inference_contract(tokenizer, max_length))
+
+
 def create_training_session(arguments: argparse.Namespace, paths: TrainingPaths, device: str) -> TrainingSession:
     """모델·데이터·옵티마이저·카드를 준비해 TrainingSession을 만든다. 출력 디렉터리는 준비가 끝난 뒤에 만든다
     (준비 중 실패하면 빈 디렉터리가 남아 다음 실행이 덮어쓰기 거부에 걸리는 일을 막기 위해서다)."""
@@ -462,7 +472,7 @@ def create_training_session(arguments: argparse.Namespace, paths: TrainingPaths,
     optimizer, scheduler = build_optimizer_and_scheduler(model, arguments, total_steps)
     base_model, training_data = describe_inputs(paths, train_split, validation_split)
     card = build_initial_model_card(base_model, training_data, describe_hyperparameters(arguments, total_steps), device, modeling.INPUT_FORMAT_DESCRIPTION)
-    create_new_output_directory(paths.output_directory)
+    prepare_output_directory(paths.output_directory, tokenizer, arguments.max_length)
     print(f"[준비] device={device} 전체 스텝={total_steps} 출력={paths.output_directory}", flush=True)
     return TrainingSession(
         arguments=arguments,
