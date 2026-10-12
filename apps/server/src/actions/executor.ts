@@ -53,6 +53,14 @@ export interface ExecutorOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * 처리 대기 중(실행 중 포함) 요청 수의 상한(S3).
+ * 왜: 직렬 대기열에 상한이 없으면 떼도배·치지직 장애 때 요청이 끝없이 쌓여 메모리가 늘고, 매니저의 조치가 수십 분 뒤에야 나간다.
+ * 넘치면 새 요청을 바로 거절해 매니저가 지금 상황을 알게 한다.
+ */
+export const MAX_PENDING_ACTIONS = 500;
+/** 대기열이 가득 차 거절할 때의 매니저용 문구. */
+const QUEUE_FULL_MESSAGE = `처리 대기 중인 조치가 너무 많아(${MAX_PENDING_ACTIONS}건) 이 요청을 보내지 않았습니다. 잠시 뒤 다시 시도하세요.`;
 /** 최대 재시도 횟수(스펙 10장). */
 const MAX_RETRIES = 3;
 /** 재시도 대기 기본값. 1·2·4초로 늘린다. */
@@ -111,6 +119,7 @@ class SerialExecutor implements Executor {
   }
 
   submit(channelId: string, request: ActionRequest, actor: Actor, options?: SubmitOptions): Promise<ActionOutcome> {
+    if (this.pending >= MAX_PENDING_ACTIONS) return Promise.resolve(this.rejectQueueFull(channelId, request, actor));
     this.pending += 1;
     const run = this.tail.then(() => this.execute(channelId, request, actor, options));
     // 대기열 사슬은 한 요청이 예외로 끝나도 이어져야 한다. 예외 자체는 run을 통해 호출자에게 그대로 전달된다.
@@ -129,6 +138,20 @@ class SerialExecutor implements Executor {
 
   onFailureRateExceeded(listener: (channelId: string) => void): void {
     this.listeners.push(listener);
+  }
+
+  /**
+   * 대기열이 가득 찬 요청을 치지직에 보내지 않고 바로 실패로 끝낸다. 감사 기록과 경고 로그를 남긴다.
+   * 실패율에는 넣지 않는다: 치지직 호출 결과가 아니어서, 넣으면 대기열 폭주만으로 자동 숨김이 꺼질 수 있다.
+   * @param channelId 채널 ID
+   * @param request 거절한 요청(종류만 로그에 남긴다)
+   * @param actor 요청한 주체
+   */
+  private rejectQueueFull(channelId: string, request: ActionRequest, actor: Actor): ActionOutcome {
+    const outcome: ActionOutcome = { ok: false, message: QUEUE_FULL_MESSAGE };
+    this.options.logger.warn("실행기 대기열이 가득 차 요청을 거절했습니다", { action: request.kind, pending: this.pending });
+    this.recordAudit(channelId, request, actor, outcome);
+    return outcome;
   }
 
   /**

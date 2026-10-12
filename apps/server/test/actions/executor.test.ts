@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createExecutor, type ActionRequest } from "../../src/actions/executor.js";
+import { createExecutor, MAX_PENDING_ACTIONS, type ActionRequest } from "../../src/actions/executor.js";
 import { ChzzkApiError, type ChzzkApi } from "../../src/chzzk/apiClient.js";
 import { WriteLockedError } from "../../src/connection/tokenManager.js";
 import { openDatabase } from "../../src/db/database.js";
@@ -213,6 +213,25 @@ describe("Executor", () => {
     releaseFirst();
     await Promise.all([first, second]);
     expect(order).toEqual(["start:first", "end:first", "start:second", "end:second"]);
+  });
+
+  it("대기열이 가득 차면(MAX_PENDING_ACTIONS) 새 요청을 바로 거절하고 실패로 기록·로그한다(S3)", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const blindMessage = vi.fn(async () => gate);
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const { executor, auditLog, verdict, hide } = setup({ blindMessage }, {}, logger);
+    const queued = Array.from({ length: MAX_PENDING_ACTIONS }, () => executor.submit("c1", hide, manager));
+    expect(executor.pendingCount()).toBe(MAX_PENDING_ACTIONS);
+    const rejected = await executor.submit("c1", hide, manager);
+    expect(rejected).toEqual({ ok: false, message: expect.stringMatching(/대기 중인 조치가 너무 많아.*잠시 뒤 다시 시도/) });
+    expect(executor.pendingCount()).toBe(MAX_PENDING_ACTIONS);
+    expect(auditLog.list("c1", 1, null)[0]).toMatchObject({ action: "hide", result: "error", verdictId: verdict.id, error: rejected.ok ? null : rejected.message });
+    expect(logger.warn).toHaveBeenCalledWith("실행기 대기열이 가득 차 요청을 거절했습니다", { action: "hide", pending: MAX_PENDING_ACTIONS });
+    release();
+    await Promise.all(queued);
+    expect(executor.pendingCount()).toBe(0);
+    await expect(executor.submit("c1", hide, manager)).resolves.toEqual({ ok: true, note: null });
   });
 
   it("실패율 알림 수신자가 예외를 던져도 나머지에게 알리고 submit은 결과를 돌려준다", async () => {
