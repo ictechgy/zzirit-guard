@@ -57,6 +57,27 @@ describe("containsBlockedLink", () => {
   });
 });
 
+describe("bidi·서식 제어 문자로 끊은 링크·전화번호(S9, M08)", () => {
+  it.each([
+    ["LRE·PDF(U+202A·U+202C)", "evil\u202A.\u202Ccom/x"],
+    ["RLO(U+202E)", "spam\u202E.ru 들어와"],
+    ["LRI~PDI(U+2066~2069)", "t\u2066.\u2069me/spamroom"],
+    ["ALM(U+061C)", "bit\u061C.ly/free"],
+    ["LRM·RLM(U+200E·U+200F)", "evil\u200E.\u200Fde"],
+  ])("%s로 끊어도 링크로 잡는다", (_label, text) => {
+    expect(containsBlockedLink(text, [])).toBe(true);
+  });
+
+  it.each([
+    ["U+202A·U+202C", "010\u202A1234\u202C5678"],
+    ["U+2066·U+2069", "010-\u20661234\u2069-5678"],
+    ["U+061C", "010\u061C1234\u061C5678"],
+    ["U+202E", "0\u202E1012345678"],
+  ])("%s로 끊은 전화번호도 잡는다", (_label, text) => {
+    expect(containsPhoneNumber(text)).toBe(true);
+  });
+});
+
 describe("containsPhoneNumber", () => {
   it.each(["010-1234-5678 이 번호로", "01012345678", "010 1234 5678", "011.123.4567", "010​1234​5678"])("잡는다: %s", (text) => {
     expect(containsPhoneNumber(text)).toBe(true);
