@@ -133,3 +133,11 @@ def test_regression_sample_is_deterministic_and_balanced(tmp_path: Path) -> None
     assert [record.record_id for record in first] == [record.record_id for record in second]
     counts = {label: sum(record.original_label == label for record in first) for label in ("normal", "offensive", "L1_hate", "L2_hate")}
     assert counts == {"normal": 4, "offensive": 4, "L1_hate": 4, "L2_hate": 1}
+
+
+def test_duplicate_id_raises_with_both_locations(tmp_path: Path) -> None:
+    """같은 id가 두 번 나오면 두 위치를 담은 오류를 낸다(회귀 표본·점수 대응이 id 기준이라 중복이면 어긋난다)."""
+    raw = [{"id": 1, "text": "가", "label": "normal"}, {"id": 2, "text": "나", "label": "offensive"}, {"id": 1, "text": "다", "label": "L1_hate"}]
+    path = write_jsonl(tmp_path / "test.jsonl", raw)
+    with pytest.raises(DatasetFormatError, match=r"test\.jsonl:3.*test\.jsonl:1"):
+        load_labeled_texts(path)

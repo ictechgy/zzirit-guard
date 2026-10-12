@@ -141,10 +141,26 @@ def load_labeled_texts(path: str | Path, limit: int | None = None) -> list[Label
     주의: 읽은 줄이 하나도 없으면 오류를 낸다. 빈 파일로 학습·평가가 '성공'하는 일을 막기 위해서다.
     """
     file_path = Path(path)
-    records = [parse_labeled_text(line, location) for location, line in iterate_nonblank_lines(file_path, limit)]
-    if not records:
+    located_records = [(location, parse_labeled_text(line, location)) for location, line in iterate_nonblank_lines(file_path, limit)]
+    if not located_records:
         raise DatasetFormatError(f"{file_path.name}: 읽은 줄이 없습니다. 파일이 비었는지, 경로가 맞는지 확인하세요.")
-    return records
+    ensure_unique_identifiers(located_records)
+    return [record for _, record in located_records]
+
+
+def ensure_unique_identifiers(located_records: list[tuple[str, LabeledText]]) -> None:
+    """한 파일 안에서 id가 겹치지 않는지 확인한다. 겹치면 두 위치를 담은 오류를 낸다.
+
+    왜: 회귀 표본과 점수 대응을 id로 하므로, 중복이 있으면 다른 문장의 점수를 조용히 쓰게 된다.
+    """
+    first_location_by_identifier: dict[str, str] = {}
+    for location, record in located_records:
+        first_location = first_location_by_identifier.setdefault(record.record_id, location)
+        if first_location != location:
+            raise DatasetFormatError(
+                f"{location}: id {record.record_id!r}가 {first_location}에서 이미 나왔습니다. "
+                "파일이 합쳐졌거나 손상됐는지 확인하고 공식 저장소에서 다시 받으세요."
+            )
 
 
 def parse_chat_sample(line: str, location: str) -> ChatSample:
