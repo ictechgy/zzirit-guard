@@ -309,6 +309,16 @@ describe("Executor 재시도 범위(S1): 요청이 나갔을 수 있는 실패�
     });
   });
 
+  it("2xx인데 응답 본문을 해석하지 못한 실패는 다시 보내지 않고 결과를 알 수 없다고 알린다(N3)", async () => {
+    const delivered = new ChzzkApiError(502, "UNEXPECTED_RESPONSE: JSON이 아닌 응답", "/open/v1/chats/blind-message", { wasDelivered: true });
+    const blindMessage = failingThenOk([delivered]);
+    const { executor, sleeps, hide } = setup({ blindMessage });
+    const outcome = await executor.submit("c1", hide, manager);
+    expect(blindMessage).toHaveBeenCalledTimes(1);
+    expect(sleeps).toEqual([]);
+    expect(outcome).toEqual({ ok: false, message: expect.stringMatching(/결과를 알 수 없습니다/) });
+  });
+
   it.each(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"])("요청이 나가기 전 실패(%s)는 기다렸다가 다시 시도한다", async (code) => {
     const blindMessage = failingThenOk([fetchFailure(code)]);
     const { executor, sleeps, hide } = setup({ blindMessage });

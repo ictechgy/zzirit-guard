@@ -362,6 +362,9 @@ function isStatus(error: unknown, status: number): boolean {
  * @param phase 실패한 단계
  */
 function isRetryable(error: unknown, phase: FailurePhase): boolean {
+  // 2xx 응답의 본문을 해석하지 못한 502는 요청이 이미 처리됐을 수 있어 다시 보내지 않는다(N3).
+  if (error instanceof ChzzkApiError && error.wasDelivered) return false;
+  // 진짜 5xx는 계획대로 다시 시도한다. 단, 504처럼 앞단이 시간 초과를 알린 경우 치지직은 이미 처리했을 수 있다(알려진 위험, 스펙 10장).
   if (error instanceof ChzzkApiError) return error.status === 429 || error.status >= 500;
   return phase === "token" || isPreSendNetworkError(error);
 }
@@ -395,6 +398,7 @@ function networkErrorCode(error: unknown): string | null {
  */
 function toUserMessage(error: unknown, phase: FailurePhase): string {
   if (error instanceof WriteLockedError) return error.message;
+  if (phase === "write" && error instanceof ChzzkApiError && error.wasDelivered) return RESULT_UNKNOWN_MESSAGE;
   // 내부 오류 내용은 넣지 않는다(describeFailure가 로그로 남긴다).
   if (!(error instanceof ChzzkApiError)) return phase === "write" && !isPreSendNetworkError(error) ? RESULT_UNKNOWN_MESSAGE : NETWORK_FAILURE_MESSAGE;
   if (error.status === 429) return "치지직 호출 한도를 넘었습니다. 잠시 뒤 다시 시도하세요.";
