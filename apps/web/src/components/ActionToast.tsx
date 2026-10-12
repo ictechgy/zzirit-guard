@@ -23,7 +23,8 @@ export interface ActionToastProps {
 /**
  * 동작 결과 알림: 탭 막대 바로 위에 떠 있는 토스트(F9, 스모크 S3).
  * 왜 아래쪽인가: 결과를 맨 위에만 보이면, 목록 아래에서 누른 매니저는 성공·실패를 못 본다(성공한 숨기기는 아무것도 안 보였다).
- * 성공·안내는 status(작업 결과)로 읽어 주고 4초 뒤 사라진다. 오류는 alert로 읽어 주고 닫을 때까지 남는다.
+ * 성공·안내는 status로 읽어 주고 4초 뒤 사라진다. 오류는 alert로 읽어 주고 닫을 때까지 남는다.
+ * 알림 자체에는 이름(aria-label)을 붙이지 않는다(W4, X33). 왜: 이름이 있으면 스크린리더가 결과 문구 대신 "작업 결과"만 읽는다.
  */
 export function ActionToast({ feedback, onDismiss }: ActionToastProps) {
   useEffect(() => {
@@ -32,7 +33,7 @@ export function ActionToast({ feedback, onDismiss }: ActionToastProps) {
     return () => clearTimeout(timer);
   }, [feedback, onDismiss]);
   if (!feedback) return null;
-  if (feedback.kind !== "error") return <p className={feedback.kind === "ok" ? "toast feedback" : "toast info"} role="status" aria-label="작업 결과">{feedback.message}</p>;
+  if (feedback.kind !== "error") return <p className={feedback.kind === "ok" ? "toast feedback" : "toast info"} role="status">{feedback.message}</p>;
   return (
     <div className="toast error" role="alert">
       <p>{feedback.message}</p>

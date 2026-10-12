@@ -57,6 +57,14 @@ function listElement(): HTMLElement {
   return screen.getAllByRole("article")[0] as HTMLElement;
 }
 
+/**
+ * 작업 결과 알림(성공·안내 토스트)을 찾는다. 없으면 null.
+ * 왜 이름으로 찾지 않나: 알림에 이름(aria-label)을 붙이면 스크린리더가 내용 대신 이름을 읽어, 알림에는 이름을 두지 않는다(W4).
+ */
+function actionToast(): HTMLElement | null {
+  return screen.queryAllByRole("status").find((element) => element.classList.contains("toast")) ?? null;
+}
+
 /** 화면을 그린다. status를 null로 넘기면 서버 상태를 아직 모르는 경우다. */
 function renderScreen(verdicts: VerdictDto[], actions = fakeActions(), currentStatus: ServerStatus | null = status) {
   const onReload = vi.fn();
@@ -103,16 +111,16 @@ describe("CandidatesScreen", () => {
   it("성공하면 서버 안내(note)를 보여 준다(R-13)", async () => {
     renderScreen([verdict(1)], fakeActions({ hide: async () => "이미 사라진 메시지입니다" }));
     await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 사라진 메시지입니다"));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("이미 사라진 메시지입니다"));
   });
 
   it("이미 처리된 판정(409 already_handled)이면 빨간 오류가 아니라 안내로 알리고 목록을 다시 읽는다(R-13·B19-6)", async () => {
     const conflict = new ApiError(409, "already_handled", "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.");
     const { onReload } = renderScreen([verdict(1)], fakeActions({ ignore: async () => { throw conflict; } }));
     await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("status", { name: "작업 결과" }).classList.contains("error")).toBe(false);
+    expect(actionToast()?.classList.contains("error")).toBe(false);
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 
@@ -383,13 +391,22 @@ describe("CandidatesScreen 작업 결과 알림(F9, 스모크 S3)", () => {
     renderScreen([verdict(1)], fakeActions({ hide: async () => "숨겼습니다." }));
     fireEvent.click(hideButton());
     await act(async () => undefined);
-    const toast = screen.getByRole("status", { name: "작업 결과" });
-    expect(toast.textContent).toBe("숨겼습니다.");
-    expect(toast.closest(".toast")).not.toBeNull();
+    const toast = actionToast();
+    expect(toast?.textContent).toBe("숨겼습니다.");
     act(() => vi.advanceTimersByTime(3_999));
-    expect(screen.queryByRole("status", { name: "작업 결과" })).not.toBeNull();
+    expect(actionToast()).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
-    expect(screen.queryByRole("status", { name: "작업 결과" })).toBeNull();
+    expect(actionToast()).toBeNull();
+  });
+
+  it("알림에는 이름(aria-label·aria-labelledby)을 붙이지 않아 스크린리더가 결과 문구를 읽는다(W4, X33)", async () => {
+    renderScreen([verdict(1)], fakeActions({ hide: async () => "숨겼습니다." }));
+    fireEvent.click(hideButton());
+    await waitFor(() => expect(actionToast()).not.toBeNull());
+    const toast = actionToast() as HTMLElement;
+    expect(toast.hasAttribute("aria-label")).toBe(false);
+    expect(toast.hasAttribute("aria-labelledby")).toBe(false);
+    expect(screen.getByRole("status", { name: "" }).textContent).toBe("숨겼습니다.");
   });
 
   it("오류는 시간이 지나도 남고, 닫아야 사라진다", async () => {
