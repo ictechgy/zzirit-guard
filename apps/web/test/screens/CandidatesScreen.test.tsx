@@ -57,6 +57,14 @@ function listElement(): HTMLElement {
   return screen.getAllByRole("article")[0] as HTMLElement;
 }
 
+/**
+ * 작업 결과 알림(성공·안내 토스트)을 찾는다. 없으면 null.
+ * 왜 이름으로 찾지 않나: 알림에 이름(aria-label)을 붙이면 스크린리더가 내용 대신 이름을 읽어, 알림에는 이름을 두지 않는다(W4).
+ */
+function actionToast(): HTMLElement | null {
+  return screen.queryAllByRole("status").find((element) => element.classList.contains("toast")) ?? null;
+}
+
 /** 화면을 그린다. status를 null로 넘기면 서버 상태를 아직 모르는 경우다. */
 function renderScreen(verdicts: VerdictDto[], actions = fakeActions(), currentStatus: ServerStatus | null = status) {
   const onReload = vi.fn();
@@ -103,16 +111,16 @@ describe("CandidatesScreen", () => {
   it("성공하면 서버 안내(note)를 보여 준다(R-13)", async () => {
     renderScreen([verdict(1)], fakeActions({ hide: async () => "이미 사라진 메시지입니다" }));
     await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 사라진 메시지입니다"));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("이미 사라진 메시지입니다"));
   });
 
   it("이미 처리된 판정(409 already_handled)이면 빨간 오류가 아니라 안내로 알리고 목록을 다시 읽는다(R-13·B19-6)", async () => {
     const conflict = new ApiError(409, "already_handled", "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.");
     const { onReload } = renderScreen([verdict(1)], fakeActions({ ignore: async () => { throw conflict; } }));
     await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("status", { name: "작업 결과" }).classList.contains("error")).toBe(false);
+    expect(actionToast()?.classList.contains("error")).toBe(false);
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 
@@ -204,10 +212,20 @@ describe("CandidatesScreen", () => {
     expect(actions.temporaryRestrict).toHaveBeenCalledWith(expect.objectContaining({ senderChannelId: "bad" }));
   });
 
-  it("카드에는 메시지를 최대 3건만 보여 준다", () => {
+  it("카드에는 처음에 메시지를 3건만 보여 주고, '더 보기 (N건)'을 누르면 그 사람의 대기 중 판정을 모두 보여 준다(W2, X34)", async () => {
     renderScreen([verdict(1), verdict(2), verdict(3), verdict(4), verdict(5)]);
     expect(screen.getByText("5건")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ })).toHaveLength(3);
+    await userEvent.click(screen.getByRole("button", { name: "더 보기 (2건)" }));
+    expect(screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ })).toHaveLength(5);
+    expect(screen.getByText("나쁜 말 5")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "접기" }));
+    expect(screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ })).toHaveLength(3);
+  });
+
+  it("3건 이하면 '더 보기'를 두지 않는다", () => {
+    renderScreen([verdict(1), verdict(2), verdict(3)]);
+    expect(screen.queryByRole("button", { name: /더 보기/ })).toBeNull();
   });
 
   it("동기로 던지는 동작도 오류를 보여 주고 버튼을 풀며 다시 누를 수 있다", async () => {
@@ -373,13 +391,22 @@ describe("CandidatesScreen 작업 결과 알림(F9, 스모크 S3)", () => {
     renderScreen([verdict(1)], fakeActions({ hide: async () => "숨겼습니다." }));
     fireEvent.click(hideButton());
     await act(async () => undefined);
-    const toast = screen.getByRole("status", { name: "작업 결과" });
-    expect(toast.textContent).toBe("숨겼습니다.");
-    expect(toast.closest(".toast")).not.toBeNull();
+    const toast = actionToast();
+    expect(toast?.textContent).toBe("숨겼습니다.");
     act(() => vi.advanceTimersByTime(3_999));
-    expect(screen.queryByRole("status", { name: "작업 결과" })).not.toBeNull();
+    expect(actionToast()).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
-    expect(screen.queryByRole("status", { name: "작업 결과" })).toBeNull();
+    expect(actionToast()).toBeNull();
+  });
+
+  it("알림에는 이름(aria-label·aria-labelledby)을 붙이지 않아 스크린리더가 결과 문구를 읽는다(W4, X33)", async () => {
+    renderScreen([verdict(1)], fakeActions({ hide: async () => "숨겼습니다." }));
+    fireEvent.click(hideButton());
+    await waitFor(() => expect(actionToast()).not.toBeNull());
+    const toast = actionToast() as HTMLElement;
+    expect(toast.hasAttribute("aria-label")).toBe(false);
+    expect(toast.hasAttribute("aria-labelledby")).toBe(false);
+    expect(screen.getByRole("status", { name: "" }).textContent).toBe("숨겼습니다.");
   });
 
   it("오류는 시간이 지나도 남고, 닫아야 사라진다", async () => {
@@ -420,9 +447,12 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     expect(hide).toHaveBeenCalledTimes(2);
   });
 
-  it("시간 초과된 임시 제한은 그 판정의 상태가 바뀌면(서버가 처리했으면) 60초를 기다리지 않고 풀린다", async () => {
+  it.each([
+    ["성공한", async (): Promise<string | null> => null],
+    ["시간 초과된", async (): Promise<string | null> => { throw timeoutError(); }],
+  ])("%s 임시 제한은 첫 판정의 상태가 바뀌어도 60초 동안 그 사람의 임시 제한을 다시 보내지 않는다(W2, M20)", async (_label, outcome) => {
     vi.useFakeTimers();
-    const temporaryRestrict = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
+    const temporaryRestrict = vi.fn(outcome);
     const actions = fakeActions({ temporaryRestrict });
     const screenFor = (verdicts: VerdictDto[]) => <CandidatesScreen me={chatManager} status={status} sections={buildSections(verdicts, NOW)} realtimeConnected actions={actions} onReload={vi.fn()} {...noNotice} />;
     const { rerender } = render(screenFor([verdict(1), verdict(2)]));
@@ -430,10 +460,41 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     fireEvent.click(restrictButton());
     await act(async () => undefined);
     expect(restrictButton().disabled).toBe(true);
-    rerender(screenFor([verdict(1), verdict(2)]));
-    expect(restrictButton().disabled).toBe(true);
+    // 서버가 첫 판정만 restricted로 바꾸므로, 남은 판정 때문에 묶음 카드는 그대로 남는다.
     rerender(screenFor([verdict(1, { status: "restricted" }), verdict(2)]));
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(restrictButton());
+    expect(temporaryRestrict).toHaveBeenCalledTimes(1);
+    expect(restrictButton().disabled).toBe(true);
+    act(() => vi.advanceTimersByTime(1));
     expect(restrictButton().disabled).toBe(false);
+  });
+
+  it("서버가 처리 결과를 알 수 없다고 하면(502 result_unknown) 시간 초과와 같이 60초 동안 같은 줄을 다시 보내지 않는다(N4)", async () => {
+    vi.useFakeTimers();
+    const resultUnknown = () => new ApiError(502, "result_unknown", "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.");
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw resultUnknown(); });
+    renderScreen([verdict(1)], fakeActions({ hide }));
+    const hideButton = () => screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement;
+    fireEvent.click(hideButton());
+    await act(async () => undefined);
+    expect(screen.getByRole("alert").textContent).toMatch(/결과를 알 수 없습니다.*다시 누르지 마세요/);
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(hideButton());
+    expect(hide).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(1));
+    expect(hideButton().disabled).toBe(false);
+  });
+
+  it("자동 숨김이 진행 중이라는 409(in_progress)는 서버 문구를 안내(info)로 보여 주고 다시 불러오지 않는다(N4)", async () => {
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw new ApiError(409, "in_progress", "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다."); });
+    const { onReload } = renderScreen([verdict(1, { decision: "auto_hide" })], fakeActions({ hide }));
+    fireEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다."));
+    expect(actionToast()?.classList.contains("info")).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/이미 처리된 항목입니다/)).toBeNull();
+    expect(onReload).not.toHaveBeenCalled();
   });
 
   it("자동 숨김 끄기는 시간 초과돼도 붙잡지 않는다(안전장치는 바로 다시 누를 수 있어야 한다)", async () => {

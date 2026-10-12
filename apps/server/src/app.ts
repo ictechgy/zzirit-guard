@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { createAutoHideSwitch } from "./actions/autoHideSwitch.js";
 import { createDecisionHandler } from "./actions/decisionHandler.js";
 import { createExecutor } from "./actions/executor.js";
+import { createVerdictClaims } from "./actions/verdictClaims.js";
 import { connectWithSocketIo, createChatReceiver, type SocketConnector } from "./chat/chatReceiver.js";
 import { createChzzkApi } from "./chzzk/apiClient.js";
 import type { AppConfig } from "./config.js";
@@ -28,6 +29,7 @@ import { runBackup, runRetention } from "./records/maintenance.js";
 import { createMinuteStats } from "./records/minuteStats.js";
 import { createSettingsRepository } from "./records/settingsRepository.js";
 import { createVerdictRepository } from "./records/verdictRepository.js";
+import { runOneAtATime } from "./runOneAtATime.js";
 import { createTokenCipher } from "./security/tokenCipher.js";
 import { systemClock, type Clock } from "./time.js";
 
@@ -65,6 +67,8 @@ const INTERVALS = {
 const STATUS_BROADCAST_MS = 20_000;
 /** 시스템 행위자. */
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
+/** 주기 작업이 이만큼 연속으로 건너뛰어지면 멈춘 것으로 보고 경고 로그를 남긴다(N5). */
+const STUCK_TASK_SKIP_THRESHOLD = 3;
 /** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
 const SESSION_EXPIRED_REASON = "세션이 만료되었습니다. 다시 로그인하세요";
 
@@ -102,7 +106,9 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     onVerdictStatus: (verdictId, status) => hub.broadcast({ type: "verdict_status", verdictId, status }),
   });
   const autoHide = createAutoHideSwitch({ settings, auditLog, clock, logger });
-  const decisionHandler = createDecisionHandler({ verdicts, executor, autoHide, stats, broadcaster: hub, logger });
+  /** 숨김을 보내는 중인 판정 모음. 매니저 숨기기(routes)와 자동 숨김이 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
+  const claims = createVerdictClaims();
+  const decisionHandler = createDecisionHandler({ verdicts, executor, autoHide, claims, stats, broadcaster: hub, logger });
   const pipeline = createDetectionPipeline({
     rules, auditLog,
     groupFlood: createGroupFloodDetector(),
@@ -155,6 +161,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
 
   const receiver = createChatReceiver({
     api, tokenManager, clock, logger, connect: options.connect ?? connectWithSocketIo,
+    connectedChannelId: () => credentialStore.loadChannel()?.channelId ?? null,
     onChat: (event) => {
       lastChatAt = event.receivedAt;
       decisionHandler.handle(event, pipeline.evaluate(event));
@@ -223,7 +230,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
 
   const services: RouteServices = {
     channel: () => credentialStore.loadChannel(),
-    status, verdicts, executor, autoHide, rules, settings, auditLog, stats, push,
+    status, verdicts, claims, executor, autoHide, rules, settings, auditLog, stats, push,
     broadcaster: hub,
     clock,
     getChatSettings: async () => api.getChatSettings(await tokenManager.getAccessToken()),
@@ -300,14 +307,31 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     await recheckSessionRoles({ sessions, roleVerifier, logger, onRevoked: handleRevokedSessions });
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
+  /**
+   * 오래 걸릴 수 있는 주기 작업을 한 번에 하나만 돌게 감싼다(S15). 건너뛴 차례는 정보 로그로 남기고,
+   * 3번 연속 건너뛰면 경고로 올린다(N5). 왜: 한 번 실행이 주기의 세 배 넘게 끝나지 않으면 치지직 장애나 DB 잠금처럼 운영자가 봐야 할 문제다.
+   * @param name 로그에 쓸 작업 이름
+   * @param task 감쌀 비동기 작업
+   */
+  const oneAtATime = (name: string, task: () => Promise<void>): (() => Promise<void>) =>
+    runOneAtATime(task, (skipCount) => {
+      if (skipCount < STUCK_TASK_SKIP_THRESHOLD) logger.info("이전 실행이 아직 끝나지 않아 이번 차례를 건너뜁니다", { task: name });
+      else logger.warn(`주기 작업이 ${skipCount}번 연속 건너뛰어졌습니다. 이전 실행이 멈췄는지 치지직·DB 상태를 확인하세요`, { task: name, skipCount });
+    });
+  /** 토큰 선제 갱신(겹침 방지). */
+  const refreshTokenOnce = oneAtATime("토큰 선제 갱신", refreshTokenQuietly);
+  /** 역할 재확인과 만료 세션 소켓 종료(겹침 방지). */
+  const recheckRolesOnce = oneAtATime("역할 재확인", recheckRolesAndCloseExpired);
+  /** 보관 기한 정리와 백업(겹침 방지). 첫 실행 타이머와 하루 주기 타이머가 이 함수 하나를 함께 써야 서로 겹치지 않는다. */
+  const runMaintenanceOnce = oneAtATime("정리·백업", runMaintenance);
   /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
   const startTimers = (): void => {
     intervalTimers.push(setInterval(guarded("상태 방송 실패", broadcastStatus), STATUS_BROADCAST_MS));
-    intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenQuietly), INTERVALS.tokenCheckMs));
+    intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenOnce), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
-    intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesAndCloseExpired), INTERVALS.roleRecheckMs));
-    timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenance), INTERVALS.firstMaintenanceDelayMs));
-    intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenance), INTERVALS.maintenanceMs));
+    intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesOnce), INTERVALS.roleRecheckMs));
+    timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.firstMaintenanceDelayMs));
+    intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.maintenanceMs));
   };
   /** 등록한 모든 타이머를 해제하고 목록을 비운다. */
   const clearTimers = (): void => {

@@ -23,6 +23,18 @@ describe("VerdictRepository", () => {
     expect(repository.listRecent("c1", 2_000).map((verdict) => verdict.id)).toEqual([second.id]);
     expect(repository.deleteOlderThan(2_000)).toBe(1);
   });
+
+  it("상태 전이는 허용한 이전 상태·같은 채널일 때만 바꾸고 결과를 알려 준다(S12)", () => {
+    const repository = createVerdictRepository(openDatabase(":memory:"), () => 0);
+    const verdict = repository.insert(sample);
+    expect(repository.transitionStatus(verdict.id, "other-channel", "ignored", ["pending"])).toBe(false);
+    expect(repository.transitionStatus(verdict.id, "c1", "ignored", ["hidden", "restricted"])).toBe(false);
+    expect(repository.get(verdict.id)?.status).toBe("pending");
+    expect(repository.transitionStatus(verdict.id, "c1", "ignored", ["pending"])).toBe(true);
+    expect(repository.get(verdict.id)?.status).toBe("ignored");
+    expect(repository.transitionStatus(verdict.id, "c1", "ignored", ["pending"])).toBe(false);
+    expect(repository.transitionStatus(999, "c1", "hidden", ["pending"])).toBe(false);
+  });
 });
 
 describe("AuditLog", () => {
@@ -38,6 +50,27 @@ describe("AuditLog", () => {
     expect(log.hasEnforcedAction("c1", "bad", 0)).toBe(true);
     expect(log.hasEnforcedAction("c1", "failed", 0)).toBe(false);
     expect(log.hasEnforcedAction("c1", "bad", 1_500)).toBe(false);
+  });
+});
+
+describe("AuditLog 페이지 크기(S19, M18)", () => {
+  /** 감사 기록 n건을 넣은 저장소. */
+  function auditLogWith(count: number) {
+    const auditLog = createAuditLog(openDatabase(":memory:"), () => 0);
+    for (let index = 0; index < count; index += 1) {
+      auditLog.record({ channelId: "c1", actorType: "rule", actorChannelId: null, action: "hide", targetSenderChannelId: "s", verdictId: null, result: "ok", error: null });
+    }
+    return auditLog;
+  }
+
+  it.each([
+    ["음수(SQLite에서는 무제한)", -1, 1],
+    ["0", 0, 1],
+    ["상한(200)보다 큰 값", 1000, 200],
+    ["정수가 아닌 값", 2.7, 2],
+    ["숫자가 아닌 값(NaN)", Number.NaN, 1],
+  ])("limit이 %s이면 1~200 사이로 맞춘다", (_label, limit, expected) => {
+    expect(auditLogWith(250).list("c1", limit, null)).toHaveLength(expected);
   });
 });
 

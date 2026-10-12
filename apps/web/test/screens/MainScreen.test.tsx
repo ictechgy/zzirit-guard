@@ -22,6 +22,10 @@ const switchManager = { ...me, permissions: ["disable_auto_hide" as const] };
 const auditManager = { ...switchManager, role: "STREAMING_CHANNEL_MANAGER" as const, permissions: ["disable_auto_hide" as const, "view_audit" as const] };
 /** 정상 서버 상태(자동 숨김 켜짐). */
 const enabledStatus: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: true, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+/** 작업 결과 알림(성공·안내 토스트)을 찾는다. 알림에는 이름을 붙이지 않으므로(W4) 역할과 클래스로 찾는다. */
+function actionToast(): HTMLElement | null {
+  return screen.queryAllByRole("status").find((element) => element.classList.contains("toast")) ?? null;
+}
 /** 감사 기록을 볼 수 있는 매니저에게만 붙이는 안내(B19-3). */
 const AUDIT_HINT = "기록·설정 → 감사 기록에서 확인하세요.";
 
@@ -153,8 +157,20 @@ describe("MainScreen 기본 성공 안내(F9)", () => {
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict(1), verdict(2)] };
     render(<MainScreen me={{ ...me, permissions: ["hide_message"] }} onSignedOut={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: /^시청자1의 .+ 메시지 숨기기$/ }));
-    expect((await screen.findByRole("status", { name: "작업 결과" })).textContent).toBe("숨겼습니다.");
+    await waitFor(() => expect(actionToast()?.textContent).toBe("숨겼습니다."));
     await userEvent.click(screen.getByRole("button", { name: /^시청자2의 .+ 메시지 무시$/ }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "작업 결과" }).textContent).toBe("무시했습니다."));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("무시했습니다."));
+  });
+});
+
+describe("MainScreen 임시 제한 요청(S13)", () => {
+  it("판정 번호만 보내고 채팅 채널은 보내지 않는다(서버가 판정에서 읽는다)", async () => {
+    const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() };
+    const fetchMock = stubFetch({ "POST /api/senders/bad/temporary-restrict": () => json(200, { ok: true, note: null }) });
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
+    render(<MainScreen me={{ ...me, permissions: ["temporary_restrict"] }} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ verdictId: 7 });
   });
 });

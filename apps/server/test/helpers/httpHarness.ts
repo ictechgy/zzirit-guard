@@ -1,6 +1,7 @@
 import type { ManagerRole } from "@zzirit-guard/shared";
 import { vi } from "vitest";
 import { createAutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
+import { createVerdictClaims } from "../../src/actions/verdictClaims.js";
 import type { ActionOutcome, Executor } from "../../src/actions/executor.js";
 import { openDatabase } from "../../src/db/database.js";
 import { createRuleRepository } from "../../src/detection/ruleRepository.js";
@@ -46,6 +47,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     channel: () => ({ channelId: "c1", channelName: "채널" }),
     status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }),
     verdicts, auditLog, settings, clock,
+    claims: createVerdictClaims(),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ settings, auditLog, clock, logger: silentLogger }),
     rules: createRuleRepository(database, clock),
@@ -69,5 +71,5 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
   const app = await buildHttpServer({ config: { publicOrigin: ORIGIN, webDistDirectory: options.webDistDirectory ?? "/nonexistent-web-dist" }, sessions, authFlow, hub, services, logger: silentLogger });
   /** 역할로 로그인한 세션의 쿠키 값. */
   const login = (role: ManagerRole) => sessions.create({ channelId: `${role}-id`, channelName: role, role }).rawId;
-  return { app, verdicts, auditLog, sessions, hub, services, submit, login, close: async () => { hub.stop(); await app.close(); } };
+  return { app, database, verdicts, auditLog, sessions, hub, services, submit, login, close: async () => { hub.stop(); await app.close(); } };
 }

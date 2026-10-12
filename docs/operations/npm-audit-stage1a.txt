@@ -1,3 +1,24 @@
+# 위험 수용 기록 (2026-10-12, M21)
+# 아래 "# npm audit report"부터가 원본 npm audit 출력이다. 이 머리말은 그 결과를 왜 고치지 않고 받아들이는지 적는다.
+
+대상: apps/server의 socket.io-client 2.0.3과 그 하위 의존성(engine.io-client, xmlhttprequest-ssl, ws, socket.io-parser, parseuri).
+결정: 위험을 받아들이고 그대로 쓴다. `npm audit fix --force`는 쓰지 않는다(socket.io-client 4.x로 올라가 치지직에 연결되지 않는다).
+
+받아들이는 근거
+1. 치지직 Session API는 socket.io-client 1.0.0~2.0.3만 지원한다(설계 문서 2장 표, 치지직 공식 문서). 더 새 클라이언트는 연결되지 않는다.
+2. 수신기는 WebSocket 전송만 쓴다: apps/server/src/chat/chatReceiver.ts의 SOCKET_OPTIONS가 transports: ["websocket"], forceNode: true다.
+   XHR 폴링을 쓰지 않으므로 xmlhttprequest-ssl의 코드 경로(임의 코드 주입·인증서 검증 우회 권고)는 실행되지 않는다.
+3. TLS 인증서 검증을 끄지 않는다. rejectUnauthorized 같은 TLS 옵션을 바꾸지 않아 Node 기본값(검증함)을 쓴다.
+4. 치지직이 발급한 세션 URL(GET /open/v1/sessions/auth 응답)로만 연결한다. 사용자 입력이나 설정 값의 주소로 연결하지 않는다.
+
+남는 위험
+- 치지직 세션 서버가 악의적이거나 침해되면, 그 서버가 보내는 프레임으로 ws·socket.io-parser·parseuri 권고(메모리 고갈·파서 DoS·ReDoS)를 일으켜
+  서버 프로세스를 멈추거나 느리게 할 수 있다. 영향은 가용성이다(자동 숨김·매니저 조치가 멈춤). launchd(KeepAlive)가 서버를 다시 띄운다.
+
+다시 볼 때
+- 치지직이 더 새 socket.io-client(3.x·4.x)나 다른 프로토콜을 지원하면 바로 올리고 이 기록을 지운다.
+- 그 전에도 의존성을 바꿀 때마다 npm audit을 다시 돌려, 위 목록에 없는 새 권고가 생겼는지 이 기록과 대조한다.
+
 # npm audit report
 
 parseuri  <2.0.0

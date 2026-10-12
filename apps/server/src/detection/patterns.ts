@@ -1,13 +1,53 @@
 import { stripInvisibleAndFullwidth } from "./normalize.js";
 
 /**
- * 호스트 후보를 전부 뽑는 패턴. 1번 그룹은 http(s):// 접두, 2번 그룹은 전체 호스트, 3번 그룹은 바로 뒤의 "/"(경로)다.
+ * 호스트 바로 뒤의 경로·포트를 보는 앞쪽 탐색. 3번 그룹은 경로 단서("/", 또는 ":포트/"), 4번 그룹은 경로 없는 포트(":8080")다.
+ * 왜 포트를 따로 보나(U3): "evil.zzz:8080/x"처럼 포트 뒤에 경로가 오면 주소가 분명하지만, 경로 없는 두 자리 이상 포트는
+ * "T1 vs.GEN:13", "t1.faker:12킬" 같은 게임 점수·횟수와 모양이 같다. 그래서 경로 없는 포트는 알려진 최상위 도메인일 때만 링크로 보고,
+ * 모르는 최상위 도메인이면 후보(rule:link_port)로만 올린다. 한 자리 숫자 콜론은 포트로 보지 않는다(N2).
+ */
+const PATH_AND_PORT_LOOKAHEAD = String.raw`(?=(\/|:\d{1,5}\/)?)(?=(:\d{2,5}(?![\d\/]))?)`;
+/**
+ * 호스트 후보를 전부 뽑는 패턴. 1번 그룹은 http(s):// 접두, 2번 그룹은 전체 호스트, 3번 그룹은 경로 단서, 4번 그룹은 경로 없는 포트다.
  * 최상위 도메인을 미리 정해 두지 않고 모양만 보는 이유: 목록에 없는 TLD(.bet, .casino)나 IP도 빠짐없이 잡기 위해서다.
  * 앞뒤에 호스트 글자가 이어지면 잘린 조각으로 보지 않도록 막는다.
+ * 점 바로 뒤는 그 점 앞 글자가 호스트 글자일 때만 막는다(B2). 왜: "a.b.com"의 중간 라벨 "b.com"을 따로 뽑지 않으려는 규칙이었는데,
+ * 점 앞이 호스트 글자가 아니어도 막아서 "좋아.me_.evil.com", "ㅋ.evil.com", "..evil.com"의 evil.com을 아예 뽑지 못했다.
+ * 뒤에 ".한글"이 와도 끊는다: "spam.com.진짜 좋음"처럼 문장 끝 마침표 뒤에 한글을 붙인 주소를 놓치지 않기 위해서다.
  */
-const HOST_CANDIDATE_PATTERN = /(?<![a-z0-9.-])(https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z0-9-]+)(?![a-z0-9-]|\.[a-z0-9])(?=(\/)?)/g;
-/** 마지막 라벨이 영문자로 시작하는지. "3.5/2" 같은 숫자 표기를 경로 휴리스틱에서 빼기 위해 쓴다. */
-const STARTS_WITH_LETTER_PATTERN = /^[a-z]/;
+const HOST_CANDIDATE_PATTERN = new RegExp(
+  String.raw`(?<![a-z0-9-])(?<![a-z0-9-]\.)(https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z0-9-]+)(?![a-z0-9-]|\.[a-z0-9])` + PATH_AND_PORT_LOOKAHEAD,
+  "g",
+);
+/**
+ * 한글 최상위 도메인. .한국(국가 도메인)과 .닷컴·.닷넷(com·net의 한글 IDN)이다.
+ * .삼성 같은 브랜드 도메인은 넣지 않는다: "역시.삼성" 같은 대화를 되돌릴 수 없는 자동 숨김으로 보지 않기 위해서다.
+ */
+const HANGUL_TOP_LEVEL_DOMAINS = ["한국", "닷컴", "닷넷"] as const;
+/**
+ * 한글 라벨이 든 호스트(IDN) 후보를 뽑는 패턴(S11, X15). 그룹 번호는 HOST_CANDIDATE_PATTERN과 같다.
+ * 라벨은 영문·숫자 라벨이거나 한글이 하나 이상 든 한글·숫자 라벨이다(한 라벨에 영문과 한글을 섞지 않는다).
+ * 왜 섞지 않나: "링크youtube.com"처럼 한글 낱말에 붙여 쓴 주소를 한 호스트로 읽으면, 허용 도메인 링크를 쓴 정상 채팅을 되돌릴 수 없게 숨긴다.
+ * 대신 그런 모양은 containsGluedAllowedLink가 후보로 올려 매니저가 본다(다른 주소일 수 있어서).
+ * 마지막 라벨은 영문 TLD(뒤에 "에서" 같은 한글 조사가 붙어도 된다) 또는 한글 TLD(뒤에 한글이 이어지면 낱말로 보고 빼낸다)이다.
+ * 한글 라벨에는 앞쪽 탐색(?=…)으로 한글이 있는지 먼저 확인해, 긴 한글 입력에서 되돌아가기가 늘지 않게 한다.
+ * 점 바로 뒤는 영문 패턴과 같이 점 앞 글자가 호스트 글자(영문·숫자·한글·하이픈)일 때만 막는다(B2): "ㅋ.카지노.kr"을 놓치지 않기 위해서다.
+ */
+const HANGUL_HOST_CANDIDATE_PATTERN = new RegExp(
+  String.raw`(?<![a-z0-9가-힣-])(?<![a-z0-9가-힣-]\.)(https?:\/\/)?((?:(?:[a-z0-9-]+|(?=[가-힣0-9-]*[가-힣])[가-힣0-9-]+)\.)+` +
+    String.raw`(?:(?:${HANGUL_TOP_LEVEL_DOMAINS.join("|")})(?![a-z0-9가-힣-])|[a-z0-9-]+(?![a-z0-9-])))(?!\.[a-z0-9가-힣])` +
+    PATH_AND_PORT_LOOKAHEAD,
+  "g",
+);
+/** 한글 음절. 한글 호스트 후보만 골라낼 때 쓴다(영문 호스트는 HOST_CANDIDATE_PATTERN이 맡는다). */
+const HANGUL_SYLLABLE_PATTERN = /[가-힣]/;
+/** 퓨니코드(IDN을 ASCII로 쓴 형태) 라벨 접두. "xn--3e0b707e"(한국)처럼 목록에 없는 TLD로도 링크를 만들 수 있다. */
+const PUNYCODE_LABEL_PREFIX = "xn--";
+/**
+ * 마지막 라벨이 최상위 도메인 모양(영문자로 시작하는 두 글자 이상)인지. 경로·포트 휴리스틱에만 쓴다.
+ * 왜: "3.5/2" 같은 숫자 표기와 "e.g:10"·"a.m:10" 같은 한 글자 약어를 빼기 위해서다. 한 글자 최상위 도메인은 없다(N2).
+ */
+const TOP_LEVEL_DOMAIN_SHAPE_PATTERN = /^[a-z][a-z0-9-]/;
 /**
  * 흔한 최상위 도메인. 접두(http://, www.)가 없는 호스트를 링크로 볼지 가리는 데만 쓴다.
  * 호스트의 첫 라벨을 뺀 나머지 라벨 중 하나라도 여기 있으면 링크로 본다("youtube.com.de", "spam.ru" 같은 우회를 막기 위해).
@@ -16,6 +56,8 @@ const KNOWN_TOP_LEVEL_DOMAINS: ReadonlySet<string> = new Set([
   "com", "net", "org", "kr", "io", "me", "ly", "gg", "xyz", "co", "tv", "app", "link", "site", "shop", "top", "info", "biz", "cc", "to", "kim", "vip",
   "bet", "win", "club", "online", "casino", "live", "fun", "store", "cloud", "pro", "asia", "games", "poker",
   "de", "ru", "cn", "jp", "us", "uk", "vn", "ph", "tw", "hk", "sg", "su", "ws",
+  // 한글 최상위 도메인. 한글 호스트 후보에서만 나온다(S11).
+  ...HANGUL_TOP_LEVEL_DOMAINS,
 ]);
 /** "텔레 @아이디", "텔레그램 아이디" 같은 연락처 유도(4자 이상 아이디). 도박 단어 없이도 광고로 본다. */
 const TELEGRAM_HANDLE_PATTERN = /텔레(?:그램)?\s{0,3}[:@]?\s{0,3}@?[a-z0-9_]{4,}/;
@@ -38,39 +80,129 @@ const UNIT_NUMBER_PATTERN = /\d+\s*동\s*\d+\s*호/;
 const IDEOGRAPHIC_DOT_PATTERN = /[。｡]/g;
 /** 도메인 점을 흐리려고 쓰는 [.] 와 (.) 표기. */
 const BRACKETED_DOT_PATTERN = /\[\.\]|\(\.\)/g;
+/**
+ * "scheme://사용자 정보@"까지의 토큰. 이 뒤에 오는 호스트가 브라우저가 실제로 가는 주소다.
+ * 왜: "https://allowed.com:pw@evil.zzz"는 사람 눈에 허용 도메인처럼 보이지만 실제 호스트는 evil.zzz다(적대적 재점검).
+ */
+const URL_USERINFO_TOKEN_PATTERN = /^https?:\/\/[^/?#]*@$/;
+/** 공백 문자 하나. 사용자 정보 토큰의 시작(앞의 공백 다음)을 찾을 때 쓴다. */
+const WHITESPACE_PATTERN = /\s/;
+/** 한글 낱말에 붙여 쓴 호스트를 찾을 때 거꾸로 훑는 라벨 글자(한글 음절·영문·숫자·하이픈). */
+const GLUED_LABEL_CHARACTER_PATTERN = /[가-힣a-z0-9-]/;
+/**
+ * 오른쪽→왼쪽 강제(RLO, U+202E). 이 뒤의 글자는 화면에 거꾸로 그려진다.
+ * 왜: "(RLO)moc.lebatsetnoc"는 화면에 "contestable.com"으로 보이는데, 제어 문자만 지우고 논리 순서로 읽으면 링크가 아니다(적대적 재점검).
+ */
+const RIGHT_TO_LEFT_OVERRIDE = "\u202E";
+/** RLO 구간을 끝내는 문자: PDF(U+202C)와 PDI(U+2069). */
+const OVERRIDE_END_PATTERN = /[\u202C\u2069]/;
 
-/** 호스트 후보 하나. hasExplicitPrefix는 http(s):// 또는 www. 로 시작해 링크임이 분명한지, isFollowedBySlash는 바로 뒤에 "/"가 오는지 나타낸다. */
+/**
+ * 호스트 후보 하나. hasExplicitPrefix는 http(s):// 또는 www. 로 시작하거나 URL 사용자 정보(…@) 뒤에 와서 링크임이 분명한지,
+ * hasPathCue는 바로 뒤에 경로("/" 또는 ":포트/")가 오는지, hasPortCue는 경로 없는 두 자리 이상 포트가 오는지(U3),
+ * start는 텍스트에서 호스트가 시작하는 위치다.
+ */
 interface HostCandidate {
   readonly host: string;
   readonly hasExplicitPrefix: boolean;
-  readonly isFollowedBySlash: boolean;
+  readonly hasPathCue: boolean;
+  readonly hasPortCue: boolean;
+  readonly start: number;
 }
 
 /**
- * 검사 전 공통 전처리. 보이지 않는 문자·전각을 걷어내고 소문자로 맞춘다.
- * 이유: 채팅 UI는 이런 문자를 건너뛰고 링크로 그리므로, 패턴이 보는 문자열도 같아야 우회를 막는다.
+ * 검사할 전처리 형태들. 읽기 순서(원문·RLO 화면 순서)마다 두 형태를 만든다: 보이지 않는 문자·전각을 걷어내고 소문자로 맞춘 형태(main과 같다)와,
+ * 거기에 호환 문자를 기본 문자로 바꾼(NFKC) 형태. 하나라도 걸리면 걸린 것으로 본다(B1).
+ * 왜 NFKC를 쓰나: 브라우저 주소 처리(UTS 46)처럼 "ⓔⓥⓘⓛ.ⓒⓞⓜ"·"𝐞𝐯𝐢𝐥.𝐜𝐨𝐦"·"evil․com"(한 점 리더)·"𝟎𝟏𝟎…"를 기본 글자로 맞춰야 이런 우회를 막는다(적대적 재점검).
+ * 왜 NFKC만 쓰지 않나: NFKC는 경계를 옮긴다. 끝에 붙은 ™·①이 "comtm"·"com1"이 되어 최상위 도메인을 못 알아보고, 앞의 "…"는 "..."가 되며,
+ * 번호 앞뒤의 ①은 숫자로 붙는다. 그래서 main이 막던 "evil.com™", "…evil.com", "010-1234-5678①"이 빠졌다.
+ * 금칙어 비교(normalize.ts)에는 NFKC를 넣지 않는다: 호환 자모가 조합형으로 바뀌어 자모 조합 단계가 달라지기 때문이다.
+ * @param text 원문
  */
-function prepareText(text: string): string {
-  return stripInvisibleAndFullwidth(text).toLowerCase();
+function preparedReadings(text: string): string[] {
+  return readingOrders(text).flatMap((reading) => {
+    const stripped = stripInvisibleAndFullwidth(reading);
+    return [stripped.toLowerCase(), stripped.normalize("NFKC").toLowerCase()];
+  });
 }
 
 /**
- * 링크 검사용 전처리. 공통 전처리 뒤에 가운데 점과 [.] (.) 표기를 "."로 바꾼다.
+ * 링크 검사용 전처리 형태들(preparedReadings마다 가운데 점과 [.] (.) 표기를 "."로 바꾼 것).
  * 이유: "spam[.]com"처럼 점을 가려 쓴 주소는 사람에게는 링크로 보이므로, 호스트 추출 전에 같은 모양으로 맞춘다.
+ * @param text 원문
  */
-function prepareLinkText(text: string): string {
-  return prepareText(text).replace(IDEOGRAPHIC_DOT_PATTERN, ".").replace(BRACKETED_DOT_PATTERN, ".");
+function linkReadings(text: string): string[] {
+  return preparedReadings(text).map((prepared) => prepared.replace(IDEOGRAPHIC_DOT_PATTERN, ".").replace(BRACKETED_DOT_PATTERN, "."));
 }
 
 /**
- * 텍스트에서 호스트 후보를 모두 뽑는다.
+ * 검사할 읽기 순서들. 기본은 원문(논리 순서) 하나이고, RLO가 있으면 화면에 보이는 순서로 뒤집은 것도 함께 본다.
+ * 둘 중 하나라도 걸리면 걸린 것으로 본다. 정상 채팅에는 RLO가 거의 없어 오탐 걱정이 작다.
+ * @param text 원문
+ */
+function readingOrders(text: string): string[] {
+  return text.includes(RIGHT_TO_LEFT_OVERRIDE) ? [text, toDisplayOrder(text)] : [text];
+}
+
+/**
+ * RLO 구간(RLO 뒤부터 PDF·PDI 또는 끝까지)을 거꾸로 뒤집어 화면에 보이는 순서에 가깝게 만든다. 중첩은 따로 다루지 않는다.
+ * @param text RLO가 든 원문
+ */
+function toDisplayOrder(text: string): string {
+  return text
+    .split(RIGHT_TO_LEFT_OVERRIDE)
+    .map((segment, index) => (index === 0 ? segment : reverseOverriddenPart(segment)))
+    .join("");
+}
+
+/**
+ * RLO 바로 뒤 조각에서 구간 끝(PDF·PDI) 전까지만 글자 순서를 뒤집는다.
+ * @param segment RLO 뒤의 조각
+ */
+function reverseOverriddenPart(segment: string): string {
+  const end = segment.search(OVERRIDE_END_PATTERN);
+  const overridden = end === -1 ? segment : segment.slice(0, end);
+  return [...overridden].reverse().join("") + (end === -1 ? "" : segment.slice(end));
+}
+
+/**
+ * 텍스트에서 호스트 후보를 모두 뽑는다: 영문 호스트와, 한글 라벨이 든 호스트(IDN, S11).
  * @returns 호스트와 접두(scheme/www) 유무, 뒤따르는 경로 유무 목록
  */
 function extractHostCandidates(text: string): HostCandidate[] {
-  return [...text.matchAll(HOST_CANDIDATE_PATTERN)].map((match) => {
+  const hangulCandidates = matchHostCandidates(text, HANGUL_HOST_CANDIDATE_PATTERN).filter((candidate) => HANGUL_SYLLABLE_PATTERN.test(candidate.host));
+  return [...matchHostCandidates(text, HOST_CANDIDATE_PATTERN), ...hangulCandidates];
+}
+
+/**
+ * 패턴 하나로 호스트 후보를 뽑는다. 두 패턴은 그룹 번호(1: 접두, 2: 호스트, 3: 경로 단서, 4: 경로 없는 포트)가 같다.
+ * @param text 링크 검사용 전처리를 거친 텍스트
+ * @param pattern HOST_CANDIDATE_PATTERN 또는 HANGUL_HOST_CANDIDATE_PATTERN(g 플래그)
+ */
+function matchHostCandidates(text: string, pattern: RegExp): HostCandidate[] {
+  return [...text.matchAll(pattern)].map((match) => {
     const host = match[2] ?? "";
-    return { host, hasExplicitPrefix: match[1] !== undefined || host.startsWith("www."), isFollowedBySlash: match[3] !== undefined };
+    const start = match.index + (match[1]?.length ?? 0);
+    const hasExplicitPrefix = match[1] !== undefined || host.startsWith("www.") || isAfterUrlUserinfo(text, start);
+    return { host, hasExplicitPrefix, hasPathCue: match[3] !== undefined, hasPortCue: match[4] !== undefined, start };
   });
+}
+
+/**
+ * 호스트가 "https://사용자정보@" 바로 뒤에 오는지 본다. 그렇다면 브라우저가 실제로 가는 호스트라 링크로 본다.
+ * @param text 링크 검사용 전처리를 거친 텍스트
+ * @param hostStart 호스트가 시작하는 위치
+ */
+function isAfterUrlUserinfo(text: string, hostStart: number): boolean {
+  if (text[hostStart - 1] !== "@") return false;
+  let tokenStart = hostStart;
+  while (tokenStart > 0 && !WHITESPACE_PATTERN.test(text[tokenStart - 1] ?? "")) tokenStart -= 1;
+  return URL_USERINFO_TOKEN_PATTERN.test(text.slice(tokenStart, hostStart));
+}
+
+/** 호스트에 퓨니코드 라벨(xn--)이 하나라도 있는지 본다. 사람이 IDN 주소를 ASCII로 옮겨 쓴 것이므로 링크로 본다(S11). */
+function hasPunycodeLabel(host: string): boolean {
+  return host.split(".").some((label) => label.startsWith(PUNYCODE_LABEL_PREFIX));
 }
 
 /**
@@ -84,14 +216,16 @@ function hasKnownTopLevelDomain(host: string): boolean {
 /**
  * 후보가 링크인지 본다.
  * 1) 접두가 있으면 TLD와 상관없이 링크(.bet, IP 포함).
- * 2) 접두가 없어도 "word.word/..."(접두 없이 경로가 붙은 호스트)는 거의 항상 URL이라 링크로 본다.
- *    단, 마지막 라벨이 영문자로 시작해야 한다("3.5/2 정도" 같은 숫자 표기는 제외).
- * 3) 그 밖에는 첫 라벨 뒤에 알려진 TLD가 있을 때만 링크다("3.5", "ver.2" 같은 숫자 표기를 거르기 위해).
+ * 2) 퓨니코드 라벨(xn--)이 있으면 링크(S11).
+ * 3) 접두가 없어도 "word.word/..."·"word.word:8080/..."(접두 없이 경로가 붙은 호스트)는 거의 항상 URL이라 링크로 본다.
+ *    경로 없는 포트("word.word:8080")만으로는 링크로 보지 않는다(U3, 게임 점수와 모양이 같다). 알려진 최상위 도메인이면 4)에서 링크가 된다.
+ *    단, 마지막 라벨이 영문자로 시작하는 두 글자 이상이어야 한다("3.5/2 정도" 같은 숫자 표기, "a.m:10" 같은 한 글자 약어, "그래.그래/…" 같은 한글 표기는 제외).
+ * 4) 그 밖에는 첫 라벨 뒤에 알려진 TLD(.한국 포함)가 있을 때만 링크다("3.5", "ver.2", "안녕.하세요" 같은 표기를 거르기 위해).
  */
 function isLinkCandidate(candidate: HostCandidate): boolean {
-  if (candidate.hasExplicitPrefix) return true;
+  if (candidate.hasExplicitPrefix || hasPunycodeLabel(candidate.host)) return true;
   const lastLabel = candidate.host.split(".").at(-1) ?? "";
-  if (candidate.isFollowedBySlash && STARTS_WITH_LETTER_PATTERN.test(lastLabel)) return true;
+  if (candidate.hasPathCue && TOP_LEVEL_DOMAIN_SHAPE_PATTERN.test(lastLabel)) return true;
   return hasKnownTopLevelDomain(candidate.host);
 }
 
@@ -108,17 +242,103 @@ function isAllowedHost(host: string, allowDomains: readonly string[]): boolean {
   return allowDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
-/** 텍스트에 링크로 볼 호스트가 하나라도 있는지 본다. */
-function hasAnyLink(text: string): boolean {
-  return extractHostCandidates(text).some(isLinkCandidate);
+/**
+ * 텍스트에서 자동 숨김할 링크 호스트를 모두 뽑는다(맨 앞 www. 제거). 단서 없는 한글 호스트는 빼고 후보 신호로만 쓴다(N1).
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ */
+function extractLinkHosts(linkText: string): string[] {
+  return extractHostCandidates(linkText)
+    .filter((candidate) => isLinkCandidate(candidate) && !isBareHangulHost(candidate))
+    .map((candidate) => stripLeadingWww(candidate.host));
 }
 
 /**
- * 도박 단어가 실제 연락 수단과 함께 있는지 본다. 연락 수단은 messenger 아이디, "@아이디", 휴대전화 번호, 링크 중 하나다.
- * 단순히 "가입·문의·@"만 있는 것은 일반 대화와 구분되지 않으므로 세지 않는다.
+ * 최상위 도메인 바로 앞 라벨(등록 도메인 이름)에 한글이 있고, 접두(http(s)://·www.·사용자 정보)·경로·포트·퓨니코드 단서가 하나도 없는 링크 후보인지 본다(N1).
+ * 왜 따로 보나: "좋아요.me", "구글.com에서 찾아봐", "가자.한국!"처럼 한글 낱말 뒤에 마침표와 흔한 영문 낱말이 오는 정상 채팅과 모양이 같아,
+ * 되돌릴 수 없는 자동 숨김 대신 매니저가 보는 후보로 낮춘다. 도박 단어와 함께면 광고 연락 수단으로 세어 자동 숨김을 유지한다.
+ * 왜 바로 앞 라벨만 보나: "좋아.evil.com"은 한글 라벨이 있어도 실제로는 영문 도메인 evil.com의 하위 주소라, 한글을 앞에 붙이기만 하면
+ * 허용되지 않은 영문 도메인이 후보로 낮아지는 우회가 된다(적대적 재점검). 등록 도메인 이름이 영문이면 낮추지 않는다.
+ * @param candidate 호스트 후보
  */
-function hasRealContact(text: string): boolean {
-  return MESSENGER_ID_PATTERN.test(text) || HANDLE_PATTERN.test(text) || containsPhoneNumber(text) || hasAnyLink(text);
+function isBareHangulHost(candidate: HostCandidate): boolean {
+  if (candidate.hasExplicitPrefix || candidate.hasPathCue || candidate.hasPortCue || hasPunycodeLabel(candidate.host)) return false;
+  const registrableLabel = candidate.host.split(".").at(-2) ?? "";
+  return HANGUL_SYLLABLE_PATTERN.test(registrableLabel);
+}
+
+/**
+ * 읽기 순서 하나에서 허용되지 않은 단서 없는 한글 링크 호스트를 뽑는다(N1).
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function bareHangulHostsIn(linkText: string, allowDomains: readonly string[]): string[] {
+  return extractHostCandidates(linkText)
+    .filter((candidate) => isLinkCandidate(candidate) && isBareHangulHost(candidate))
+    .map((candidate) => stripLeadingWww(candidate.host))
+    .filter((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 모르는 최상위 도메인(최상위 도메인 모양: 영문자로 시작하는 두 글자 이상)에 경로 없는 포트만 붙은 호스트인지 본다(U3).
+ * 예: "evil.zzz:8080", "T1 vs.GEN:13". 알려진 최상위 도메인·경로·접두가 있으면 이미 링크라 여기 들지 않는다.
+ * @param candidate 호스트 후보
+ */
+function isPortOnlyHost(candidate: HostCandidate): boolean {
+  const lastLabel = candidate.host.split(".").at(-1) ?? "";
+  return candidate.hasPortCue && TOP_LEVEL_DOMAIN_SHAPE_PATTERN.test(lastLabel) && !isLinkCandidate(candidate);
+}
+
+/**
+ * 읽기 순서 하나에서 허용되지 않은, 포트만 붙은 모르는 최상위 도메인 호스트를 뽑는다(U3).
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function portOnlyHostsIn(linkText: string, allowDomains: readonly string[]): string[] {
+  return extractHostCandidates(linkText)
+    .filter(isPortOnlyHost)
+    .map((candidate) => stripLeadingWww(candidate.host))
+    .filter((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 모르는 최상위 도메인에 포트만 붙은 주소(예: "evil.zzz:8080")가 있는지 본다. 파이프라인은 자동 숨김이 아니라 후보(rule:link_port)로 올린다(U3).
+ * 왜: 게임 점수("T1 vs.GEN:13")와 모양이 같아 확실하지 않지만, 매니저에게는 보여야 한다.
+ * @param text 원문(정규화 전)
+ * @param allowDomains 채널이 허용한 도메인
+ */
+export function containsPortOnlyLink(text: string, allowDomains: readonly string[]): boolean {
+  return linkReadings(text).some((linkText) => portOnlyHostsIn(linkText, allowDomains).length > 0);
+}
+
+/**
+ * 단서 없는 한글 링크(예: "좋아요.me", "가자.한국")가 있는지 본다. 파이프라인은 이것을 자동 숨김이 아니라 후보(rule:link_idn)로 올린다(N1).
+ * @param text 원문(정규화 전)
+ * @param allowDomains 채널이 허용한 도메인
+ */
+export function containsBareHangulLink(text: string, allowDomains: readonly string[]): boolean {
+  return linkReadings(text).some((linkText) => bareHangulHostsIn(linkText, allowDomains).length > 0);
+}
+
+/**
+ * 허용 도메인이 아닌 링크가 하나라도 있는지 본다.
+ * @param linkHosts extractLinkHosts 결과
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function hasBlockedHost(linkHosts: readonly string[], allowDomains: readonly string[]): boolean {
+  return linkHosts.some((host) => !isAllowedHost(host, allowDomains));
+}
+
+/**
+ * 도박 단어가 실제 연락 수단과 함께 있는지 본다. 연락 수단은 messenger 아이디, "@아이디", 휴대전화 번호, 허용되지 않은 링크 중 하나다.
+ * 단순히 "가입·문의·@"만 있는 것은 일반 대화와 구분되지 않으므로 세지 않는다.
+ * 허용 도메인 링크는 연락 수단으로 세지 않는다(S10, M09). 왜: 홀덤·슬롯 방송에서 "홀덤 하이라이트 youtube.com/…" 같은 정상 채팅이
+ * 되돌릴 수 없는 자동 숨김이 됐다. 채널이 허용한 주소는 광고 연락처가 아니다.
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ * @param linkHosts extractLinkHosts 결과
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function hasRealContact(linkText: string, linkHosts: readonly string[], allowDomains: readonly string[]): boolean {
+  return MESSENGER_ID_PATTERN.test(linkText) || HANDLE_PATTERN.test(linkText) || containsPhoneNumber(linkText) || hasBlockedHost(linkHosts, allowDomains);
 }
 
 /**
@@ -127,19 +347,66 @@ function hasRealContact(text: string): boolean {
  * @param allowDomains 채널이 허용한 도메인(소문자, www 제거). 하위 도메인까지 허용한다.
  */
 export function containsBlockedLink(text: string, allowDomains: readonly string[]): boolean {
-  const linkText = prepareLinkText(text);
-  const linkHosts = extractHostCandidates(linkText).filter(isLinkCandidate).map((candidate) => stripLeadingWww(candidate.host));
-  if (linkHosts.some((host) => !isAllowedHost(host, allowDomains))) return true;
-  if (TELEGRAM_HANDLE_PATTERN.test(linkText)) return true;
-  return GAMBLING_PATTERN.test(linkText) && hasRealContact(linkText);
+  return linkReadings(text).some((linkText) => hasBlockedLinkIn(linkText, allowDomains));
 }
 
 /**
- * 휴대전화 번호가 있는지 본다(신상 노출 방지). 보이지 않는 문자로 끊긴 번호도 찾는다.
+ * 읽기 순서 하나에서 광고·외부 링크·연락처 유도를 찾는다(containsBlockedLink 본체).
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function hasBlockedLinkIn(linkText: string, allowDomains: readonly string[]): boolean {
+  const linkHosts = extractLinkHosts(linkText);
+  if (hasBlockedHost(linkHosts, allowDomains)) return true;
+  if (TELEGRAM_HANDLE_PATTERN.test(linkText)) return true;
+  if (!GAMBLING_PATTERN.test(linkText)) return false;
+  // 도박 단어와 함께면 단서 없는 한글 링크("카지노.kr", N1)와 포트만 붙은 주소("토토 evil.zzz:8080", U3)도 광고 연락 수단으로 센다.
+  const uncertainHosts = [...bareHangulHostsIn(linkText, allowDomains), ...portOnlyHostsIn(linkText, allowDomains)];
+  return hasRealContact(linkText, linkHosts, allowDomains) || uncertainHosts.length > 0;
+}
+
+/**
+ * 허용 도메인 링크인데 바로 앞에 한글이 붙어, 다른 주소(예: "카지노youtube.com" = 한글 IDN 도메인)로 읽힐 수 있는지 본다.
+ * 왜 자동 숨김이 아니라 후보 신호인가: "링크youtube.com"처럼 낱말에 붙여 쓴 정상 링크와 구분할 수 없어,
+ * 되돌릴 수 없는 숨김 대신 매니저가 보게 한다. 붙여 읽어도 허용 도메인의 하위 도메인이면("카지노m.youtube.com") 신호를 내지 않는다.
+ * @param text 원문(정규화 전)
+ * @param allowDomains 채널이 허용한 도메인
+ */
+export function containsGluedAllowedLink(text: string, allowDomains: readonly string[]): boolean {
+  return linkReadings(text).some((linkText) => hasGluedAllowedHost(linkText, allowDomains));
+}
+
+/**
+ * 읽기 순서 하나에서 한글이 붙은 허용 도메인 링크를 찾는다(containsGluedAllowedLink 본체).
+ * @param linkText linkReadings가 만든 링크 검사용 텍스트
+ * @param allowDomains 채널이 허용한 도메인
+ */
+function hasGluedAllowedHost(linkText: string, allowDomains: readonly string[]): boolean {
+  return matchHostCandidates(linkText, HOST_CANDIDATE_PATTERN).some((candidate) => {
+    const gluedPrefix = gluedHangulPrefix(linkText, candidate.start);
+    if (gluedPrefix === "" || !isLinkCandidate(candidate)) return false;
+    return isAllowedHost(stripLeadingWww(candidate.host), allowDomains) && !isAllowedHost(gluedPrefix + candidate.host, allowDomains);
+  });
+}
+
+/**
+ * 호스트 바로 앞에 공백 없이 붙은 라벨 글자 묶음을 돌려준다. 한글이 하나도 없으면 빈 문자열.
+ * @param text 링크 검사용 전처리를 거친 텍스트
+ * @param hostStart 호스트가 시작하는 위치
+ */
+function gluedHangulPrefix(text: string, hostStart: number): string {
+  let prefixStart = hostStart;
+  while (prefixStart > 0 && GLUED_LABEL_CHARACTER_PATTERN.test(text[prefixStart - 1] ?? "")) prefixStart -= 1;
+  const prefix = text.slice(prefixStart, hostStart);
+  return HANGUL_SYLLABLE_PATTERN.test(prefix) ? prefix : "";
+}
+
+/**
+ * 휴대전화 번호가 있는지 본다(신상 노출 방지). 보이지 않는 문자로 끊긴 번호, 호환 숫자(𝟎·⓪), RLO로 뒤집어 보이게 한 번호도 찾는다.
  * @param text 원문(정규화 전)
  */
 export function containsPhoneNumber(text: string): boolean {
-  return PHONE_PATTERN.test(prepareText(text));
+  return preparedReadings(text).some((prepared) => PHONE_PATTERN.test(prepared));
 }
 
 /**
@@ -147,6 +414,5 @@ export function containsPhoneNumber(text: string): boolean {
  * @param text 원문(정규화 전)
  */
 export function looksLikeAddress(text: string): boolean {
-  const prepared = prepareText(text);
-  return NEIGHBORHOOD_BUILDING_PATTERN.test(prepared) || UNIT_NUMBER_PATTERN.test(prepared);
+  return preparedReadings(text).some((prepared) => NEIGHBORHOOD_BUILDING_PATTERN.test(prepared) || UNIT_NUMBER_PATTERN.test(prepared));
 }

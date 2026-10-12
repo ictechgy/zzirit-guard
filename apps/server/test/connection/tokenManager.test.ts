@@ -156,3 +156,73 @@ describe("TokenManager", () => {
     await expect(manager.getAccessToken()).rejects.toThrow(/스트리머가 먼저 연결/);
   });
 });
+
+describe("TokenManager 연결 세대(S7, M06): 진행 중 갱신은 adoptCredential·disconnect 뒤의 상태를 바꾸지 않는다", () => {
+  /** 다시 연결해 받은 새 토큰. */
+  const adopted = { channelId: "owner-channel", accessToken: "adopted-access", refreshToken: "adopted-refresh", accessExpiresAt: NOW + TWO_HOURS * 10 };
+  /** 다시 연결한 채널. */
+  const channel = { channelId: "owner-channel", channelName: "스트리머" };
+
+  /** 결과를 테스트가 정하는 갱신 API. */
+  function controlledRefresh() {
+    const pending: Array<{ resolve(tokens: TokenSet): void; reject(error: unknown): void }> = [];
+    const refreshToken = vi.fn((_refreshToken: string) => new Promise<TokenSet>((resolve, reject) => void pending.push({ resolve, reject })));
+    return { refreshToken, pending };
+  }
+
+  it("다시 연결한 뒤 늦게 온 갱신 성공은 새 토큰을 덮어쓰지 않는다", async () => {
+    const { refreshToken, pending } = controlledRefresh();
+    const store = connectedStore(0);
+    const manager = createTokenManager({ store, api: createFakeApi({ refreshToken }), clock: () => NOW });
+    const stale = manager.getAccessToken();
+    manager.adoptCredential(channel, adopted);
+    pending[0]?.resolve(freshTokens);
+    await expect(stale).rejects.toBeInstanceOf(WriteLockedError);
+    expect(store.loadCredential()).toMatchObject({ accessToken: "adopted-access", refreshToken: "adopted-refresh" });
+    expect(await manager.getAccessToken()).toBe("adopted-access");
+  });
+
+  it("다시 연결한 뒤 늦게 온 갱신 401은 새 연결을 잠그지 않는다", async () => {
+    const { refreshToken, pending } = controlledRefresh();
+    const listener = vi.fn();
+    const manager = createTokenManager({ store: connectedStore(0), api: createFakeApi({ refreshToken }), clock: () => NOW });
+    manager.onLockChange(listener);
+    const stale = manager.getAccessToken();
+    manager.adoptCredential(channel, adopted);
+    pending[0]?.reject(new ChzzkApiError(401, "INVALID_TOKEN", "/auth/v1/token"));
+    await expect(stale).rejects.toBeInstanceOf(WriteLockedError);
+    expect(manager.isWriteLocked()).toBe(false);
+    expect(listener).not.toHaveBeenCalledWith(true);
+  });
+
+  it("연결을 해제한 뒤 늦게 온 갱신 성공은 저장하지 않고, 일시 오류여도 옛 토큰을 내주지 않는다", async () => {
+    const { refreshToken, pending } = controlledRefresh();
+    const store = connectedStore(TWO_HOURS - 1);
+    const manager = createTokenManager({ store, api: createFakeApi({ refreshToken }), clock: () => NOW, reportError: () => undefined });
+    const succeeded = manager.getAccessToken();
+    manager.disconnect();
+    pending[0]?.resolve(freshTokens);
+    await expect(succeeded).rejects.toBeInstanceOf(WriteLockedError);
+    expect(store.loadCredential()).toBeNull();
+
+    const relinked = connectedStore(TWO_HOURS - 1);
+    const second = createTokenManager({ store: relinked, api: createFakeApi({ refreshToken }), clock: () => NOW, reportError: () => undefined });
+    const failed = second.getAccessToken();
+    second.disconnect();
+    pending[1]?.reject(new TypeError("fetch failed"));
+    await expect(failed).rejects.toBeInstanceOf(WriteLockedError);
+  });
+
+  it("다시 연결한 뒤의 갱신은 옛 연결의 진행 중 갱신에 합류하지 않고 새 refresh token으로 갱신한다", async () => {
+    const { refreshToken, pending } = controlledRefresh();
+    const manager = createTokenManager({ store: connectedStore(0), api: createFakeApi({ refreshToken }), clock: () => NOW });
+    const stale = manager.getAccessToken().catch(() => "stale");
+    manager.adoptCredential(channel, { ...adopted, accessExpiresAt: NOW });
+    const current = manager.getAccessToken();
+    expect(refreshToken.mock.calls.map(([token]) => token)).toEqual(["old-refresh", "adopted-refresh"]);
+    pending[1]?.resolve(freshTokens);
+    pending[0]?.resolve({ ...freshTokens, accessToken: "late-access" });
+    expect(await current).toBe("new-access");
+    expect(await stale).toBe("stale");
+  });
+});

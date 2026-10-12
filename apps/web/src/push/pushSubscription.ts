@@ -40,17 +40,28 @@ export async function enablePush(readyTimeoutMs: number = SERVICE_WORKER_READY_T
  * 이 기기의 푸시 구독을 해지한다: 서버에서 지우고 브라우저 구독도 끊는다(스펙 11장 "해지 시 삭제", R-14).
  * 로그아웃·연결 해제 전에 부른다. 서비스 워커나 구독이 없으면 아무것도 하지 않는다.
  * 왜 ready가 아니라 getRegistration인가: 등록이 없으면 ready는 끝나지 않아 로그아웃이 멈춘다.
- * 서버 삭제가 실패해도 브라우저 구독은 끊는다: 끊긴 주소로 보낸 푸시는 푸시 서비스가 410으로 돌려주고, 서버가 그때 지운다.
+ * 서버 삭제가 실패해도 던지지 않고 경고만 남긴 뒤 브라우저 구독은 끊는다(W5, X39): 끊긴 주소로 보낸 푸시는 푸시 서비스가 410으로 돌려주고, 서버가 그때 지운다.
+ * @throws Error 브라우저 구독 해지 자체가 실패했을 때(호출자가 로그로 남긴다)
  */
 export async function disablePush(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
   const registration = await navigator.serviceWorker.getRegistration();
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return;
+  await deleteServerSubscription(subscription.endpoint);
+  await subscription.unsubscribe();
+}
+
+/**
+ * 서버에서 이 기기의 구독을 지운다. 실패하면 던지지 않고 개발자용 경고만 남긴다.
+ * 왜 던지지 않나: 로그아웃·연결 해제는 계속돼야 하고, 서버에 남은 구독은 브라우저 구독을 끊으면 다음 알림 때 410으로 지워진다.
+ * @param endpoint 지울 구독 주소
+ */
+async function deleteServerSubscription(endpoint: string): Promise<void> {
   try {
-    await apiSend("DELETE", "/api/push/subscriptions", { endpoint: subscription.endpoint });
-  } finally {
-    await subscription.unsubscribe();
+    await apiSend("DELETE", "/api/push/subscriptions", { endpoint });
+  } catch (error) {
+    console.warn("서버에서 알림 구독을 지우지 못했습니다. 브라우저 구독은 끊고, 서버에 남은 구독은 다음 알림 때 지워집니다.", error);
   }
 }
 

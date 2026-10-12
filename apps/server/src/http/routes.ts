@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
 import type { Broadcaster } from "../actions/decisionHandler.js";
 import type { ActionOutcome, Actor, Executor } from "../actions/executor.js";
+import type { VerdictClaims } from "../actions/verdictClaims.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
 import type { RuleRepository } from "../detection/ruleRepository.js";
 import { describeError, type Logger } from "../logger.js";
@@ -23,6 +24,8 @@ export interface RouteServices {
   channel(): ConnectedChannel | null;
   status(): ServerStatus;
   verdicts: VerdictRepository;
+  /** 숨김을 보내는 중인 판정 모음. 자동 숨김(decisionHandler)과 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
+  claims: VerdictClaims;
   executor: Executor;
   autoHide: AutoHideSwitch;
   rules: RuleRepository;
@@ -62,12 +65,29 @@ const MAX_PUSH_ENDPOINT_LENGTH = 2048;
 const MAX_PUSH_KEY_LENGTH = 256;
 
 /**
- * 이 상태의 판정은 다시 숨기지 않는다. 왜: 이미 숨겼거나 활동을 제한한 메시지에 숨김을 또 보내면 치지직 호출·감사 기록만 늘고,
- * 두 매니저가 동시에 누른 경우 같은 조치가 두 번 기록된다(F9.2). 무시·오판으로 표시한 판정은 매니저가 생각을 바꿀 수 있어 다시 숨길 수 있다.
+ * 숨길 수 있는 판정 상태(S12): 대기 중만.
+ * 왜: 이미 숨겼거나 제한한 메시지에 숨김을 또 보내면 치지직 호출·감사 기록만 늘고(F9.2), 무시·오판으로 표시한 판정은 매니저가 이미 판단을 끝낸 것이다.
+ * 특히 오판 표시가 판정을 다시 숨길 대상으로 되돌리면 안 된다(M11).
  */
-const HIDE_BLOCKING_STATUSES: ReadonlySet<VerdictStatus> = new Set(["hidden", "restricted"]);
+const HIDE_ALLOWED_FROM: readonly VerdictStatus[] = ["pending"];
+/**
+ * 표시 동작별로 바꿀 수 있는 이전 상태(S12).
+ * 무시는 대기 중만: 숨김·제한이 끝난 판정을 무시로 덮으면 실제 조치 기록이 화면에서 사라진다.
+ * 오판은 대기 중·숨김·제한: 잘못된 자동 숨김(hidden)·제한을 알리는 통로다. 무시했거나 이미 오판인 판정은 받지 않는다.
+ */
+const MARK_ALLOWED_FROM: Readonly<Record<Extract<VerdictStatus, "ignored" | "false_positive">, readonly VerdictStatus[]>> = {
+  ignored: ["pending"],
+  false_positive: ["pending", "hidden", "restricted"],
+};
 /** 이미 처리된 판정에 다시 조치하려 할 때의 안내 문구. */
 const ALREADY_HANDLED_MESSAGE = "이미 다른 조치가 끝난 판정입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.";
+/** 다른 매니저가 같은 판정을 숨기는 중일 때의 안내 문구. 화면이 already_handled 코드로 다시 불러오게 같은 코드를 쓴다. */
+const ACTION_IN_PROGRESS_MESSAGE = "다른 요청이 이 판정을 숨기는 중입니다. 잠시 뒤 '다시 불러오기'를 눌러 결과를 확인하세요.";
+/**
+ * 자동 숨김이 같은 판정을 숨기는 중일 때의 안내 문구(N4). 코드는 in_progress라 화면이 실패가 아닌 안내로 이 문구를 그대로 보여 준다.
+ * 왜 already_handled와 가르나: 자동 숨김은 아직 끝나지 않아 다시 불러와도 대기 중으로 보이므로 "이미 처리됨"은 틀린 안내다.
+ */
+const AUTO_HIDE_IN_PROGRESS_MESSAGE = "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -93,8 +113,12 @@ const chatSettingsBodySchema = z.object({
   chatSlowModeSec: z.number().refine((value) => ALLOWED_SLOW_MODE_SECONDS.includes(value), "치지직이 허용하지 않는 값입니다"),
   chatEmojiMode: z.boolean(),
 });
-/** 임시 제한 본문. 판정 ID는 선택이며 서버가 보낸 사람과 일치하는지 확인한다. */
-const temporaryRestrictBodySchema = z.object({ chatChannelId: z.string().min(1).max(MAX_CHANNEL_ID_LENGTH), verdictId: z.number().int().nullable().optional() });
+/**
+ * 임시 제한 본문. 판정 ID가 꼭 있어야 하고, 서버가 보낸 사람·채널과 일치하는지 확인한다(S13, M12).
+ * 채팅 채널 ID는 받지 않고 저장된 판정에서 읽는다. 왜: 본문 값을 그대로 치지직에 넘기면 매니저가 다른 채팅 채널을 지정할 수 있다.
+ * 예전 화면이 보내는 chatChannelId는 zod가 알 수 없는 키로 버린다(따르지 않는다).
+ */
+const temporaryRestrictBodySchema = z.object({ verdictId: z.number().int().positive() });
 /** 활동 제한 본문(본문 자체도 생략 가능). */
 const restrictBodySchema = z.object({ verdictId: z.number().int().nullable().optional() }).optional();
 /** 푸시 구독 본문. 길이 상한으로 과대 입력을 막는다. */
@@ -167,18 +191,37 @@ function registerSessionRoutes(app: FastifyInstance, services: RouteServices, se
 /** 후보 목록과 판정 조치. */
 function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): void {
   app.get("/api/candidates", guarded(services, null, ({ channelId }) => services.verdicts.listRecent(channelId, services.clock() - CANDIDATE_WINDOW_MS)));
-  app.post(
-    "/api/verdicts/:id/hide",
-    guarded(services, "hide_message", async ({ request, reply, manager, channelId }) => {
-      const verdict = findVerdict(services, request.params, channelId);
-      if (HIDE_BLOCKING_STATUSES.has(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-      const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
-      return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
-    }),
-  );
+  app.post("/api/verdicts/:id/hide", guarded(services, "hide_message", (context) => hideVerdict(services, context)));
   app.post("/api/verdicts/:id/ignore", guarded(services, "hide_message", (context) => markVerdict(services, context, "ignored")));
   app.post("/api/verdicts/:id/false-positive", guarded(services, "hide_message", (context) => markVerdict(services, context, "false_positive")));
   app.get("/api/false-positives", guarded(services, null, (context) => listFalsePositiveReview(services, context)));
+}
+
+/**
+ * 판정 하나를 숨긴다. 대기 중인 판정만 받고, 보내기 전에 판정을 붙잡아 동시에 누른 요청 중 하나만 실행기로 보낸다(S12, M10).
+ * 확인(findVerdict·상태)과 붙잡기 사이에 await가 없어 다른 요청이 끼어들 수 없다. 결과와 관계없이 끝나면 놓는다.
+ * 성공했을 때의 hidden 전이는 실행기가 pending에서만 한다(그사이 오판·제한으로 바뀌었으면 덮지 않는다).
+ */
+async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
+  const verdict = findVerdict(services, request.params, channelId);
+  if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
+  if (!services.claims.tryClaim(verdict.id, "manager")) throw claimConflict(services, verdict.id);
+  try {
+    const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
+    return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
+  } finally {
+    services.claims.release(verdict.id);
+  }
+}
+
+/**
+ * 이미 붙잡힌 판정에 대한 409 오류를 만든다. 자동 숨김이 붙잡았으면 in_progress와 "곧 반영" 안내, 다른 매니저면 already_handled(N4).
+ * @param services 붙잡기 모음
+ * @param verdictId 판정 번호
+ */
+function claimConflict(services: RouteServices, verdictId: number): RouteError {
+  if (services.claims.holderOf(verdictId) === "auto_hide") return new RouteError(409, "in_progress", AUTO_HIDE_IN_PROGRESS_MESSAGE);
+  return new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
 }
 
 /**
@@ -196,9 +239,8 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
     "/api/senders/:senderChannelId/temporary-restrict",
     guarded(services, "temporary_restrict", async ({ request, reply, manager, channelId }) => {
       const { senderChannelId } = senderParamSchema.parse(request.params);
-      const body = temporaryRestrictBodySchema.parse(request.body);
-      const verdictId = resolveVerdictId(services, body.verdictId, senderChannelId, channelId);
-      const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: body.chatChannelId, verdictId };
+      const verdict = findSenderVerdict(services, temporaryRestrictBodySchema.parse(request.body).verdictId, senderChannelId, channelId);
+      const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: verdict.chatChannelId, verdictId: verdict.id };
       return sendOutcome(reply, await services.executor.submit(channelId, action, actorOf(manager)));
     }),
   );
@@ -259,8 +301,9 @@ function registerPushRoutes(app: FastifyInstance, services: RouteServices): void
   );
   app.delete(
     "/api/push/subscriptions",
-    guarded(services, null, ({ request }) => {
-      services.push.unsubscribe(pushDeleteSchema.parse(request.body).endpoint);
+    guarded(services, null, ({ request, manager }) => {
+      // 요청한 매니저의 구독만 지운다. 없거나 남의 것이면 아무것도 지우지 않고 똑같이 ok를 준다(구독 존재 여부를 드러내지 않는다).
+      services.push.unsubscribe(manager.managerChannelId, pushDeleteSchema.parse(request.body).endpoint);
       return { ok: true };
     }),
   );
@@ -342,25 +385,34 @@ function findVerdict(services: RouteServices, params: unknown, channelId: string
 }
 
 /**
- * 본문의 판정 ID가 이 채널의 것이고 대상 사용자의 판정인지 확인한다.
+ * 본문의 판정 ID가 이 채널의 것이고 대상 사용자의 판정인지 확인한다. 판정 ID가 없으면(활동 제한은 선택) null.
  * 왜: 실행기는 판정 상태를 그대로 바꾸고 방송하므로, 다른 사용자·채널의 판정을 가리키면 엉뚱한 기록이 바뀐다.
  */
 function resolveVerdictId(services: RouteServices, verdictId: number | null | undefined, senderChannelId: string, channelId: string): number | null {
   if (verdictId === null || verdictId === undefined) return null;
+  return findSenderVerdict(services, verdictId, senderChannelId, channelId).id;
+}
+
+/**
+ * 판정을 찾고, 대상 사용자의 판정인지 확인한다. 임시 제한은 이 판정에서 채팅 채널을 읽는다(S13).
+ * @throws RouteError 없거나 다른 채널이면 404, 보낸 사람이 다르면 400
+ */
+function findSenderVerdict(services: RouteServices, verdictId: number, senderChannelId: string, channelId: string) {
   const verdict = findVerdict(services, { id: verdictId }, channelId);
   if (verdict.senderChannelId !== senderChannelId) throw new RouteError(400, "verdict_mismatch", "판정의 보낸 사람과 대상 사용자가 다릅니다. '다시 불러오기'를 누른 뒤 다시 시도하세요.");
-  return verdict.id;
+  return verdict;
 }
 
 /**
  * 무시·오판으로 표시하고 기록·방송한다. 오판은 해당 규칙을 검토할 근거가 된다.
- * 무시는 대기 중(pending)인 판정에만 허락한다. 숨김·제한이 끝난 판정을 무시로 덮으면 실제 조치 기록이 화면에서 사라지기 때문이다.
- * 오판 신고는 어떤 상태에서도 받는다. 매니저가 잘못된 자동 숨김(hidden)을 알리는 유일한 통로이기 때문이다(F9.2).
+ * 바꿀 수 있는 이전 상태는 MARK_ALLOWED_FROM이고, 확인과 쓰기를 조건부 UPDATE 한 번으로 해 동시 요청이 서로 덮어쓰지 못한다(S12).
+ * 숨기는 중인 판정은 무시로 바꾸지 않는다: 숨김이 성공하면 무시 표시와 실제 조치가 어긋난다.
+ * 오판은 숨기는 중에도 받는다: 그 뒤 숨김이 성공해도 실행기가 오판을 hidden으로 덮지 않는다.
  */
 function markVerdict(services: RouteServices, { request, manager, channelId }: GuardedContext, status: Extract<VerdictStatus, "ignored" | "false_positive">) {
   const verdict = findVerdict(services, request.params, channelId);
-  if (status === "ignored" && verdict.status !== "pending") throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-  services.verdicts.updateStatus(verdict.id, status);
+  if (status === "ignored" && services.claims.isClaimed(verdict.id)) throw claimConflict(services, verdict.id);
+  if (!services.verdicts.transitionStatus(verdict.id, channelId, status, MARK_ALLOWED_FROM[status])) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
   services.auditLog.record({
     channelId, actorType: "manager", actorChannelId: manager.managerChannelId, action: status,
     targetSenderChannelId: verdict.senderChannelId, verdictId: verdict.id, result: "ok", error: null,
@@ -369,10 +421,14 @@ function markVerdict(services: RouteServices, { request, manager, channelId }: G
   return { ok: true };
 }
 
-/** 실행 결과를 응답으로 바꾼다. 치지직 실패는 502와 이유. */
+/**
+ * 실행 결과를 응답으로 바꾼다. 치지직 실패는 502와 이유.
+ * 처리 결과를 알 수 없는 실패(시간 초과·연결 끊김·해석할 수 없는 2xx)는 코드를 result_unknown으로 둔다(N4).
+ * 왜: 화면이 이 코드를 보고 시간 초과와 같이 60초 동안 같은 버튼을 다시 보내지 않게 한다(치지직이 이미 처리했을 수 있다).
+ */
 function sendOutcome(reply: FastifyReply, outcome: ActionOutcome) {
   if (outcome.ok) return reply.send({ ok: true, note: outcome.note });
-  return reply.code(502).send(errorBody("chzzk_failed", outcome.message));
+  return reply.code(502).send(errorBody(outcome.isResultUnknown ? "result_unknown" : "chzzk_failed", outcome.message));
 }
 
 /** 매니저 행위자. */

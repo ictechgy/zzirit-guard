@@ -62,6 +62,58 @@ describe("runRetention", () => {
     database.close();
   });
 
+  it("앞 단계가 던져도 WAL 체크포인트는 돌아, 이미 지운 원문이 WAL 파일에 남지 않는다(S8, M07)", () => {
+    const path = join(makeTemporaryDirectory(), "zzirit-guard.sqlite");
+    let now = 0;
+    const database = openDatabase(path);
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now);
+    const sessions = { ...createSessionStore(database, () => now), deleteExpired: () => { throw new Error("세션 정리 실패"); } };
+    verdicts.insert({ channelId: "c1", chatChannelId: "x", messageTime: 0, senderChannelId: "s", senderNickname: "n", content: "지워야 할 원문", decision: "candidate", reason: "r" });
+    now = 31 * DAY;
+    expect(() => runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toThrow("세션 정리 실패");
+    expect(verdicts.listRecent("c1", 0)).toEqual([]);
+    expect(statSync(`${path}-wal`).size).toBe(0);
+    database.close();
+  });
+
+  it.each([
+    ["0", [0], 30],
+    ["음수", [-5], 30],
+    ["정수가 아닌 값", [7.5], 30],
+    ["잘못된 값과 올바른 값이 섞이면 올바른 값 중 가장 짧은 것", [0, 7], 7],
+  ])("DB의 원문 보관 기간이 잘못됐을 때(%s) 전체 삭제하지 않고 올바른 값, 없으면 기본값을 쓴다(S8, X26)", (_label, contentDays, expectedDays) => {
+    let now = 0;
+    const database = openDatabase(":memory:");
+    contentDays.forEach((days, index) => {
+      database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES (?, '채널', 0)").run(`c${index}`);
+      database.prepare("INSERT INTO setting (channel_id, retention_days_content) VALUES (?, ?)").run(`c${index}`, days);
+    });
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now);
+    const sessions = createSessionStore(database, () => now);
+    const verdict = { channelId: "c0", chatChannelId: "x", messageTime: 0, senderChannelId: "s", senderNickname: "n", content: "c", decision: "candidate" as const, reason: "r" };
+    verdicts.insert(verdict);
+    now = (expectedDays - 1) * DAY;
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 0 });
+    now = (expectedDays + 1) * DAY;
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ verdicts: 1 });
+  });
+
+  it("DB의 감사 보관 기간이 0이면 감사 기록을 전체 삭제하지 않고 기본값(180일)으로 본다(S8, X26)", () => {
+    const now = 10 * DAY;
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id, retention_days_audit) VALUES ('c1', 0)").run();
+    const verdicts = createVerdictRepository(database, () => now);
+    const auditLog = createAuditLog(database, () => now - DAY);
+    const sessions = createSessionStore(database, () => now);
+    auditLog.record({ channelId: "c1", actorType: "rule", actorChannelId: null, action: "hide", targetSenderChannelId: "s", verdictId: null, result: "ok", error: null });
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ audits: 0 });
+  });
+
   it("채널 설정의 보관 기간(7일)을 따른다", () => {
     let now = 100 * DAY;
     const database = openDatabase(":memory:");
@@ -171,6 +223,28 @@ describe("runBackup", () => {
     await runBackup(database, directory, () => Date.UTC(2026, 9, 11));
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(join(directory, "other.partial"))).toBe(true);
+  });
+
+  it("겹쳐 돈 백업이 진행 중인 다른 백업의 부분 파일(.partial)을 지우지 않는다(S15, M19)", async () => {
+    const directory = makeTemporaryDirectory();
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let calls = 0;
+    // 첫 백업은 부분 파일을 쓴 채 멈춰 있고, 그사이 두 번째 백업이 시작해 끝난다.
+    const slowDatabase = {
+      backup: async (path: string) => {
+        calls += 1;
+        writeFileSync(path, "backup");
+        if (calls === 1) await firstGate;
+      },
+    } as unknown as Parameters<typeof runBackup>[0];
+    const first = runBackup(slowDatabase, directory, () => Date.UTC(2026, 9, 11, 0, 0, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(runBackup(slowDatabase, directory, () => Date.UTC(2026, 9, 11, 0, 0, 1))).resolves.toMatch(/000001\.sqlite$/);
+    releaseFirst();
+    const firstPath = await first;
+    expect(existsSync(firstPath)).toBe(true);
+    expect(readdirSync(directory).filter((name) => name.endsWith(".partial"))).toEqual([]);
   });
 
   it("방금 만든 백업은 보존 개수 정리에서 지우지 않는다(미래 시각 백업이 있어도)", async () => {

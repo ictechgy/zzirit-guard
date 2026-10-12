@@ -63,6 +63,27 @@ describe("pushSubscription", () => {
     expect(subscription.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it("서버 삭제가 실패해도 던지지 않고 경고만 남긴 뒤 브라우저 구독은 끊는다(W5, X39)", async () => {
+    const subscription = fakeSubscription();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    stubServiceWorker({ getRegistration: async () => ({ pushManager: { getSubscription: async () => subscription } }) });
+    stubFetch({ "DELETE /api/push/subscriptions": () => json(500, { error: "internal", message: "서버 오류가 발생했습니다." }) });
+    await expect(disablePush()).resolves.toBeUndefined();
+    expect(subscription.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("서버"), expect.any(ApiError));
+    warn.mockRestore();
+  });
+
+  it("서버에 닿지 못해도(네트워크 오류) 던지지 않고 브라우저 구독은 끊는다(W5)", async () => {
+    const subscription = fakeSubscription();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    stubServiceWorker({ getRegistration: async () => ({ pushManager: { getSubscription: async () => subscription } }) });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    await expect(disablePush()).resolves.toBeUndefined();
+    expect(subscription.unsubscribe).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
   it("구독이 없으면 알림 해지는 아무것도 보내지 않는다", async () => {
     stubServiceWorker({ getRegistration: async () => undefined });
     const fetchMock = stubFetch({});

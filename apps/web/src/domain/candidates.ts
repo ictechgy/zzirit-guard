@@ -17,8 +17,6 @@ export interface SenderGroup {
   senderChannelId: string;
   /** 보낸 사람 닉네임(가장 최근 판정의 값). */
   senderNickname: string;
-  /** 임시 제한 API에 넘길 채팅 채널 ID. */
-  chatChannelId: string;
   /** 이 사람의 판정(최신순). */
   verdicts: VerdictDto[];
   /** 가장 최근 판정 시각. 묶음 정렬에 쓴다. */
@@ -103,13 +101,28 @@ export function addVerdictIfAbsent(verdicts: readonly VerdictDto[], verdict: Ver
 
 /**
  * REST로 다시 읽은 판정을 id로 합친다. 같은 id는 읽은 값으로 바꾸고(끊긴 동안 바뀐 상태를 반영), 없던 것은 더하고, 목록에 없는 기존 판정은 남긴다.
+ * 단, 이미 처리 상태(pending이 아닌 값)인 판정을 스냅숏의 pending으로 되돌리지 않는다(W3, X36).
+ * 왜: 조회 응답은 보낸 뒤 늦게 도착할 수 있어, 그사이 실시간으로 받은 hidden을 옛 pending이 덮으면 숨긴 메시지의 버튼이 되살아난다.
+ * 서버는 처리된 판정을 pending으로 되돌리지 않으므로(오판·무시·숨김·제한 모두 pending에서 떠난다) 처리 상태가 pending보다 새롭다.
  * 결과는 id 순서(저장 순서)로 정렬한다.
  * 왜 통째로 바꾸지 않나: 조회와 실시간 연결이 함께 시작돼, 먼저 온 실시간 판정을 덮어쓰면 사라지기 때문이다(X1, R-3).
  */
 export function mergeVerdicts(current: readonly VerdictDto[], loaded: readonly VerdictDto[]): VerdictDto[] {
   const byId = new Map(current.map((verdict) => [verdict.id, verdict]));
-  for (const verdict of loaded) byId.set(verdict.id, verdict);
+  for (const verdict of loaded) {
+    const existing = byId.get(verdict.id);
+    byId.set(verdict.id, existing && isStatusDowngrade(existing.status, verdict.status) ? existing : verdict);
+  }
   return [...byId.values()].sort((left, right) => left.id - right.id);
+}
+
+/**
+ * 처리 상태를 대기 중(pending)으로 되돌리는 변화인지 본다. 처리 상태가 대기 중보다 우선한다.
+ * @param currentStatus 화면이 알고 있는 상태
+ * @param loadedStatus 스냅숏의 상태
+ */
+function isStatusDowngrade(currentStatus: VerdictStatus, loadedStatus: VerdictStatus): boolean {
+  return currentStatus !== "pending" && loadedStatus === "pending";
 }
 
 /** 상태만 바꾼다. 없는 id면 그대로 둔다. */
@@ -134,7 +147,7 @@ function groupBySender(verdicts: readonly VerdictDto[]): SenderGroup[] {
   const groups = new Map<string, SenderGroup>();
   for (const verdict of [...verdicts].sort(newestFirst)) {
     const group = groups.get(verdict.senderChannelId) ?? {
-      senderChannelId: verdict.senderChannelId, senderNickname: verdict.senderNickname, chatChannelId: verdict.chatChannelId, verdicts: [], latestAt: verdict.createdAt,
+      senderChannelId: verdict.senderChannelId, senderNickname: verdict.senderNickname, verdicts: [], latestAt: verdict.createdAt,
     };
     group.verdicts.push(verdict);
     groups.set(verdict.senderChannelId, group);

@@ -1,18 +1,32 @@
 import type { ChatSettingsDto } from "@zzirit-guard/shared";
 import { z } from "zod";
 
-/** 치지직 API 오류. status는 HTTP 상태, apiMessage는 치지직이 준 메시지다. */
+/** ChzzkApiError 추가 정보. */
+export interface ChzzkApiErrorOptions {
+  /**
+   * 치지직이 요청을 받아 2xx로 답했는데 본문을 해석하지 못했는지(N3). 이때 상태는 502로 두지만 요청은 이미 처리됐을 수 있다.
+   * 왜 따로 표시하나: 실행기가 5xx처럼 다시 보내면 되돌릴 수 없는 숨김·제한이 두 번 나갈 수 있다.
+   */
+  wasDelivered?: boolean;
+}
+
+/**
+ * 치지직 API 오류. status는 HTTP 상태, apiMessage는 치지직이 준 메시지다.
+ * wasDelivered가 참이면 2xx 응답의 본문을 해석하지 못해 만든 502다(요청은 치지직에 닿았다).
+ */
 export class ChzzkApiError extends Error {
   override readonly name = "ChzzkApiError";
   readonly status: number;
   readonly apiMessage: string;
   readonly path: string;
+  readonly wasDelivered: boolean;
 
-  constructor(status: number, apiMessage: string, path: string) {
+  constructor(status: number, apiMessage: string, path: string, options: ChzzkApiErrorOptions = {}) {
     super(`치지직 API 오류 ${status} (${path}): ${apiMessage}`);
     this.status = status;
     this.apiMessage = apiMessage;
     this.path = path;
+    this.wasDelivered = options.wasDelivered ?? false;
   }
 }
 
@@ -124,11 +138,11 @@ export function createChzzkApi(options: ChzzkApiOptions): ChzzkApi {
 
 /**
  * 호출 후 content를 스키마로 검증한다. 형식이 다르면 raw ZodError 대신 502 ChzzkApiError를 던진다.
- * 호출자가 ChzzkApiError.status만으로 실패를 분류할 수 있게 하려는 것이다.
+ * 호출자가 ChzzkApiError.status만으로 실패를 분류할 수 있게 하려는 것이다. 응답은 2xx였으므로 wasDelivered로 표시한다(N3).
  */
 async function callParsed<T>(call: Caller, schema: z.ZodType<T>, method: HttpMethod, path: string, callOptions: CallOptions): Promise<T> {
   const result = schema.safeParse(await call(method, path, callOptions));
-  if (!result.success) throw new ChzzkApiError(502, `UNEXPECTED_RESPONSE: ${summarizeIssues(result.error)}`, path);
+  if (!result.success) throw new ChzzkApiError(502, `UNEXPECTED_RESPONSE: ${summarizeIssues(result.error)}`, path, { wasDelivered: true });
   return result.data;
 }
 
@@ -181,6 +195,7 @@ async function unwrapEnvelope(response: Response, path: string): Promise<unknown
 /**
  * 빈 본문은 null로 본다(blind-message는 본문 없이 200을 줄 수 있다).
  * 성공 상태인데 JSON이 아니면(예: 프록시의 HTML 페이지) 성공으로 오인하지 않도록 502로 던진다.
+ * 이때 요청은 치지직(또는 앞단)에 닿아 처리됐을 수 있으므로 wasDelivered로 표시한다(N3).
  */
 function parseJsonOrNull(text: string, path: string, isSuccessStatus: boolean): unknown {
   if (!text) return null;
@@ -189,7 +204,7 @@ function parseJsonOrNull(text: string, path: string, isSuccessStatus: boolean): 
   } catch {
     // 실패 상태(429 등)의 비JSON 본문은 원래 상태 코드를 살려야 하므로 null로 두어 호출부가 status로 오류를 만든다.
     if (!isSuccessStatus) return null;
-    throw new ChzzkApiError(502, "UNEXPECTED_RESPONSE: JSON이 아닌 응답", path);
+    throw new ChzzkApiError(502, "UNEXPECTED_RESPONSE: JSON이 아닌 응답", path, { wasDelivered: true });
   }
 }
 

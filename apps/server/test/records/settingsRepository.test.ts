@@ -51,3 +51,15 @@ describe("SettingsRepository 값 검증", () => {
     expect(settings.get("c1").breakerPerMinute).toBe(60);
   });
 });
+
+describe("SettingsRepository 자동 숨김 스위치(S6, C03)", () => {
+  it("설정 행이 없으면 성공으로 넘기지 않고 원인과 해결 방향을 담아 던진다", () => {
+    expect(() => settings.setAutoHide("missing-channel", false)).toThrow(SettingsValidationError);
+    expect(() => settings.setAutoHide("missing-channel", false)).toThrow(/채널 설정이 없어.*다시 연결/);
+  });
+
+  it("설정 행이 있으면 값을 바꾼다", () => {
+    settings.setAutoHide("c1", true);
+    expect(settings.get("c1").autoHideEnabled).toBe(true);
+  });
+});

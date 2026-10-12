@@ -1,9 +1,12 @@
 /**
  * 글자 사이에 끼워 필터를 피하는 데 쓰는 보이지 않는 문자를 지운다.
  * 제로폭·서식 문자(U+00AD, U+200B~U+200F, U+2060~U+2064, U+FEFF)와 한글 채움 문자(U+115F, U+1160, U+3164)·반각 채움 문자(U+FFA0)를 포함한다.
+ * bidi 제어 문자(LRE~RLO U+202A~U+202E, LRI~PDI U+2066~U+2069, 아랍 글자 표시 U+061C)도 지운다(S9, M08).
+ * 왜: 화면에는 보이지 않아 "evil(U+202A).com"·"010(U+2066)1234…"가 그대로 링크·번호로 읽히는데, 지우지 않으면 패턴이 끊겨 통과한다.
+ * 링크·전화번호 검사(stripInvisibleAndFullwidth)와 두 비교용 정규화(prepareForMatching)가 모두 이 목록을 쓴다.
  * 한글 채움 문자는 Script=Hangul이라 아래 DISALLOWED_CHARACTERS에서 남으므로 여기서 먼저 지워야 한다.
  */
-const INVISIBLE_CHARACTERS = /[\u00AD\u115F\u1160\u200B-\u200F\u2060-\u2064\u3164\uFEFF\uFFA0]/g;
+const INVISIBLE_CHARACTERS = /[\u00AD\u061C\u115F\u1160\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]/g;
 /** 전각 ASCII 영역(！~～). 반각으로 바꾼다. */
 const FULLWIDTH_ASCII = /[！-～]/g;
 /** 남길 문자: 한글(음절·자모), 영문 소문자, 숫자, 그리고 모음 대용으로 쓰는 '|'. */

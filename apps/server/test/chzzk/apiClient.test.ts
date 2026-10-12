@@ -93,6 +93,20 @@ describe("ChzzkApi 비정상 응답", () => {
     expect(error).toMatchObject({ status: 502 });
   });
 
+  it("2xx인데 본문을 해석하지 못하면 요청이 치지직에 닿았다고 표시한다(wasDelivered, N3)", async () => {
+    const notJson = await apiWithBody("<html>").blindMessage("t", { chatChannelId: "c", messageTime: 1, senderChannelId: "s" }).catch((caught: unknown) => caught);
+    const wrongShape = await apiWithBody(JSON.stringify({ code: 200, message: null, content: { channelId: 1 } })).getMe("t").catch((caught: unknown) => caught);
+    expect(notJson).toMatchObject({ status: 502, wasDelivered: true });
+    expect(wrongShape).toMatchObject({ status: 502, wasDelivered: true });
+  });
+
+  it("진짜 5xx 응답은 닿았다고 표시하지 않는다(재시도 대상)", async () => {
+    const owner = fake.issueTokens(fake.owner);
+    fake.failNext("/open/v1/chats/blind-message", 503);
+    const error = await api.blindMessage(owner.accessToken, { chatChannelId: "chat-1", messageTime: 1, senderChannelId: "bad" }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ status: 503, wasDelivered: false });
+  });
+
   it("빈 200 본문은 성공으로 본다", async () => {
     await expect(apiWithBody("").blindMessage("t", { chatChannelId: "c", messageTime: 1, senderChannelId: "s" })).resolves.toBeUndefined();
   });

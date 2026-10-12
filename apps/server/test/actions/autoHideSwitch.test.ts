@@ -48,6 +48,30 @@ describe("AutoHideSwitch", () => {
     expect(autoHide.tryConsume("c1")).toBe(true);
   });
 
+  it("한도로 꺼진 뒤 1분 안에 다시 켜도 바로 다시 꺼지지 않는다: 트립과 다시 켜기 때 창을 비운다(S4, X03)", () => {
+    now = 1_000_000;
+    settings.update("c1", { breakerPerMinute: 2 });
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    expect([autoHide.tryConsume("c1"), autoHide.tryConsume("c1"), autoHide.tryConsume("c1")]).toEqual([true, true, false]);
+    expect(autoHide.isEnabled("c1")).toBe(false);
+    now += 5_000;
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    expect([autoHide.tryConsume("c1"), autoHide.tryConsume("c1")]).toEqual([true, true]);
+    expect(autoHide.isEnabled("c1")).toBe(true);
+  });
+
+  it("손으로 껐다 1분 안에 다시 켜도 꺼지기 전 숨김은 새 창에 세지 않는다(S4)", () => {
+    now = 2_000_000;
+    settings.update("c1", { breakerPerMinute: 2 });
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    expect([autoHide.tryConsume("c1"), autoHide.tryConsume("c1")]).toEqual([true, true]);
+    autoHide.setEnabled("c1", false, { type: "manager", channelId: "m1" }, "manual");
+    now += 1_000;
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    expect(autoHide.tryConsume("c1")).toBe(true);
+    expect(autoHide.isEnabled("c1")).toBe(true);
+  });
+
   it("잘못된 설정값을 거부한다", () => {
     expect(() => settings.update("c1", { breakerPerMinute: 0 })).toThrow(/1~1000/);
     expect(() => settings.update("c1", { retentionDaysContent: 400 })).toThrow(/1~365/);

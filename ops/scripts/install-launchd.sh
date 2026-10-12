@@ -2,7 +2,7 @@
 # 서버를 로그인 사용자 LaunchAgent로 설치(또는 갱신)하고 시작한다.
 # 사용법: ops/scripts/install-launchd.sh   (sudo 없이 서버를 돌릴 사용자로 실행)
 # Node를 업그레이드하면(경로가 바뀌므로) 다시 실행한다.
-# 시험용 덮어쓰기: ZG_INSTALL_DRY_RUN=1이면 plist만 만들어 검사하고 launchctl은 건드리지 않는다.
+# 시험용 덮어쓰기: ZG_INSTALL_DRY_RUN=1이면 plist를 임시 파일에 만들어 검사만 하고, 기존 plist와 launchctl은 건드리지 않는다.
 #   ZG_INSTALL_HOME으로 홈 디렉터리를 바꿀 수 있다(임시 폴더에서 시험할 때만 쓴다).
 set -euo pipefail
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -16,7 +16,8 @@ BASE_HOME="${ZG_INSTALL_HOME:-$HOME}"
 DATA_DIR="$BASE_HOME/Library/Application Support/zzirit-guard"
 ENV_FILE="$DATA_DIR/.env"
 LOG_DIR="$BASE_HOME/Library/Logs/zzirit-guard"
-PLIST="$BASE_HOME/Library/LaunchAgents/$LABEL.plist"
+PLIST_DIR="$BASE_HOME/Library/LaunchAgents"
+PLIST="$PLIST_DIR/$LABEL.plist"
 IS_DRY_RUN="${ZG_INSTALL_DRY_RUN:-0}"
 
 # sed 치환부 값에서 &, |, \를 이스케이프한다(구분자가 |이고 &는 '일치한 문자열'이라서).
@@ -44,21 +45,28 @@ if [[ ! -f "$ROOT/apps/server/dist/main.js" ]]; then
   exit 1
 fi
 # 로그에는 매니저 채널 ID가 남으므로 폴더는 700, 파일은 600으로 미리 만든다(launchd가 만들면 644가 된다).
-(umask 077; mkdir -p "$LOG_DIR" "$BASE_HOME/Library/LaunchAgents"; touch "$LOG_DIR/server.log" "$LOG_DIR/server.err.log")
+(umask 077; mkdir -p "$LOG_DIR" "$PLIST_DIR"; touch "$LOG_DIR/server.log" "$LOG_DIR/server.err.log")
 chmod 700 "$LOG_DIR"
 chmod 600 "$LOG_DIR/server.log" "$LOG_DIR/server.err.log"
+# 렌더 결과는 대상 옆 임시 파일에 먼저 쓰고, 검사를 통과한 뒤에만 mv로 바꾼다(C05).
+# 왜: 대상에 바로 쓰면 검사가 실패했을 때(또는 시험 실행만 해도) 디스크의 정상 plist가 깨진 내용으로 바뀐다.
+# 같은 폴더에 만들어야 mv가 같은 파일 시스템 안의 원자적 이름 바꾸기가 된다.
+RENDERED=$(mktemp "$PLIST_DIR/.$LABEL.plist.XXXXXX")
+# 어떻게 끝나든(검사 실패·시험 실행·중간 오류) 남은 임시 파일을 지운다. mv가 끝난 뒤에는 지울 파일이 없어 아무 일도 하지 않는다.
+trap 'rm -f "$RENDERED"' EXIT
 sed -e "s|__NODE__|$(template_value "$NODE")|g" -e "s|__ENV_FILE__|$(template_value "$ENV_FILE")|g" \
   -e "s|__REPO__|$(template_value "$ROOT")|g" -e "s|__LOG_DIR__|$(template_value "$LOG_DIR")|g" \
-  "$ROOT/ops/launchd/$LABEL.plist.template" > "$PLIST"
-# 잘못된 plist를 건 채로 기존 서버를 내리지 않도록, 내리기 전에 문법을 검사한다.
-if ! plutil -lint "$PLIST" >/dev/null; then
-  echo "만든 plist가 올바르지 않습니다: $PLIST — 경로에 특수 문자가 있는지 확인하세요. 기존 서버는 건드리지 않았습니다." >&2
+  "$ROOT/ops/launchd/$LABEL.plist.template" > "$RENDERED"
+# 잘못된 plist를 건 채로 기존 서버를 내리지 않도록, 바꾸고 내리기 전에 문법을 검사한다.
+if ! plutil -lint "$RENDERED" >/dev/null; then
+  echo "만든 plist가 올바르지 않습니다(검사한 임시 파일: $RENDERED) — 경로에 특수 문자가 있는지 확인하세요. 기존 plist($PLIST)와 서버는 건드리지 않았습니다." >&2
   exit 1
 fi
 if [[ "$IS_DRY_RUN" == "1" ]]; then
-  echo "시험 실행: plist를 만들고 검사했습니다($PLIST). launchctl은 건드리지 않았습니다."
+  echo "시험 실행: plist를 임시 파일에 만들어 검사했습니다. 기존 plist($PLIST)와 launchctl은 건드리지 않았습니다."
   exit 0
 fi
+mv -f "$RENDERED" "$PLIST"
 # 이미 떠 있으면 내린다. 떠 있는지 먼저 확인해, 내리기 실패(권한 등)를 '처음 설치'로 잘못 안내하지 않는다.
 if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
   launchctl bootout "$DOMAIN/$LABEL"

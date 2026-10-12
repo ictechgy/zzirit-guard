@@ -47,8 +47,21 @@ export function createSettingsRepository(database: Database): SettingsRepository
       database.transaction(() => Object.entries(patch).forEach(([key, value]) => writeSetting(database, channelId, key as keyof SettingsDto, value)))();
       return readSettings(database, channelId);
     },
-    setAutoHide: (channelId, enabled) => void database.prepare("UPDATE setting SET auto_hide_enabled = ? WHERE channel_id = ?").run(enabled ? 1 : 0, channelId),
+    setAutoHide: (channelId, enabled) => writeAutoHide(database, channelId, enabled),
   };
+}
+
+/**
+ * 자동 숨김 스위치 값을 쓴다. 바뀐 행이 없으면(설정 행 없음) 성공으로 넘기지 않고 던진다(S6, C03).
+ * 왜: 끄기 요청이 조용히 무시되면 매니저는 껐다고 믿는데 자동 숨김이 계속 나간다. 안전장치의 실패는 드러나야 한다.
+ * @param database 서버 SQLite 연결
+ * @param channelId 채널 ID
+ * @param enabled 켤지 여부
+ * @throws SettingsValidationError 이 채널의 설정 행이 없을 때
+ */
+function writeAutoHide(database: Database, channelId: string, enabled: boolean): void {
+  const { changes } = database.prepare("UPDATE setting SET auto_hide_enabled = ? WHERE channel_id = ?").run(enabled ? 1 : 0, channelId);
+  if (changes === 0) throw new SettingsValidationError("채널 설정이 없어 자동 숨김 상태를 바꾸지 못했습니다. 스트리머가 채널을 다시 연결하세요.");
 }
 
 /**

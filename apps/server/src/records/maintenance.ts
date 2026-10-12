@@ -42,6 +42,12 @@ const STALE_PARTIAL_PATTERN = /^zzirit-guard-\d{8}-\d{6}\.sqlite\.partial$/;
 const BACKUP_DIRECTORY_MODE = 0o700;
 /** 백업 파일 권한(소유자만 읽기·쓰기). 이유는 BACKUP_DIRECTORY_MODE와 같다. */
 const BACKUP_FILE_MODE = 0o600;
+/**
+ * 지금 쓰고 있는 임시 백업 파일 경로들(S15, M19).
+ * 왜: 백업이 겹쳐 돌면 나중 백업의 "죽은 임시 파일 정리"가 앞선 백업이 쓰는 중인 파일을 지워 그 백업이 실패한다.
+ * 이 프로세스가 쓰는 중인 파일은 정리 대상에서 뺀다(앱은 주기 작업을 runOneAtATime으로도 막는다).
+ */
+const inProgressPartialPaths = new Set<string>();
 
 /**
  * 보관 기한이 지난 기록을 지운다(매일 실행).
@@ -51,29 +57,52 @@ const BACKUP_FILE_MODE = 0o600;
  * @returns 종류별로 지운 행 수
  */
 export function runRetention(deps: RetentionDeps): RetentionResult {
+  try {
+    return deleteExpiredRecords(deps);
+  } finally {
+    // 앞 단계가 던져도 이미 지운 원문 페이지가 WAL에 남지 않게 체크포인트는 반드시 돈다(S8, M07).
+    deps.database.pragma("wal_checkpoint(TRUNCATE)");
+  }
+}
+
+/**
+ * 종류별로 보관 기한이 지난 행을 지운다. 체크포인트는 호출자(runRetention)가 finally에서 한다.
+ * @returns 종류별로 지운 행 수
+ */
+function deleteExpiredRecords(deps: RetentionDeps): RetentionResult {
   const now = deps.clock();
   const days = readRetentionDays(deps.database);
   const auditCutoff = now - days.audit * DAY_MS;
-  const result: RetentionResult = {
+  return {
     verdicts: deps.verdicts.deleteOlderThan(now - days.content * DAY_MS),
     audits: deps.auditLog.deleteOlderThan(auditCutoff),
     stats: deps.database.prepare("DELETE FROM minute_stat WHERE minute < ?").run(auditCutoff).changes,
     sessions: deps.sessions.deleteExpired(),
   };
-  deps.database.pragma("wal_checkpoint(TRUNCATE)");
-  return result;
 }
 
 /**
- * 설정 행들 중 가장 짧은 보관 기간을 읽는다. 설정 행이 없으면 스펙 기본값을 쓴다.
+ * 설정 행들 중 올바른 값(1 이상 정수) 가운데 가장 짧은 보관 기간을 읽는다. 올바른 값이 없으면 스펙 기본값을 쓴다.
  * 왜 MIN인가: 채널을 바꿔도 이전 채널의 설정 행이 남는데 삭제는 채널과 무관하게 전역으로 이뤄진다.
  * 첫 행이나 임의의 행을 쓰면 이전 채널의 더 긴 기간이 적용될 수 있어, 개인정보 보호를 위해 가장 엄격한 설정이 이기게 한다.
+ * 왜 잘못된 값을 거르나: 쓰기 경로는 1~365로 검증하지만 DB에 CHECK가 없어, 0·음수가 들어가면 모든 기록이 지워진다(S8, X26).
  */
 function readRetentionDays(database: Database): { content: number; audit: number } {
-  const row = database
-    .prepare("SELECT MIN(retention_days_content) AS content, MIN(retention_days_audit) AS audit FROM setting")
-    .get() as { content: number | null; audit: number | null };
-  return { content: row.content ?? DEFAULT_RETENTION.content, audit: row.audit ?? DEFAULT_RETENTION.audit };
+  const rows = database.prepare("SELECT retention_days_content AS content, retention_days_audit AS audit FROM setting").all() as Array<{ content: unknown; audit: unknown }>;
+  return {
+    content: shortestValidDays(rows.map((row) => row.content), DEFAULT_RETENTION.content),
+    audit: shortestValidDays(rows.map((row) => row.audit), DEFAULT_RETENTION.audit),
+  };
+}
+
+/**
+ * 보관 기간 값들 중 1 이상 정수만 골라 가장 짧은 것을 돌려준다. 하나도 없으면 기본값.
+ * @param values DB에서 읽은 값들(타입을 믿지 않는다)
+ * @param fallback 올바른 값이 없을 때 쓸 기본값(스펙 9장)
+ */
+function shortestValidDays(values: readonly unknown[], fallback: number): number {
+  const validDays = values.filter((value): value is number => typeof value === "number" && Number.isInteger(value) && value >= 1);
+  return validDays.length === 0 ? fallback : Math.min(...validDays);
 }
 
 /**
@@ -103,6 +132,7 @@ export async function runBackup(database: Database, backupDirectory: string, clo
  */
 async function writeBackupFile(database: Database, finalPath: string): Promise<void> {
   const partialPath = `${finalPath}${PARTIAL_SUFFIX}`;
+  inProgressPartialPaths.add(partialPath);
   try {
     await database.backup(partialPath);
     // umask에 따라 넓게 열릴 수 있으므로 이름을 바꾸기 전에 소유자 전용으로 고친다.
@@ -111,6 +141,8 @@ async function writeBackupFile(database: Database, finalPath: string): Promise<v
   } catch (error) {
     rmSync(partialPath, { force: true });
     throw error;
+  } finally {
+    inProgressPartialPaths.delete(partialPath);
   }
 }
 
@@ -124,13 +156,13 @@ function prepareBackupDirectory(backupDirectory: string): void {
 }
 
 /**
- * 이전 실행이 백업 도중 죽어 남긴 임시 파일을 지운다.
+ * 이전 실행이 백업 도중 죽어 남긴 임시 파일을 지운다. 지금 다른 백업이 쓰고 있는 임시 파일은 건드리지 않는다(S15).
  * 왜: 임시 파일에도 원문이 들어 있는데 BACKUP_PATTERN에 맞지 않아 보존 개수 정리에 걸리지 않으므로, 그대로 두면 보관 기한 없이 남는다(F5).
  * @param backupDirectory 백업 디렉터리
  */
 function removeStalePartials(backupDirectory: string): void {
   readdirSync(backupDirectory)
-    .filter((name) => STALE_PARTIAL_PATTERN.test(name))
+    .filter((name) => STALE_PARTIAL_PATTERN.test(name) && !inProgressPartialPaths.has(join(backupDirectory, name)))
     .forEach((name) => rmSync(join(backupDirectory, name), { force: true }));
 }
 

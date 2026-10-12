@@ -53,6 +53,24 @@ describe("DetectionPipeline", () => {
     expect(result.reason).toMatch(reason);
   });
 
+  it("허용 도메인 앞에 한글을 붙인 링크는 다른 주소일 수 있어 후보(rule:link_glued)로 올린다", () => {
+    rules.add("c1", "allow_domain", "youtube.com", "m");
+    expect(pipeline.evaluate(chat("가입은 카지노youtube.com/abc"))).toMatchObject({ decision: "candidate", reason: "rule:link_glued" });
+    expect(pipeline.evaluate(chat("하이라이트 youtube.com/abc"))).toMatchObject({ decision: "pass" });
+  });
+
+  it("한글 낱말 + 알려진 최상위 도메인은 후보(rule:link_idn), 도박 단어가 함께면 자동 숨김(rule:link)이다(N1)", () => {
+    expect(pipeline.evaluate(chat("구글.com에서 찾아봐"))).toMatchObject({ decision: "candidate", reason: "rule:link_idn" });
+    expect(pipeline.evaluate(chat("가자.한국!"))).toMatchObject({ decision: "candidate", reason: "rule:link_idn" });
+    expect(pipeline.evaluate(chat("카지노.kr"))).toMatchObject({ decision: "auto_hide", reason: "rule:link" });
+  });
+
+  it("모르는 최상위 도메인에 포트만 붙으면 후보(rule:link_port), 경로가 붙으면 자동 숨김이다(U3)", () => {
+    expect(pipeline.evaluate(chat("T1 vs.GEN:13"))).toMatchObject({ decision: "candidate", reason: "rule:link_port" });
+    expect(pipeline.evaluate(chat("evil.zzz:8080"))).toMatchObject({ decision: "candidate", reason: "rule:link_port" });
+    expect(pipeline.evaluate(chat("evil.zzz:8080/x"))).toMatchObject({ decision: "auto_hide", reason: "rule:link" });
+  });
+
   it("허용어는 메시지 전체가 같을 때만 통과시킨다", () => {
     expect(pipeline.evaluate(chat("적팀 죽여버려!!")).decision).toBe("pass");
     expect(pipeline.evaluate(chat("적팀 죽여버려 시발")).decision).toBe("candidate");
@@ -73,6 +91,20 @@ describe("DetectionPipeline", () => {
     const result = pipeline.evaluate(chat("느금마 진짜 웃기네", { senderChannelId: "c1", userRoleCode }));
     expect(result).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/:privileged$/) });
     expect(result.ref.privileged).toBe(true);
+  });
+
+  it.each(["", "unknown_role_code"])("역할 코드가 '%s'(없거나 모름)면 자동 숨김 대신 후보로 낮추고 이유에 :unknown_role을 붙인다(S18, X08)", (userRoleCode) => {
+    const result = pipeline.evaluate(chat("느금마 진짜 웃기네", { senderChannelId: "someone", userRoleCode }));
+    expect(result).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:strong:\d+:unknown_role$/) });
+  });
+
+  it("역할을 모르는 사람의 앞선 떼도배 메시지는 숨김 대상으로 넘기지 않는다(S18)", () => {
+    const text = "구독하면 선물 드려요 진짜로";
+    for (let user = 1; user <= 3; user += 1) pipeline.evaluate(chat(text, { senderChannelId: `user-${user}` }));
+    pipeline.evaluate(chat(text, { senderChannelId: "role-missing", userRoleCode: "" }));
+    const fifth = pipeline.evaluate(chat(text, { senderChannelId: "user-5" }));
+    expect(fifth).toMatchObject({ decision: "auto_hide", reason: "rule:group_flood" });
+    expect(fifth.earlierFloodRefs.map((ref) => ref.senderChannelId)).toEqual(["user-1", "user-2", "user-3"]);
   });
 
   it("떼도배는 다섯 번째에 앞선 메시지까지 넘긴다(권한자 메시지는 빼고)", () => {

@@ -12,6 +12,14 @@ const control = vi.hoisted(() => ({
   hub: null as RealtimeHub | null,
   /** 다음 역할 재확인이 해임했다고 알릴 세션(세션 ID와 매니저 채널 ID). */
   revokedOnRecheck: [] as Array<{ sessionId: string; managerChannelId: string }>,
+  /** 주기 작업이 불린 횟수(겹침 방지 확인용). */
+  calls: { recheck: 0, retention: 0, accessToken: 0 },
+  /** 설정되면 해당 주기 작업이 이 Promise가 끝날 때까지 멈춘다(이전 실행이 길어진 상황). */
+  recheckGate: null as Promise<void> | null,
+  backupGate: null as Promise<void> | null,
+  accessTokenGate: null as Promise<void> | null,
+  /** 설정되면 저장된 채널 대신 이 채널을 돌려준다(토큰 선제 갱신 타이머가 돌게). */
+  fakeChannel: null as { channelId: string; channelName: string } | null,
 }));
 
 vi.mock("../src/records/minuteStats.js", async (importOriginal) => {
@@ -30,22 +38,47 @@ vi.mock("../src/connection/credentialStore.js", async (importOriginal) => {
     ...original,
     createCredentialStore: (...args: Parameters<typeof original.createCredentialStore>) => {
       const real = original.createCredentialStore(...args);
-      return { ...real, loadChannel: () => { if (control.loadChannelError) throw control.loadChannelError; return real.loadChannel(); } };
+      return { ...real, loadChannel: () => { if (control.loadChannelError) throw control.loadChannelError; return control.fakeChannel ?? real.loadChannel(); } };
     },
   };
 });
 // 첫 정리·백업 타이머(5분)가 역할 재확인 타이머(5분)와 같은 시각에 돌아 stop()과 겹치지 않게, 정리·백업은 즉시 끝나는 가짜로 바꾼다.
 vi.mock("../src/records/maintenance.js", () => ({
-  runRetention: () => ({ verdicts: 0, audits: 0, stats: 0, sessions: 0 }),
-  runBackup: async () => "backup-skipped",
+  runRetention: () => {
+    control.calls.retention += 1;
+    return { verdicts: 0, audits: 0, stats: 0, sessions: 0 };
+  },
+  runBackup: async () => {
+    if (control.backupGate) await control.backupGate;
+    return "backup-skipped";
+  },
 }));
 vi.mock("../src/managers/roleRecheck.js", () => ({
   /** 실패를 흉내 내거나, 해임된 세션을 앱의 onRevoked로 알린다(앱이 그 뒤 무엇을 하는지 보려고). */
   recheckSessionRoles: async (deps: { onRevoked(revoked: Array<{ sessionId: string; managerChannelId: string }>): void }) => {
+    control.calls.recheck += 1;
+    if (control.recheckGate) await control.recheckGate;
     if (control.recheckError) throw control.recheckError;
     if (control.revokedOnRecheck.length > 0) deps.onRevoked(control.revokedOnRecheck);
   },
 }));
+vi.mock("../src/connection/tokenManager.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/connection/tokenManager.js")>();
+  return {
+    ...original,
+    createTokenManager: (...args: Parameters<typeof original.createTokenManager>) => {
+      const real = original.createTokenManager(...args);
+      /** 토큰 선제 갱신이 오래 걸리는 상황을 흉내 낸다. 게이트가 없으면 실제 동작을 따른다. */
+      const getAccessToken = async () => {
+        control.calls.accessToken += 1;
+        if (!control.accessTokenGate) return real.getAccessToken();
+        await control.accessTokenGate;
+        return "slow-token";
+      };
+      return Object.assign(Object.create(real) as typeof real, { getAccessToken });
+    },
+  };
+});
 vi.mock("../src/db/database.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/db/database.js")>();
   return { ...original, openDatabase: (path: string) => (control.database = original.openDatabase(path)) };
@@ -75,6 +108,11 @@ beforeEach(async () => {
   control.recheckError = null;
   control.loadChannelError = null;
   control.revokedOnRecheck = [];
+  control.calls = { recheck: 0, retention: 0, accessToken: 0 };
+  control.recheckGate = null;
+  control.backupGate = null;
+  control.accessTokenGate = null;
+  control.fakeChannel = null;
   errorLines = [];
   warnLines = [];
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
@@ -117,6 +155,66 @@ function recordingSocket() {
   };
   return socket;
 }
+
+/** 테스트가 끝낼 때까지 멈춰 있는 Promise와 그것을 끝내는 함수. */
+function gate(): { promise: Promise<void>; open(): void } {
+  let open: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => (open = resolve));
+  return { promise, open };
+}
+
+describe("주기 작업은 이전 실행이 끝나기 전에 겹쳐 돌지 않는다(S15, M04)", () => {
+  it("역할 재확인이 길어지면 다음 차례를 건너뛰고, 끝난 뒤에는 다시 돈다", async () => {
+    const slow = gate();
+    control.recheckGate = slow.promise;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(control.calls.recheck).toBe(1);
+    slow.open();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(control.calls.recheck).toBe(2);
+  });
+
+  it("역할 재확인을 3번 연속 건너뛰면 작업 이름과 건너뛴 횟수를 경고로 남긴다(N5)", async () => {
+    const slow = gate();
+    control.recheckGate = slow.promise;
+    for (let tick = 0; tick < 3; tick += 1) await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(warnLines.filter((line) => line.details?.task === "역할 재확인")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(warnLines.filter((line) => line.details?.task === "역할 재확인")).toEqual([
+      { message: expect.stringContaining("3번 연속"), details: { task: "역할 재확인", skipCount: 3 } },
+    ]);
+    slow.open();
+  });
+
+  it("정리·백업이 길어지면 다음 차례(첫 실행 뒤 하루 주기)를 건너뛴다", async () => {
+    const slow = gate();
+    control.backupGate = slow.promise;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(control.calls.retention).toBe(1);
+    // 하루는 동기로 흘린다. 비동기로 흘리면 20초 상태 방송 등 수천 번의 타이머마다 마이크로태스크를 비워 10초 넘게 걸려,
+    // 부하가 큰 기계에서 테스트 제한 시간(15초)을 넘긴다. 겹침 방지는 타이머가 불리는 순간 동기로 판단하므로 결과는 같다.
+    vi.advanceTimersByTime(24 * 60 * 60_000);
+    expect(control.calls.retention).toBe(1);
+    slow.open();
+    await vi.advanceTimersByTimeAsync(0);
+    vi.advanceTimersByTime(24 * 60 * 60_000);
+    expect(control.calls.retention).toBe(2);
+  });
+
+  it("토큰 선제 갱신이 길어지면 다음 차례를 건너뛴다", async () => {
+    const slow = gate();
+    control.fakeChannel = { channelId: "c-timer", channelName: "채널" };
+    control.database?.prepare("INSERT OR IGNORE INTO setting (channel_id) VALUES ('c-timer')").run();
+    control.accessTokenGate = slow.promise;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(control.calls.accessToken).toBe(1);
+    slow.open();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(control.calls.accessToken).toBe(2);
+  });
+});
 
 describe("만료된 세션의 소켓 종료(F2)", () => {
   it("역할 재확인 주기마다 활성 목록에 없는 세션의 소켓을 닫고, 활성 세션의 소켓은 둔다", async () => {

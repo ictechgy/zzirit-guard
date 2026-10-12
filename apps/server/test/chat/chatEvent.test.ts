@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPrivilegedRole, parseChatPayload, parseSystemPayload } from "../../src/chat/chatEvent.js";
+import { isKnownRole, isPrivilegedRole, parseChatPayload, parseSystemPayload } from "../../src/chat/chatEvent.js";
 
 /** 문서 필드표대로 만든 정상 CHAT 페이로드. */
 const payload = {
@@ -20,9 +20,9 @@ describe("parseChatPayload", () => {
     expect(parseChatPayload(JSON.stringify(payload), 5)?.content).toBe("안녕하세요");
   });
 
-  it("profile·emojis·userRoleCode가 빠져도 기본값으로 읽는다", () => {
+  it("profile·emojis·userRoleCode가 빠져도 받아 주되, 역할은 일반 시청자로 채우지 않고 모르는 역할(빈 문자열)로 둔다(S18, X08)", () => {
     const { profile: _profile, emojis: _emojis, userRoleCode: _role, ...minimal } = payload;
-    expect(parseChatPayload(minimal, 5)).toMatchObject({ nickname: "(알 수 없음)", userRoleCode: "common_user" });
+    expect(parseChatPayload(minimal, 5)).toMatchObject({ nickname: "(알 수 없음)", userRoleCode: "" });
   });
 
   it("필수 필드가 없거나 JSON이 깨지면 null", () => {
@@ -45,5 +45,12 @@ describe("isPrivilegedRole", () => {
   it("스트리머와 매니저만 참", () => {
     expect(["streamer", "streaming_channel_manager", "streaming_chat_manager"].map(isPrivilegedRole)).toEqual([true, true, true]);
     expect(isPrivilegedRole("common_user")).toBe(false);
+  });
+});
+
+describe("isKnownRole(S18)", () => {
+  it("치지직 문서의 역할 코드만 안다", () => {
+    expect(["common_user", "streamer", "streaming_channel_manager", "streaming_chat_manager"].map(isKnownRole)).toEqual([true, true, true, true]);
+    expect(["", "manager", "COMMON_USER", "toString"].map(isKnownRole)).toEqual([false, false, false, false]);
   });
 });

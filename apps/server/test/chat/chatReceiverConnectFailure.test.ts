@@ -37,7 +37,7 @@ function createReceiverFor(port: number): ChatReceiver {
   const api = { createSessionUrl: async () => `http://127.0.0.1:${port}`, subscribeChat: async () => undefined } as unknown as ChzzkApi;
   const tokenManager = { getAccessToken: async () => "token" } as unknown as TokenManager;
   return createChatReceiver({
-    api, tokenManager, connect: connectWithSocketIo, clock: Date.now, logger: silentLogger,
+    api, tokenManager, connect: connectWithSocketIo, clock: Date.now, logger: silentLogger, connectedChannelId: () => "owner-channel",
     onChat: () => undefined, onConnectionChange: () => undefined, onInvalidEvent: () => undefined, onRevoked: () => undefined,
   });
 }

@@ -28,6 +28,7 @@ beforeEach(async () => {
   store.saveConnection(fake.owner, { channelId: fake.owner.channelId, ...tokens, accessExpiresAt: Date.now() + 86_400_000 });
   receiver = createChatReceiver({
     api, tokenManager: createTokenManager({ store, api, clock: Date.now }), connect: connectWithSocketIo, clock: Date.now,
+    connectedChannelId: () => fake.owner.channelId,
     logger: silentLogger, onChat: (event) => received.push(event), onConnectionChange: () => undefined,
     onInvalidEvent: () => { invalidCount += 1; }, onRevoked: () => { revokedCount += 1; },
   });
@@ -104,6 +105,7 @@ function createFakeSocketReceiver(overrides: Partial<Parameters<typeof createCha
   const logger = { ...silentLogger, error: (message: string) => { errors.push(message); } };
   const instance = createChatReceiver({
     api, tokenManager: createTokenManager({ store, api: baseApi, clock: Date.now }), clock: Date.now, logger,
+    connectedChannelId: () => fake.owner.channelId,
     connect: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     onChat: () => undefined, onConnectionChange: () => undefined, onInvalidEvent: () => undefined, onRevoked: () => undefined,
     ...overrides,
@@ -172,5 +174,80 @@ describe("ChatReceiver 견고성", () => {
     socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
     await waitFor(() => errors.length === 1);
     expect(receiver.isConnected()).toBe(true);
+  });
+});
+
+describe("ChatReceiver 구독 해제(S16, M05)", () => {
+  it("SYSTEM unsubscribed를 받으면 끊긴 것으로 알리고 소켓을 닫은 뒤 백오프로 다시 연결한다", async () => {
+    const changes: boolean[] = [];
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000, onConnectionChange: (connected) => void changes.push(connected) });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
+    expect(receiver.isConnected()).toBe(true);
+    socketAt(sockets, 0).emit("SYSTEM", { type: "unsubscribed", data: { eventType: "CHAT", channelId: "owner-channel" } });
+    expect(receiver.isConnected()).toBe(false);
+    expect(changes).toEqual([true, false]);
+    expect(socketAt(sockets, 0).closed).toBe(true);
+    await waitFor(() => sockets.length === 2, 4_000);
+    expect(fake.calls.filter((call) => call.path === "/open/v1/sessions/auth")).toHaveLength(2);
+  });
+});
+
+describe("ChatReceiver 연결 채널 확인(S17, X09)", () => {
+  /** 경고 로그를 모으는 기록기. */
+  function warningLogger() {
+    const warnings: Array<{ message: string; details?: Record<string, unknown> }> = [];
+    return { warnings, logger: { ...silentLogger, warn: (message: string, details?: Record<string, unknown>) => void warnings.push({ message, ...(details ? { details } : {}) }) } };
+  }
+
+  it("다른 채널의 CHAT은 넘기지도 형식 오류로 세지도 않고, 원문 없이 경고를 한 번만 남긴다", async () => {
+    const chats: ChatEvent[] = [];
+    let invalid = 0;
+    const { warnings, logger } = warningLogger();
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000, logger, onChat: (event) => void chats.push(event), onInvalidEvent: () => { invalid += 1; } });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
+    socketAt(sockets, 0).emit("CHAT", { ...chatPayload("다른 채널 원문"), channelId: "other-channel" });
+    socketAt(sockets, 0).emit("CHAT", { ...chatPayload("다른 채널 원문2"), channelId: "other-channel" });
+    socketAt(sockets, 0).emit("CHAT", chatPayload("우리 채널"));
+    expect(chats.map((event) => event.content)).toEqual(["우리 채널"]);
+    expect(invalid).toBe(0);
+    expect(warnings).toHaveLength(1);
+    expect(JSON.stringify(warnings)).not.toContain("원문");
+    expect(JSON.stringify(warnings)).not.toContain("other-channel");
+  });
+
+  it("다른 채널의 SYSTEM subscribed·unsubscribed·revoked는 무시한다", async () => {
+    let revoked = 0;
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000, onRevoked: () => { revoked += 1; } });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    const other = (type: string) => ({ type, data: { eventType: "CHAT", channelId: "other-channel" } });
+    socketAt(sockets, 0).emit("SYSTEM", other("subscribed"));
+    expect(receiver.isConnected()).toBe(false);
+    socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
+    socketAt(sockets, 0).emit("SYSTEM", other("unsubscribed"));
+    socketAt(sockets, 0).emit("SYSTEM", other("revoked"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(receiver.isConnected()).toBe(true);
+    expect(revoked).toBe(0);
+    expect(socketAt(sockets, 0).closed).toBe(false);
+  });
+
+  it("연결된 채널을 모르면(null) 채널이 든 메시지를 모두 무시한다", async () => {
+    const chats: ChatEvent[] = [];
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000, connectedChannelId: () => null, onChat: (event) => void chats.push(event) });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
+    socketAt(sockets, 0).emit("CHAT", chatPayload("채팅"));
+    expect(receiver.isConnected()).toBe(false);
+    expect(chats).toEqual([]);
   });
 });

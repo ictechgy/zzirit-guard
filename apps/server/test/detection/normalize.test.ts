@@ -36,6 +36,22 @@ describe("stripInvisibleAndFullwidth", () => {
   });
 });
 
+describe("bidi·서식 제어 문자(S9, M08)", () => {
+  /** 우회에 쓰이는 bidi·서식 제어 문자(LRM·RLM·LRE~RLO·LRI~PDI·ALM)와 테스트 이름에 쓸 코드 포인트 표기. */
+  const BIDI_CONTROLS = [0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c].map(
+    (codePoint) => [`U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`, String.fromCodePoint(codePoint)] as const,
+  );
+
+  it.each(BIDI_CONTROLS)("stripInvisibleAndFullwidth가 %s를 지운다", (_name, control) => {
+    expect(stripInvisibleAndFullwidth(`evil${control}.com`)).toBe("evil.com");
+  });
+
+  it.each(BIDI_CONTROLS)("두 비교용 정규화 모두 %s를 지운다", (_name, control) => {
+    expect(normalizeForMatching(`씨${control}발`)).toBe("씨발");
+    expect(normalizeKeepingWhitespace(`김치${control}녀 같은`)).toBe("김치녀 같은");
+  });
+});
+
 describe("normalizeKeepingWhitespace", () => {
   it.each([
     ["공백은 남기고 특수문자는 지운다", "씨@발 방송 꺼라", "씨발 방송 꺼라"],

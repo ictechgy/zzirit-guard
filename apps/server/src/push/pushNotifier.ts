@@ -22,7 +22,13 @@ export type PushSender = (subscription: PushSubscriptionInput, payload: string, 
 export interface PushNotifier {
   publicKey(): string;
   subscribe(managerChannelId: string, subscription: PushSubscriptionInput): void;
-  unsubscribe(endpoint: string): void;
+  /**
+   * 한 기기의 구독을 지운다. 요청한 매니저가 등록한 구독만 지운다(S14, M13).
+   * 왜: 주소 문자열만으로 지우면 다른 매니저의 구독 주소를 아는 사람이 그 매니저의 장애 알림을 끊을 수 있다.
+   * @param managerChannelId 요청한 매니저 채널 ID
+   * @param endpoint 지울 구독 주소
+   */
+  unsubscribe(managerChannelId: string, endpoint: string): void;
   /**
    * 한 매니저의 구독(모든 기기)을 지운다. 치지직에서 해임된 매니저가 장애 알림을 계속 받지 않게 한다(F10).
    * @param managerChannelId 매니저 채널 ID
@@ -150,7 +156,8 @@ export function createPushNotifier(deps: PushNotifierDeps): PushNotifier {
   return {
     publicKey: () => deps.vapid.publicKey,
     subscribe: (managerChannelId, subscription) => saveSubscription(deps, managerChannelId, subscription),
-    unsubscribe: (endpoint) => void deps.database.prepare("DELETE FROM push_subscription WHERE endpoint = ?").run(endpoint),
+    unsubscribe: (managerChannelId, endpoint) =>
+      void deps.database.prepare("DELETE FROM push_subscription WHERE endpoint = ? AND manager_channel_id = ?").run(endpoint, managerChannelId),
     unsubscribeManager: (managerChannelId) => void deps.database.prepare("DELETE FROM push_subscription WHERE manager_channel_id = ?").run(managerChannelId),
     notifyAll: (message) => notifyAll(deps, send, message),
   };

@@ -20,6 +20,16 @@ export interface NewVerdict {
 export interface VerdictRepository {
   insert(verdict: NewVerdict): VerdictDto;
   updateStatus(id: number, status: VerdictStatus): void;
+  /**
+   * 판정 상태를 원자적으로 바꾼다: 같은 채널이고 지금 상태가 allowedFrom 중 하나일 때만 바꾼다(S12, M10).
+   * 왜: "읽고 확인한 뒤 쓰기"는 그 사이 다른 요청이 상태를 바꿔도 덮어써, 숨김·제한 기록이 사라지거나 같은 조치가 두 번 기록된다.
+   * @param id 판정 번호
+   * @param channelId 판정이 속해야 하는 채널
+   * @param status 새 상태
+   * @param allowedFrom 바꿔도 되는 지금 상태 목록
+   * @returns 바꿨으면 true, 조건이 맞지 않아(다른 채널·이미 처리됨·없음) 바꾸지 않았으면 false
+   */
+  transitionStatus(id: number, channelId: string, status: VerdictStatus, allowedFrom: readonly VerdictStatus[]): boolean;
   get(id: number): (VerdictDto & { channelId: string }) | null;
   listRecent(channelId: string, sinceMs: number): VerdictDto[];
   /**
@@ -52,6 +62,7 @@ export function createVerdictRepository(database: Database, clock: Clock): Verdi
   return {
     insert: (verdict) => insertVerdict(database, verdict, clock()),
     updateStatus: (id, status) => void database.prepare("UPDATE verdict SET status = ? WHERE id = ?").run(status, id),
+    transitionStatus: (id, channelId, status, allowedFrom) => transitionVerdictStatus(database, { id, channelId, status, allowedFrom }),
     get: (id) => {
       const row = database.prepare("SELECT * FROM verdict WHERE id = ?").get(id) as VerdictRow | undefined;
       return row ? { ...toDto(row), channelId: row.channel_id } : null;
@@ -68,6 +79,29 @@ export function createVerdictRepository(database: Database, clock: Clock): Verdi
         .all(channelId) as FalsePositiveReasonCountDto[],
     deleteOlderThan: (cutoffMs) => database.prepare("DELETE FROM verdict WHERE created_at < ?").run(cutoffMs).changes,
   };
+}
+
+/** transitionVerdictStatus에 넘기는 전이 한 건. 필드 뜻은 VerdictRepository.transitionStatus와 같다. */
+interface StatusTransition {
+  id: number;
+  channelId: string;
+  status: VerdictStatus;
+  allowedFrom: readonly VerdictStatus[];
+}
+
+/**
+ * 조건부 UPDATE 한 번으로 상태를 바꾸고 바뀐 행 수로 결과를 판단한다. 확인과 쓰기가 한 문장이라 사이에 끼어들 틈이 없다.
+ * @param database 서버 SQLite 연결
+ * @param transition 바꿀 판정·채널·새 상태·허용 이전 상태
+ * @returns 바꿨으면 true
+ */
+function transitionVerdictStatus(database: Database, transition: StatusTransition): boolean {
+  if (transition.allowedFrom.length === 0) return false;
+  const placeholders = transition.allowedFrom.map(() => "?").join(",");
+  const { changes } = database
+    .prepare(`UPDATE verdict SET status = ? WHERE id = ? AND channel_id = ? AND status IN (${placeholders})`)
+    .run(transition.status, transition.id, transition.channelId, ...transition.allowedFrom);
+  return changes > 0;
 }
 
 /** 판정을 넣고 DTO로 돌려준다. */

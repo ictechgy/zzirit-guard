@@ -1,6 +1,7 @@
 import type { RealtimeEvent } from "@zzirit-guard/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAutoHideSwitch, type AutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
+import { createVerdictClaims, type VerdictClaims } from "../../src/actions/verdictClaims.js";
 import { createDecisionHandler, type DecisionHandler } from "../../src/actions/decisionHandler.js";
 import type { Executor } from "../../src/actions/executor.js";
 import type { ChatEvent } from "../../src/chat/chatEvent.js";
@@ -21,6 +22,7 @@ let autoHide: AutoHideSwitch;
 let submit: ReturnType<typeof vi.fn>;
 let events: RealtimeEvent[];
 let chatLines: string[];
+let claims: VerdictClaims;
 
 beforeEach(() => {
   database = openDatabase(":memory:");
@@ -32,8 +34,9 @@ beforeEach(() => {
   submit = vi.fn(async () => ({ ok: true, note: null }));
   events = [];
   chatLines = [];
+  claims = createVerdictClaims();
   handler = createDecisionHandler({
-    verdicts, autoHide, stats, logger: silentLogger,
+    verdicts, autoHide, stats, claims, logger: silentLogger,
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
     broadcaster: { broadcast: (event) => events.push(event), pushChatLine: (line) => chatLines.push(`${line.decision}:${line.content}`) },
   });
@@ -41,7 +44,7 @@ beforeEach(() => {
 
 /** 메시지 참조. */
 function ref(sender: string, content: string): MessageRef {
-  return { chatChannelId: "chat-1", messageTime: 1, senderChannelId: sender, nickname: sender, content, privileged: false };
+  return { chatChannelId: "chat-1", messageTime: 1, senderChannelId: sender, nickname: sender, content, privileged: false, isRoleUnknown: false };
 }
 
 /** 채팅 이벤트. */
@@ -87,14 +90,59 @@ describe("DecisionHandler", () => {
     expect(flushedStats()).toMatchObject({ shadow: 1, auto_hidden: 0 });
   });
 
-  it("스위치가 켜져 있으면 실행기로 숨기고, 떼도배의 앞선 메시지도 함께 숨긴다", () => {
+  it("스위치가 켜져 있으면 실행기로 숨기고, 떼도배의 앞선 메시지도 함께 숨긴다", async () => {
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
     handler.handle(chat("도배 문장"), result("auto_hide", "도배 문장", { earlierFloodRefs: [ref("user-1", "도배 문장"), ref("user-2", "도배 문장")] }));
     expect(submit).toHaveBeenCalledTimes(3);
     expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["viewer-1", "user-1", "user-2"]);
     expect(submit.mock.calls[0]?.[2]).toEqual({ type: "rule", channelId: null });
     expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.decision)).toEqual(["auto_hide", "auto_hide", "auto_hide"]);
+    // 자동 숨김 통계는 실행기가 성공을 알린 뒤에 센다(S5).
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(flushedStats()).toMatchObject({ auto_hidden: 3 });
+  });
+
+  it("자동 숨김 통계는 숨김이 성공한 뒤에만 센다(S5, M01)", async () => {
+    let finish: (outcome: { ok: boolean; note?: null; message?: string }) => void = () => undefined;
+    submit.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    expect(flushedStats()?.auto_hidden ?? 0).toBe(0);
+    finish({ ok: true, note: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flushedStats()).toMatchObject({ auto_hidden: 1 });
+  });
+
+  it.each([
+    ["실패", { ok: false, message: "치지직 서버 오류로 실패했습니다." }],
+    ["취소", { ok: false, message: "자동 숨김이 꺼져 보내지 않았습니다" }],
+  ])("자동 숨김이 %s로 끝나면 auto_hidden을 세지 않는다(S5, M01)", async (_label, outcome) => {
+    submit.mockImplementation(async () => outcome);
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flushedStats()).toMatchObject({ auto_hidden: 0, shadow: 0 });
+  });
+
+  it("자동 숨김을 보내는 동안 그 판정을 붙잡아 매니저 숨기기·무시와 겹치지 않게 하고, 끝나면 놓는다(S12)", async () => {
+    let finish: (outcome: { ok: boolean; note: null }) => void = () => undefined;
+    submit.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    const verdictId = verdicts.listRecent("c1", 0)[0]?.id as number;
+    expect(claims.holderOf(verdictId)).toBe("auto_hide");
+    finish({ ok: true, note: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(claims.isClaimed(verdictId)).toBe(false);
+  });
+
+  it("폭주 한도에 걸려 섀도로 저장되는 메시지는 실시간 채팅 줄도 shadow로 보인다(S5, M02)", () => {
+    settingsBreaker(1);
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("첫 금칙어"), result("auto_hide", "첫 금칙어"));
+    handler.handle(chat("둘째 금칙어"), result("auto_hide", "둘째 금칙어"));
+    expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.decision)).toEqual(["auto_hide", "shadow"]);
+    expect(chatLines).toEqual(["auto_hide:첫 금칙어", "shadow:둘째 금칙어"]);
   });
 
   it("후보 판정(권한자)이어도 떼도배의 앞선 메시지는 규칙 이유로 숨긴다", () => {
@@ -141,13 +189,21 @@ describe("DecisionHandler", () => {
     expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.senderChannelId)).toEqual(["viewer-1", "user-1"]);
   });
 
+  it("역할을 모르는 사람의 앞선 메시지는 떼도배 숨김에서 빠진다(S18)", () => {
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("도배 문장"), result("auto_hide", "도배 문장", {
+      earlierFloodRefs: [ref("user-1", "도배 문장"), { ...ref("role-missing", "도배 문장"), isRoleUnknown: true }],
+    }));
+    expect(submit.mock.calls.map((call) => call[1].target.senderChannelId)).toEqual(["viewer-1", "user-1"]);
+  });
+
   it("자동 숨김 요청이 거절되면 예외를 로그로 남기고 처리를 끝낸다", async () => {
     const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const rejecting = vi.fn(async () => {
       throw new Error("실행기 실패");
     });
     const failingHandler = createDecisionHandler({
-      verdicts, autoHide, stats, logger,
+      verdicts, autoHide, stats, claims, logger,
       executor: { submit: rejecting, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as unknown as Executor,
       broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
     });
@@ -163,7 +219,7 @@ describe("DecisionHandler", () => {
   it("자동 숨김이 실패하면 기록기의 message를 덮지 않게 outcomeMessage로 남긴다(F8)", async () => {
     const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const failingHandler = createDecisionHandler({
-      verdicts, autoHide, stats, logger,
+      verdicts, autoHide, stats, claims, logger,
       executor: { submit: async () => ({ ok: false, message: "치지직 서버 오류" }), pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
       broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
     });

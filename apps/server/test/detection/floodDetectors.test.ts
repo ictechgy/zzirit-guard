@@ -3,7 +3,7 @@ import { createGroupFloodDetector, createPersonalFloodDetector, type MessageRef 
 
 /** 사용자 번호로 만든 메시지 참조. messageTime은 일부러 뒤죽박죽으로 둔다. */
 function ref(user: number, messageTime = 1_000 - user): MessageRef {
-  return { chatChannelId: "chat-1", messageTime, senderChannelId: `user-${user}`, nickname: `u${user}`, content: "복붙 도배 문장입니다아아", privileged: false };
+  return { chatChannelId: "chat-1", messageTime, senderChannelId: `user-${user}`, nickname: `u${user}`, content: "복붙 도배 문장입니다아아", privileged: false, isRoleUnknown: false };
 }
 
 /** 길이 10자 이상인 정규화 문장. */
