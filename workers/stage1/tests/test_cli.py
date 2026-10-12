@@ -56,11 +56,17 @@ def make_base_model_directory(root: Path, weight_names: list[str]) -> Path:
 
 
 def make_data_files(root: Path) -> None:
-    """가짜 K-HATERS train·val·test 파일을 만든다."""
+    """가짜 K-HATERS train·val·test 파일과 채팅 회귀 파일을 만든다(저장소 파일에 기대지 않게 한다)."""
     data_directory = root / "data" / "k-haters"
     data_directory.mkdir(parents=True)
     for name in ("train_v2.jsonl", "val_v2.jsonl", "test_v2.jsonl"):
         (data_directory / name).write_text('{"id": 1, "text": "가", "label": "normal"}\n', encoding="utf-8")
+    (root / "chat.jsonl").write_text('{"id": 1, "group": "normal", "expected": "allow", "text": "가"}\n', encoding="utf-8")
+
+
+def parse_evaluate_arguments(model_directory: Path, root: Path):
+    """가짜 자료 위치(root)를 쓰는 evaluate 인자를 만든다."""
+    return evaluate.build_argument_parser().parse_args(["--model-dir", str(model_directory), "--ml-dir", str(root), "--chat-file", str(root / "chat.jsonl")])
 
 
 def resolve_and_validate(argv: list[str], environment: dict[str, str]) -> train.TrainingPaths:
@@ -139,7 +145,7 @@ def test_evaluate_refuses_to_overwrite_previous_results(tmp_path: Path) -> None:
     model_directory = make_base_model_directory(tmp_path, ["model.safetensors"])
     make_data_files(tmp_path)
     (model_directory / "evaluation.json").write_text("{}", encoding="utf-8")
-    arguments = evaluate.build_argument_parser().parse_args(["--model-dir", str(model_directory), "--ml-dir", str(tmp_path)])
+    arguments = parse_evaluate_arguments(model_directory, tmp_path)
     paths = evaluate.resolve_evaluation_paths(arguments, {})
     with pytest.raises(OutputExistsError, match="--overwrite"):
         evaluate.validate_evaluation_paths(paths, should_overwrite=False)
@@ -150,6 +156,6 @@ def test_evaluate_refuses_bin_weights(tmp_path: Path) -> None:
     """평가할 모델 디렉터리에 .bin이 있으면 거부한다."""
     model_directory = make_base_model_directory(tmp_path, ["model.safetensors", "pytorch_model.bin"])
     make_data_files(tmp_path)
-    arguments = evaluate.build_argument_parser().parse_args(["--model-dir", str(model_directory), "--ml-dir", str(tmp_path)])
+    arguments = parse_evaluate_arguments(model_directory, tmp_path)
     with pytest.raises(UnsafeWeightsError):
         evaluate.validate_evaluation_paths(evaluate.resolve_evaluation_paths(arguments, {}), should_overwrite=False)
