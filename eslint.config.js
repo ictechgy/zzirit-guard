@@ -5,7 +5,8 @@ import tseslint from "typescript-eslint";
 import { defineConfig } from "eslint/config";
 
 export default defineConfig([
-  { ignores: ["**/dist/**", "**/node_modules/**", "docs/**", "**/*.d.ts"] },
+  // .venv: 파이썬 워커(uv) 가상환경에는 torch가 넣은 JS 파일이 있어, 무시하지 않으면 npm run lint가 그것까지 검사한다.
+  { ignores: ["**/dist/**", "**/node_modules/**", "**/.venv/**", "docs/**", "**/*.d.ts"] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

@@ -9,3 +9,14 @@ coverage/
 data/
 backups/
 .DS_Store
+
+# 파이썬 워커(uv) 가상환경·캐시
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 1차 분류기 학습 결과·모델 가중치는 저장소에 넣지 않는다(스펙 §17). 기본 출력 위치는 $ZG_DATA_DIR/ml/stage1/이다.
+workers/*/outputs/
+*.safetensors

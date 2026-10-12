@@ -52,4 +52,6 @@
 | [beomi/KcELECTRA-base](https://huggingface.co/beomi/KcELECTRA-base) | MIT |
 | [humane-lab/K-HATERS](https://huggingface.co/datasets/humane-lab/K-HATERS) | CC-BY 4.0 |
 
+1차 분류기는 각자 학습하며 미세조정한 가중치는 배포하지 않습니다. 학습 방법과 KcELECTRA·K-HATERS 인용 정보(저자·논문)는 [workers/stage1/README.md](workers/stage1/README.md)에 있습니다.
+
 > ⚠️ `docs/spikes/2026-10-11-guard-models/chat_samples.jsonl`에는 탐지 성능을 시험하려고 직접 작성한 욕설·혐오 표현이 들어 있습니다.

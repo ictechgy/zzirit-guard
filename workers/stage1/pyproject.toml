@@ -1,0 +1,50 @@
+# 찌리릿 가드 1차 분류기(KcELECTRA) 학습·평가 파이프라인.
+# 왜 버전을 정확히 고정하나: 운영자마다 직접 학습하므로(스펙 §17) 같은 스크립트가 같은 라이브러리로 돌아야
+# 결과를 비교할 수 있다. 전이 의존성까지 uv.lock에 고정한다.
+[project]
+name = "zg-stage1"
+version = "0.1.0"
+description = "찌리릿 가드 1차 분류기(KcELECTRA 이진 거름망) 학습·평가"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy==2.4.4",
+    "safetensors==0.7.0",
+    # [CLS]·[SEP] 후처리 규칙(tokenizers.processors)을 직접 불러오므로 전이 의존성에 맡기지 않고 고정한다.
+    "tokenizers==0.22.2",
+    "torch==2.12.0",
+    "transformers==5.8.1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==1.15.0",
+    "pytest==9.0.3",
+    "ruff==0.12.0",
+]
+
+[tool.uv]
+# 공급망 위생: 잠금 시점 기준 2주 넘게 공개된 배포본만 고른다(전이 의존성 포함).
+exclude-newer = "2026-09-28T00:00:00Z"
+# 운영 대상은 Apple Silicon 맥 한 대뿐이다(스펙 §1·§4). 리눅스용 CUDA 휠을 잠금에서 뺀다.
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
+
+[tool.pytest.ini_options]
+# 패키지를 설치하지 않고 저장소 안의 zg_stage1을 그대로 불러오기 위해서다.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+# 한국어 문서화 주석과 오류 메시지가 길어 기본값(88)보다 넉넉하게 둔다.
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+# 오류(E·F·W), 흔한 버그(B), 최신 문법(UP), 단순화(SIM), 이름 규칙(N).
+select = ["E", "F", "W", "B", "UP", "SIM", "N"]
+
+[tool.mypy]
+python_version = "3.12"
+# torch·transformers 일부 하위 모듈은 타입 정보가 없어, 없는 것만 Any로 본다.
+ignore_missing_imports = true
