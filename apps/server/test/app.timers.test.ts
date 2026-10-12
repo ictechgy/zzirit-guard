@@ -175,6 +175,18 @@ describe("주기 작업은 이전 실행이 끝나기 전에 겹쳐 돌지 않�
     expect(control.calls.recheck).toBe(2);
   });
 
+  it("역할 재확인을 3번 연속 건너뛰면 작업 이름과 건너뛴 횟수를 경고로 남긴다(N5)", async () => {
+    const slow = gate();
+    control.recheckGate = slow.promise;
+    for (let tick = 0; tick < 3; tick += 1) await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(warnLines.filter((line) => line.details?.task === "역할 재확인")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(warnLines.filter((line) => line.details?.task === "역할 재확인")).toEqual([
+      { message: expect.stringContaining("3번 연속"), details: { task: "역할 재확인", skipCount: 3 } },
+    ]);
+    slow.open();
+  });
+
   it("정리·백업이 길어지면 다음 차례(첫 실행 뒤 하루 주기)를 건너뛴다", async () => {
     const slow = gate();
     control.backupGate = slow.promise;

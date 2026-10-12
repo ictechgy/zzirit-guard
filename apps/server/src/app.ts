@@ -67,6 +67,8 @@ const INTERVALS = {
 const STATUS_BROADCAST_MS = 20_000;
 /** 시스템 행위자. */
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
+/** 주기 작업이 이만큼 연속으로 건너뛰어지면 멈춘 것으로 보고 경고 로그를 남긴다(N5). */
+const STUCK_TASK_SKIP_THRESHOLD = 3;
 /** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
 const SESSION_EXPIRED_REASON = "세션이 만료되었습니다. 다시 로그인하세요";
 
@@ -306,12 +308,16 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
   /**
-   * 오래 걸릴 수 있는 주기 작업을 한 번에 하나만 돌게 감싼다(S15). 건너뛴 차례는 정보 로그로만 남긴다.
+   * 오래 걸릴 수 있는 주기 작업을 한 번에 하나만 돌게 감싼다(S15). 건너뛴 차례는 정보 로그로 남기고,
+   * 3번 연속 건너뛰면 경고로 올린다(N5). 왜: 한 번 실행이 주기의 세 배 넘게 끝나지 않으면 치지직 장애나 DB 잠금처럼 운영자가 봐야 할 문제다.
    * @param name 로그에 쓸 작업 이름
    * @param task 감쌀 비동기 작업
    */
   const oneAtATime = (name: string, task: () => Promise<void>): (() => Promise<void>) =>
-    runOneAtATime(task, () => logger.info("이전 실행이 아직 끝나지 않아 이번 차례를 건너뜁니다", { task: name }));
+    runOneAtATime(task, (skipCount) => {
+      if (skipCount < STUCK_TASK_SKIP_THRESHOLD) logger.info("이전 실행이 아직 끝나지 않아 이번 차례를 건너뜁니다", { task: name });
+      else logger.warn(`주기 작업이 ${skipCount}번 연속 건너뛰어졌습니다. 이전 실행이 멈췄는지 치지직·DB 상태를 확인하세요`, { task: name, skipCount });
+    });
   /** 토큰 선제 갱신(겹침 방지). */
   const refreshTokenOnce = oneAtATime("토큰 선제 갱신", refreshTokenQuietly);
   /** 역할 재확인과 만료 세션 소켓 종료(겹침 방지). */

@@ -27,3 +27,24 @@ describe("runOneAtATime(S15)", () => {
     expect(task).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("runOneAtATime 연속 건너뜀 수(N5)", () => {
+  it("연속으로 건너뛴 횟수를 onSkip에 넘기고, 실제로 다시 돌면 0부터 센다", async () => {
+    let finish: () => void = () => undefined;
+    const task = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const onSkip = vi.fn();
+    const run = runOneAtATime(task, onSkip);
+    const first = run();
+    await run();
+    await run();
+    await run();
+    expect(onSkip.mock.calls.map(([count]) => count)).toEqual([1, 2, 3]);
+    finish();
+    await first;
+    const second = run();
+    await run();
+    expect(onSkip.mock.calls.at(-1)?.[0]).toBe(1);
+    finish();
+    await second;
+  });
+});
