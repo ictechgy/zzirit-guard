@@ -29,6 +29,10 @@ class OutputExistsError(Stage1Error):
     """출력 위치가 이미 있어 덮어쓰기를 거부할 때 낸다. 앞선 학습 결과를 실수로 지우지 않기 위해서다."""
 
 
+class OutputLocationError(Stage1Error):
+    """출력 위치가 허용되지 않을 때 낸다(예: 저장소 안). 가중치·평가 결과가 실수로 커밋되지 않게 하기 위해서다."""
+
+
 class UnsafeWeightsError(Stage1Error):
     """가중치가 safetensors가 아니거나(pickle 형식) 없을 때 낸다. pickle은 읽을 때 임의 코드를 실행할 수 있다."""
 

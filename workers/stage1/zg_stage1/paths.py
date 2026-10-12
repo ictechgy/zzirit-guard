@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 
-from zg_stage1.errors import OutputExistsError, PathResolutionError, UnsafeWeightsError
+from zg_stage1.errors import OutputExistsError, OutputLocationError, PathResolutionError, UnsafeWeightsError
 
 # ML 자료(기반 모델·데이터·학습 결과)의 최상위 디렉터리를 직접 가리키는 환경 변수.
 ML_DIRECTORY_VARIABLE = "ZG_ML_DIR"
@@ -105,6 +105,19 @@ def ensure_output_is_new(path: Path) -> Path:
     if path.exists():
         raise OutputExistsError(
             f"출력 위치가 이미 있습니다: {path}. 앞선 결과를 지키려고 덮어쓰지 않습니다. 다른 --out-dir를 주거나, 필요 없으면 직접 지운 뒤 다시 실행하세요."
+        )
+    return path
+
+
+def ensure_outside_repository(path: Path, repository_root: Path = REPOSITORY_ROOT) -> Path:
+    """출력 위치가 저장소 밖인지 확인한다. 상대 경로·심볼릭 링크는 실제 위치로 풀어 비교한다.
+
+    왜: 미세조정 가중치·평가 결과는 저장소에 넣지 않는다(스펙 §17). 저장소 안에 쓰면 .gitignore를 빠져나가거나
+    `git add -A` 한 번으로 커밋될 수 있다.
+    """
+    if path.resolve().is_relative_to(repository_root.resolve()):
+        raise OutputLocationError(
+            f"출력 위치가 저장소 안입니다: {path}. 가중치는 저장소에 넣지 않으므로 저장소 밖(예: $ZG_DATA_DIR/ml/stage1/)을 --out-dir로 주세요."
         )
     return path
 

@@ -159,3 +159,15 @@ def test_evaluate_refuses_bin_weights(tmp_path: Path) -> None:
     arguments = parse_evaluate_arguments(model_directory, tmp_path)
     with pytest.raises(UnsafeWeightsError):
         evaluate.validate_evaluation_paths(evaluate.resolve_evaluation_paths(arguments, {}), should_overwrite=False)
+
+
+def test_train_refuses_out_dir_inside_repository(tmp_path: Path) -> None:
+    """train은 저장소 안의 --out-dir를 무거운 작업 전에 거부한다."""
+    from zg_stage1.errors import OutputLocationError
+    from zg_stage1.paths import REPOSITORY_ROOT
+
+    make_base_model_directory(tmp_path, ["model.safetensors"])
+    make_data_files(tmp_path)
+    inside = REPOSITORY_ROOT / "workers" / "stage1" / "outputs" / "run"
+    with pytest.raises(OutputLocationError):
+        resolve_and_validate(["--ml-dir", str(tmp_path), "--out-dir", str(inside)], {})

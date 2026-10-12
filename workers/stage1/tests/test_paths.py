@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from zg_stage1.errors import OutputExistsError, PathResolutionError, UnsafeWeightsError
+from zg_stage1.errors import OutputExistsError, OutputLocationError, PathResolutionError, UnsafeWeightsError
 from zg_stage1.paths import (
+    REPOSITORY_ROOT,
     create_new_output_directory,
     default_training_output_directory,
+    ensure_outside_repository,
     ensure_safetensors_only,
     resolve_ml_directory,
 )
@@ -94,3 +96,21 @@ def test_missing_model_directory_is_reported(tmp_path: Path) -> None:
     """모델 디렉터리가 없으면 받는 방법을 알려 준다."""
     with pytest.raises(PathResolutionError, match="hf download"):
         ensure_safetensors_only(tmp_path / "absent")
+
+
+def test_output_inside_repository_is_refused() -> None:
+    """저장소 안의 출력 위치는 거부한다(가중치·평가 결과가 실수로 커밋되지 않게, 스펙 §17)."""
+    with pytest.raises(OutputLocationError, match="저장소 밖"):
+        ensure_outside_repository(REPOSITORY_ROOT / "workers" / "stage1" / "outputs" / "run")
+
+
+def test_relative_output_inside_repository_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """상대 경로도 현재 위치 기준으로 풀어 저장소 안이면 거부한다."""
+    monkeypatch.chdir(REPOSITORY_ROOT / "workers" / "stage1")
+    with pytest.raises(OutputLocationError):
+        ensure_outside_repository(Path("outputs") / "run")
+
+
+def test_output_outside_repository_is_accepted(tmp_path: Path) -> None:
+    """저장소 밖(예: $ZG_DATA_DIR/ml/stage1)은 허용한다."""
+    assert ensure_outside_repository(tmp_path / "run") == tmp_path / "run"

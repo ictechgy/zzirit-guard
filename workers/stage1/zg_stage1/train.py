@@ -47,6 +47,7 @@ from zg_stage1.paths import (
     default_training_output_directory,
     ensure_existing_file,
     ensure_output_is_new,
+    ensure_outside_repository,
     ensure_safetensors_only,
     resolve_ml_directory,
 )
@@ -239,10 +240,11 @@ def resolve_training_paths(arguments: argparse.Namespace, environment: Mapping[s
 
 
 def validate_training_paths(paths: TrainingPaths) -> None:
-    """무거운 작업 전에 입력이 있는지, 가중치가 safetensors뿐인지, 출력 위치가 비어 있는지 확인한다."""
+    """무거운 작업 전에 입력이 있는지, 가중치가 safetensors뿐인지, 출력 위치가 저장소 밖이고 비어 있는지 확인한다."""
     ensure_safetensors_only(paths.base_model_directory)
     ensure_existing_file(paths.train_file, "학습 데이터")
     ensure_existing_file(paths.validation_file, "검증 데이터")
+    ensure_outside_repository(paths.output_directory)
     ensure_output_is_new(paths.output_directory)
 
 
