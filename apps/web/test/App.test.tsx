@@ -127,3 +127,29 @@ describe("App", () => {
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/ws-ticket").length).toBeLessThanOrEqual(1);
   });
 });
+
+describe("App 세션 종료(W1 확인)", () => {
+  /** 상태를 보낸 뒤 곧 세션 종료를 알리는 가짜 WebSocket. */
+  class EndingWebSocket extends FakeWebSocket {
+    constructor(url: string) {
+      super(url);
+      setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: "session_ended", reason: "로그아웃했습니다" }) }), 50);
+    }
+  }
+
+  it("세션이 끝나면 본 화면 전체가 사라져 채팅 원문·닉네임이 남지 않는다", async () => {
+    vi.stubGlobal("WebSocket", EndingWebSocket);
+    const verdict = { id: 1, chatChannelId: "c", senderChannelId: "s1", senderNickname: "닉네임1", content: "남으면 안 되는 원문", messageTime: 1, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: Date.now() };
+    stubFetch({
+      "GET /api/me": () => json(200, me),
+      "GET /api/status": () => json(200, status),
+      "GET /api/candidates": () => json(200, [verdict]),
+      "POST /api/ws-ticket": () => json(200, { ticket: "t1" }),
+    });
+    render(<App />);
+    expect(await screen.findByText("남으면 안 되는 원문")).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "매니저 로그인" })).toBeTruthy();
+    expect(screen.queryByText("남으면 안 되는 원문")).toBeNull();
+    expect(screen.queryByText("닉네임1")).toBeNull();
+  });
+});
