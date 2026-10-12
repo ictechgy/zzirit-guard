@@ -174,3 +174,21 @@ describe("ChatReceiver 견고성", () => {
     expect(receiver.isConnected()).toBe(true);
   });
 });
+
+describe("ChatReceiver 구독 해제(S16, M05)", () => {
+  it("SYSTEM unsubscribed를 받으면 끊긴 것으로 알리고 소켓을 닫은 뒤 백오프로 다시 연결한다", async () => {
+    const changes: boolean[] = [];
+    const { instance, sockets } = createFakeSocketReceiver({ handshakeTimeoutMs: 60_000, onConnectionChange: (connected) => void changes.push(connected) });
+    receiver = instance;
+    receiver.start();
+    await waitFor(() => sockets.length === 1);
+    socketAt(sockets, 0).emit("SYSTEM", subscribedMessage);
+    expect(receiver.isConnected()).toBe(true);
+    socketAt(sockets, 0).emit("SYSTEM", { type: "unsubscribed", data: { eventType: "CHAT", channelId: "owner-channel" } });
+    expect(receiver.isConnected()).toBe(false);
+    expect(changes).toEqual([true, false]);
+    expect(socketAt(sockets, 0).closed).toBe(true);
+    await waitFor(() => sockets.length === 2, 4_000);
+    expect(fake.calls.filter((call) => call.path === "/open/v1/sessions/auth")).toHaveLength(2);
+  });
+});

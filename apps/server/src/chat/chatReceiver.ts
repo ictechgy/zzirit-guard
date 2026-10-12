@@ -168,11 +168,16 @@ class SessionChatReceiver implements ChatReceiver {
     });
   }
 
-  /** 시스템 메시지 처리. */
+  /**
+   * 시스템 메시지 처리.
+   * unsubscribed는 구독이 풀린 것이라 끊김과 같이 다룬다: 연결 안 됨으로 알리고 소켓을 버린 뒤 백오프로 새 세션을 만든다(S16, M05).
+   * 왜: 무시하면 채팅이 더 오지 않는데도 connected=true로 남아 화면이 "채팅 수신 중"으로 보이고 다시 연결하지도 않는다.
+   */
   private async handleSystem(socket: SocketLike, payload: unknown): Promise<void> {
     const message = parseSystemPayload(payload);
     if (message?.type === "connected") await this.subscribe(socket, message.sessionKey);
     else if (message?.type === "subscribed") this.markConnected();
+    else if (message?.type === "unsubscribed") this.handleDrop(socket, "unsubscribed");
     else if (message?.type === "revoked") this.handleRevoked();
   }
 
