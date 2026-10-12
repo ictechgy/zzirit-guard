@@ -44,6 +44,11 @@ export interface ChatReceiverOptions {
   onInvalidEvent(): void;
   /** 권한 회수 시 호출한다. 수신기는 이미 stop된 뒤이며, 스트리머가 다시 연결해야 한다. */
   onRevoked(): void;
+  /**
+   * 지금 연결된 채널 ID. 연결이 없으면 null. CHAT·SYSTEM의 channelId를 이 값과 대조한다(S17, X09).
+   * 왜: 다른 채널의 이벤트를 받아들이면 그 채널 시청자의 메시지를 판정·숨김 대상으로 삼거나, 남의 구독 해제·권한 회수로 연결 상태가 바뀐다.
+   */
+  connectedChannelId(): string | null;
   /** 소켓이 열린 뒤 구독 완료까지 기다리는 한도(ms). 기본 HANDSHAKE_TIMEOUT_MS, 테스트에서 줄인다. */
   handshakeTimeoutMs?: number;
 }
@@ -101,6 +106,8 @@ class SessionChatReceiver implements ChatReceiver {
   private generation = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 이 소켓에서 다른 채널 이벤트 경고를 이미 남겼는지. 같은 연결에서 매 이벤트마다 로그가 쌓이지 않게 한 번만 남긴다. */
+  private hasWarnedChannelMismatch = false;
 
   constructor(private readonly options: ChatReceiverOptions) {}
 
@@ -140,6 +147,7 @@ class SessionChatReceiver implements ChatReceiver {
   /** 소켓 이벤트를 연결한다. 모든 핸들러는 지금 소켓이 자기 자신일 때만 동작한다. */
   private attachSocket(socket: SocketLike): void {
     this.socket = socket;
+    this.hasWarnedChannelMismatch = false;
     this.armHandshakeWatchdog(socket);
     socket.on("SYSTEM", (payload) => {
       if (socket === this.socket) this.runSystemHandler(socket, payload);
@@ -175,6 +183,8 @@ class SessionChatReceiver implements ChatReceiver {
    */
   private async handleSystem(socket: SocketLike, payload: unknown): Promise<void> {
     const message = parseSystemPayload(payload);
+    // connected 말고는 channelId가 있다. 연결한 채널이 아니면 상태를 바꾸지 않는다(S17).
+    if (message !== null && message.type !== "connected" && !this.isConnectedChannel(message.channelId)) return this.warnChannelMismatch("SYSTEM");
     if (message?.type === "connected") await this.subscribe(socket, message.sessionKey);
     else if (message?.type === "subscribed") this.markConnected();
     else if (message?.type === "unsubscribed") this.handleDrop(socket, "unsubscribed");
@@ -199,11 +209,39 @@ class SessionChatReceiver implements ChatReceiver {
     this.setConnected(true);
   }
 
-  /** 채팅 이벤트를 검증해 넘기고, 형식이 틀리면 개수만 센다(원문은 로그에 남기지 않는다). */
+  /**
+   * 채팅 이벤트를 검증해 넘기고, 형식이 틀리면 개수만 센다(원문은 로그에 남기지 않는다).
+   * 연결한 채널이 아닌 채팅은 넘기지도 세지도 않는다(S17). 형식은 맞으므로 형식 오류 수에 넣지 않는다.
+   */
   private handleChat(payload: unknown): void {
     const event = parseChatPayload(payload, this.options.clock());
-    if (event) this.notify("onChat", () => this.options.onChat(event));
+    if (event && !this.isConnectedChannel(event.channelId)) this.warnChannelMismatch("CHAT");
+    else if (event) this.notify("onChat", () => this.options.onChat(event));
     else this.notify("onInvalidEvent", () => this.options.onInvalidEvent());
+  }
+
+  /**
+   * 이벤트의 채널이 지금 연결된 채널인지 본다. 연결 채널을 모르거나(null) 읽다가 실패하면 받아들이지 않는다(안전한 쪽).
+   * @param channelId 이벤트에 든 채널 ID
+   */
+  private isConnectedChannel(channelId: string): boolean {
+    try {
+      const connectedChannelId = this.options.connectedChannelId();
+      return connectedChannelId !== null && connectedChannelId === channelId;
+    } catch (error) {
+      this.options.logger.error("연결된 채널을 읽지 못해 이벤트를 무시했습니다. DB 상태를 확인하세요", { error: describeError(error) });
+      return false;
+    }
+  }
+
+  /**
+   * 다른 채널의 이벤트를 무시했다고 소켓마다 한 번만 경고한다. 원문·채널 ID는 남기지 않는다.
+   * @param eventName 무시한 이벤트 이름
+   */
+  private warnChannelMismatch(eventName: "CHAT" | "SYSTEM"): void {
+    if (this.hasWarnedChannelMismatch) return;
+    this.hasWarnedChannelMismatch = true;
+    this.options.logger.warn("연결한 채널과 다른 채널의 이벤트를 무시했습니다(같은 연결에서는 다시 기록하지 않습니다)", { event: eventName });
   }
 
   /** 권한 회수: 다시 연결해도 소용없으므로 멈추고 알린다. */

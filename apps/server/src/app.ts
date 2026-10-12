@@ -159,6 +159,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
 
   const receiver = createChatReceiver({
     api, tokenManager, clock, logger, connect: options.connect ?? connectWithSocketIo,
+    connectedChannelId: () => credentialStore.loadChannel()?.channelId ?? null,
     onChat: (event) => {
       lastChatAt = event.receivedAt;
       decisionHandler.handle(event, pipeline.evaluate(event));
