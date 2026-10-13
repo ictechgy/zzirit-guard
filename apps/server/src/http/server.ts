@@ -54,6 +54,7 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
   });
   app.addHook("onRequest", async (request, reply) => rejectCrossSite(deps.config.publicOrigin, request, reply));
   app.addHook("onSend", async (_request, reply, payload) => applySecurityHeaders(reply, deps.config.publicOrigin, payload));
+  app.addHook("onSend", async (request, reply, payload) => forbidCaching(request, reply, payload));
   app.setErrorHandler((error, _request, reply) => sendError(deps.logger, error, reply));
   registerAuthRoutes(app, deps);
   registerWebSocket(app, deps);
@@ -84,6 +85,26 @@ async function applySecurityHeaders(reply: FastifyReply, publicOrigin: string, p
   );
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("Referrer-Policy", "no-referrer");
+  return payload;
+}
+
+/**
+ * 브라우저가 저장하지 말아야 하는 응답의 경로 접두사(K12). 대소문자를 무시하고 비교한다.
+ * 왜: /api 응답에는 채팅 원문·닉네임·감사 기록이 들어 있고, /auth 응답은 로그인 이동이다. HTTP 캐시나 뒤로 가기 복원에 남으면
+ * 로그아웃 뒤에도 휴대폰에 개인정보가 남을 수 있다(운영 합의서·채널 공지의 "휴대폰에 따로 저장하지 않음").
+ */
+const NO_STORE_PATH_PREFIXES = ["/api/", "/auth/"];
+
+/**
+ * /api·/auth 응답(오류·리디렉션 포함)에 Cache-Control: no-store를 붙인다(K12).
+ * 원본 주소와 Fastify가 맞춘 라우트 주소를 함께 본다. 왜: "/%61pi/me"처럼 인코딩한 주소도 같은 API 라우트로 들어오기 때문이다.
+ * @param request 요청(경로를 본다)
+ * @param reply 응답
+ * @param payload 보낼 본문(그대로 돌려준다)
+ */
+async function forbidCaching(request: FastifyRequest, reply: FastifyReply, payload: unknown) {
+  const paths = [request.url.toLowerCase(), request.routeOptions.url ?? ""];
+  if (paths.some((path) => NO_STORE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)))) reply.header("Cache-Control", "no-store");
   return payload;
 }
 

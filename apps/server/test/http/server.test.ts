@@ -54,6 +54,34 @@ describe("인증과 요청 출처", () => {
   });
 });
 
+describe("API·인증 응답의 캐시 금지(K12)", () => {
+  it("/api/* 응답은 성공·오류 모두 Cache-Control: no-store다", async () => {
+    const cookie = `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}`;
+    const responses = await Promise.all([
+      harness.app.inject({ method: "GET", url: "/api/candidates", headers: { cookie } }),
+      harness.app.inject({ method: "GET", url: "/api/me" }),
+      harness.app.inject({ method: "GET", url: "/api/no-such-route", headers: { cookie } }),
+      harness.app.inject({ method: "POST", url: "/api/auto-hide", headers: { cookie }, payload: { enabled: false } }),
+      harness.app.inject({ method: "GET", url: "/api/verdicts/abc", headers: { cookie } }),
+    ]);
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 401, 404, 403, 404]);
+    expect(responses.map((response) => response.headers["cache-control"])).toEqual(Array(5).fill("no-store"));
+  });
+
+  it("/auth/* 응답(치지직으로 보내기·오류로 돌려보내기)도 no-store다", async () => {
+    const start = await harness.app.inject({ method: "GET", url: "/auth/login" });
+    const callback = await harness.app.inject({ method: "GET", url: "/auth/callback" });
+    expect([start.statusCode, callback.statusCode]).toEqual([302, 302]);
+    expect([start.headers["cache-control"], callback.headers["cache-control"]]).toEqual(["no-store", "no-store"]);
+  });
+
+  it("인코딩한 경로로 API 라우트에 닿아도 no-store다", async () => {
+    const response = await harness.app.inject({ method: "GET", url: "/%61pi/me", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
+});
+
 describe("자동 숨김 스위치 권한", () => {
   it("채팅 운영자는 끌 수만 있고, 채널 관리자는 켤 수 있다", async () => {
     const chatManager = harness.login("STREAMING_CHAT_MANAGER");
