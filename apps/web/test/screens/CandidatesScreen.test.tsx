@@ -537,3 +537,45 @@ describe("CandidatesScreen 서버의 새 409 처리(K1·K2와 맞춤)", () => {
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("CandidatesScreen 결과를 알 수 없는 조치 알림 유지(K20)", () => {
+  /** 시간 초과 오류. */
+  const timeoutError = () => new ApiError(0, "timeout", "응답이 늦습니다. 결과는 잠시 뒤 목록에 반영됩니다.");
+  /** 악플러의 숨기기 버튼과 다른사람의 무시 버튼이 있는 화면. */
+  const twoSenders = () => [verdict(1), verdict(2, { senderChannelId: "other", senderNickname: "다른사람" })];
+
+  it("시간 초과 알림은 다른 조치를 시작하거나 성공해도 지워지지 않고, 닫아야 사라진다", async () => {
+    const hide = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
+    renderScreen(twoSenders(), fakeActions({ hide, ignore: async () => "무시했습니다." }));
+    await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/응답이 늦습니다.*다시 누르지 마세요/));
+    await userEvent.click(screen.getByRole("button", { name: /^다른사람의 .+ 메시지 무시$/ }));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("무시했습니다."));
+    expect(screen.getByRole("alert").textContent).toMatch(/응답이 늦습니다.*다시 누르지 마세요/);
+    await userEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "작업 결과 닫기" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("결과를 알 수 없음 알림은 다른 조치의 실패 알림에 덮이지 않는다", async () => {
+    const hide = vi.fn(async (): Promise<string | null> => { throw new ApiError(502, "result_unknown", "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다."); });
+    const ignore = vi.fn(async (): Promise<string | null> => { throw new ApiError(502, "chzzk_failed", "치지직 서버 오류로 실패했습니다."); });
+    renderScreen(twoSenders(), fakeActions({ hide, ignore }));
+    await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    await userEvent.click(screen.getByRole("button", { name: /^다른사람의 .+ 메시지 무시$/ }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    const texts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
+    expect(texts.some((text) => /처리 결과를 알 수 없습니다.*다시 누르지 마세요/.test(text))).toBe(true);
+    expect(texts.some((text) => /치지직 서버 오류로 실패했습니다/.test(text))).toBe(true);
+  });
+
+  it("같은 문구의 알림은 하나만 남긴다(실패가 몰려도 알림이 화면을 덮지 않게)", async () => {
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw timeoutError(); });
+    renderScreen([verdict(1), verdict(2)], fakeActions({ hide }));
+    const [first, second] = screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement[];
+    await userEvent.click(first as HTMLButtonElement);
+    await userEvent.click(second as HTMLButtonElement);
+    await waitFor(() => expect(hide).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+});

@@ -1,7 +1,7 @@
 import type { MeDto, ServerStatus, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
 import { memo, useCallback, useRef, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
-import { ActionToast, type ActionFeedback } from "../components/ActionToast";
+import { ActionToast, UnknownOutcomeToasts, type ActionFeedback } from "../components/ActionToast";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
@@ -10,6 +10,7 @@ import { countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSect
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
 import { useStableSections } from "../state/useStableSections";
 import { useTimeoutHolds, type TimeoutHolds } from "../state/useTimeoutHolds";
+import { useUnknownOutcomeAlerts } from "../state/useUnknownOutcomeAlerts";
 
 /** 후보 화면이 부르는 동작. 성공하면 화면에 보여 줄 안내(없으면 null)를 돌려준다. MainScreen이 API로 채우고, 테스트는 가짜를 넘긴다. */
 export interface CandidateActions {
@@ -76,8 +77,10 @@ const TIMEOUT_HOLD_SUFFIX = "다시 누르지 마세요.";
 
 /** 동작 실행기가 쓰는 화면 쪽 도구. */
 interface RunnerContext {
-  /** 결과를 화면에 남긴다. */
+  /** 결과를 화면에 남긴다. 다음 동작이 시작되거나 끝나면 바뀐다. */
   setFeedback(feedback: ActionFeedback): void;
+  /** 결과를 알 수 없는 실패의 알림을 매니저가 닫을 때까지 남긴다(K20). */
+  keepUnknownOutcome(message: string): void;
   /** 목록을 다시 읽는다. */
   onReload(): void;
   /** 열쇠별 잠금(같은 열쇠의 동작만 막는다). */
@@ -90,6 +93,7 @@ interface RunnerContext {
 
 /**
  * 동작 실행기를 만든다. 성공하면 안내를, 실패하면 서버 문구를 남긴다.
+ * 결과를 알 수 없는 실패(시간 초과·result_unknown)는 따로 남겨, 다른 동작의 시작·결과가 지우지 못하게 한다(K20).
  * 이미 처리된 판정(409 already_handled)이면 화면이 낡은 것이므로 목록을 다시 읽고 안내(info)로 알린다(R-13·B19-6).
  * 시간이 초과되면(지켜볼 판정이 있을 때) 잠금을 바로 풀지 않고 붙잡는다(B19-7).
  * @param context 결과 표시·다시 읽기·잠금·판정 상태 조회
@@ -154,6 +158,7 @@ function holdAfterTimeout(context: RunnerContext, error: unknown, request: Timeo
 
 /**
  * 실패를 화면에 남긴다. 이미 처리된 판정이면 목록을 다시 읽고 안내로, 잠금을 붙잡았으면 다시 누르지 말라고 덧붙인다.
+ * 결과를 알 수 없는 실패는 닫을 때까지 남는 알림으로 보낸다(K20).
  * 자동 숨김이 진행 중(409 in_progress)이면 서버 문구를 그대로 안내로 보여 주고 다시 읽지 않는다(N4).
  * 왜: 자동 숨김이 끝나면 실시간으로 반영되고, 지금 다시 읽어도 대기 중으로 보여 "이미 처리됨"은 틀린 안내다.
  * @param context 결과 표시·다시 읽기
@@ -170,8 +175,9 @@ function reportFailure(context: RunnerContext, error: unknown, isHeld: boolean):
     context.onReload();
     return;
   }
-  const message = describeApiError(error);
-  context.setFeedback({ kind: "error", message: isHeld ? `${message} ${TIMEOUT_HOLD_SUFFIX}` : message });
+  const message = isHeld ? `${describeApiError(error)} ${TIMEOUT_HOLD_SUFFIX}` : describeApiError(error);
+  if (isOutcomeUnknown(error)) context.keepUnknownOutcome(message);
+  else context.setFeedback({ kind: "error", message });
 }
 
 /**
@@ -196,9 +202,10 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   const [feedback, setFeedback] = useState<ActionFeedback>(null);
   // 알림 닫기. ActionToast가 4초 타이머의 의존성으로 쓰므로 렌더마다 같은 함수여야 한다(아니면 타이머가 다시 시작된다).
   const dismissFeedback = useCallback(() => setFeedback(null), []);
+  const unknownOutcomes = useUnknownOutcomeAlerts();
   const locks = useActionLocks();
   const holds = useTimeoutHolds(sections, locks.unlock);
-  const run = createRunner({ setFeedback, onReload, locks, holds, statusOf: (verdictId) => findVerdictStatus(sections, verdictId) });
+  const run = createRunner({ setFeedback, keepUnknownOutcome: unknownOutcomes.keep, onReload, locks, holds, statusOf: (verdictId) => findVerdictStatus(sections, verdictId) });
   const { lockedKeys } = locks;
   const canHide = me.permissions.includes("hide_message");
   const autoHideEnabled = status?.autoHideEnabled ?? null;
@@ -241,6 +248,7 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
             <button type="button" onClick={onDismissSystemDisableNotice}>닫기</button>
           </div>
         )}
+        <UnknownOutcomeToasts messages={unknownOutcomes.messages} onDismiss={unknownOutcomes.dismiss} />
         <ActionToast feedback={feedback} onDismiss={dismissFeedback} />
       </div>
     </section>
