@@ -610,3 +610,25 @@ describe("CandidatesScreen 처리할 목록 나눠 그리기(K21)", () => {
     expect(within(section).getAllByRole("listitem")).toHaveLength(60);
   });
 });
+
+describe("CandidatesScreen 같은 초 메시지의 버튼 이름(K22)", () => {
+  /** 같은 초(화면 시각 기준)에 보낸 두 메시지의 시각. */
+  const sameSecond = formatClockTime(NOW - 500);
+
+  it("같은 사람이 같은 초에 보낸 메시지가 여럿이면 순번을 붙여 버튼 이름이 서로 다르다", () => {
+    renderScreen([verdict(1, { createdAt: NOW - 500 }), verdict(2, { createdAt: NOW - 600 })]);
+    expect(formatClockTime(NOW - 600)).toBe(sameSecond);
+    const hideNames = screen.getAllByRole("button", { name: /메시지 숨기기$/ }).map((button) => button.getAttribute("aria-label"));
+    expect(hideNames).toEqual([`악플러의 ${sameSecond} 1번째 메시지 숨기기`, `악플러의 ${sameSecond} 2번째 메시지 숨기기`]);
+    const ignoreNames = screen.getAllByRole("button", { name: /메시지 무시$/ }).map((button) => button.getAttribute("aria-label"));
+    expect(new Set(ignoreNames).size).toBe(2);
+  });
+
+  it("구역이 달라도(후보와 숨김 대기) 같은 사람·같은 초면 숨기기 버튼 이름이 겹치지 않는다", async () => {
+    const { actions } = renderScreen([verdict(1, { createdAt: NOW - 500 }), verdict(2, { createdAt: NOW - 600, decision: "auto_hide" })]);
+    const names = screen.getAllByRole("button", { name: /메시지 숨기기$/ }).map((button) => button.getAttribute("aria-label"));
+    expect(new Set(names).size).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: `악플러의 ${sameSecond} 2번째 메시지 숨기기` }));
+    expect(actions.hide).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
+  });
+});

@@ -1,12 +1,13 @@
 import type { MeDto, ServerStatus, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
 import { ActionToast, UnknownOutcomeToasts, type ActionFeedback } from "../components/ActionToast";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
 import { StatusBanner } from "../components/StatusBanner";
-import { ACTIONABLE_PAGE_SIZE, countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { ACTIONABLE_PAGE_SIZE, allVerdicts, countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { buildMessageLabels, type MessageLabels } from "../domain/messageLabels";
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
 import { usePageLimit } from "../state/usePageLimit";
 import { useStableSections } from "../state/useStableSections";
@@ -215,8 +216,10 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   const listRef = useRef<HTMLDivElement>(null);
   const stable = useStableSections(sections, listRef);
   const shown = stable.sections;
+  // 버튼 접근성 이름에 쓰는 메시지 설명. 같은 사람·같은 초가 겹치지 않게 화면 전체로 센다(K22).
+  const messageLabels = useMemo(() => buildMessageLabels(allVerdicts(shown)), [shown]);
   // 자동 숨김 목록 세 개가 함께 쓰는 속성.
-  const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions };
+  const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions, messageLabels };
   return (
     <section className="screen">
       <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
@@ -228,7 +231,7 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
       </div>
       <div ref={listRef} className="candidate-list">
         {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
-          <GroupSection key={key} title={title} groups={shown[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} handledIds={stable.handledIds} actions={actions} />
+          <GroupSection key={key} title={title} groups={shown[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} handledIds={stable.handledIds} actions={actions} messageLabels={messageLabels} />
         ))}
         {countActionable(shown) === 0 && <p className="empty">지금 확인할 후보가 없습니다.</p>}
         <AutoHidePendingList verdicts={shown.autoHidePending} {...rowProps} />
@@ -277,10 +280,12 @@ interface GroupSectionProps {
   handledIds: ReadonlySet<number>;
   /** 후보 화면 동작. */
   actions: CandidateActions;
+  /** 버튼 접근성 이름에 쓰는 메시지 설명(K22). */
+  messageLabels: MessageLabels;
 }
 
 /** 구역 하나. 비어 있으면 그리지 않는다. 제목에 전체 사람 수를 보인다(나눠 그려도 전체 규모를 알게, K21). */
-function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handledIds, actions }: GroupSectionProps) {
+function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handledIds, actions, messageLabels }: GroupSectionProps) {
   const page = usePageLimit(ACTIONABLE_PAGE_SIZE);
   if (groups.length === 0) return null;
   const shown = groups.slice(0, limit ?? page.limit);
@@ -289,7 +294,8 @@ function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handled
     <section className={`section section-${kind}`}>
       <h2>{title} {groups.length}명</h2>
       {shown.map((group) => (
-        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} handledIds={handledIds} actions={actions} />
+        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} handledIds={handledIds} actions={actions}
+          messageLabels={messageLabels} />
       ))}
       {remaining > 0 && (limit === null
         ? <button type="button" className="more" onClick={page.showMore}>더 보기 ({remaining}명)</button>

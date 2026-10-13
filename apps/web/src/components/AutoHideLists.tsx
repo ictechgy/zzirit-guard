@@ -1,5 +1,6 @@
 import type { VerdictDto } from "@zzirit-guard/shared";
 import { ACTIONABLE_PAGE_SIZE, MAX_LISTED_ROWS } from "../domain/candidates";
+import { messageLabelOf, type MessageLabels } from "../domain/messageLabels";
 import { formatClockTime } from "../domain/timeFormat";
 import { describeReason } from "../domain/verdictReason";
 import type { ActionRunner, CandidateActions } from "../screens/CandidatesScreen";
@@ -20,6 +21,8 @@ export interface AutoHideListProps {
   handledIds: ReadonlySet<number>;
   /** 후보 화면 동작. */
   actions: CandidateActions;
+  /** 버튼 접근성 이름에 쓰는 메시지 설명(같은 사람·같은 초면 순번이 붙는다, K22). */
+  messageLabels: MessageLabels;
 }
 
 /** 판정 한 건의 시각·보낸 사람·원문·이유. 원문은 텍스트로만 넣는다. 처리된 줄이면 "처리됨"을 단다. */
@@ -36,10 +39,10 @@ function VerdictSummary({ verdict, isHandled }: { verdict: VerdictDto; isHandled
 /** 버튼 종류: 숨기기·오판 신고. */
 type RowButtonKind = "hide" | "falsePositive";
 
-/** 버튼 이름표와 접근성 이름 끝말. */
+/** 버튼 이름표와 접근성 이름 끝말(앞부분은 메시지 설명, K22). */
 const ROW_BUTTON_LABELS: Record<RowButtonKind, { text: string; accessibleSuffix: string }> = {
-  hide: { text: "숨기기", accessibleSuffix: "메시지 숨기기" },
-  falsePositive: { text: "오판", accessibleSuffix: "메시지 오판 신고" },
+  hide: { text: "숨기기", accessibleSuffix: "숨기기" },
+  falsePositive: { text: "오판", accessibleSuffix: "오판 신고" },
 };
 
 /** 목록 한 줄 속성. */
@@ -66,7 +69,7 @@ function VerdictRow({ list, verdict, buttons }: VerdictRowProps) {
       <VerdictSummary verdict={verdict} isHandled={isHandled} />
       <span className="buttons">
         {buttons.map((kind) => (
-          <button key={kind} type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} ${ROW_BUTTON_LABELS[kind].accessibleSuffix}`}
+          <button key={kind} type="button" aria-label={`${messageLabelOf(list.messageLabels, verdict)} ${ROW_BUTTON_LABELS[kind].accessibleSuffix}`}
             disabled={isDisabled} onClick={() => list.run(lockKey, () => perform(kind), verdict.id)}>{ROW_BUTTON_LABELS[kind].text}</button>
         ))}
       </span>

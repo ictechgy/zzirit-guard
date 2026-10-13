@@ -1,6 +1,7 @@
 import type { Permission, VerdictDto } from "@zzirit-guard/shared";
 import { useState } from "react";
 import type { SenderGroup } from "../domain/candidates";
+import { messageLabelOf, type MessageLabels } from "../domain/messageLabels";
 import { formatClockTime } from "../domain/timeFormat";
 import { describeReason } from "../domain/verdictReason";
 import type { ActionRunner, CandidateActions } from "../screens/CandidatesScreen";
@@ -25,6 +26,8 @@ export interface CandidateGroupCardProps {
   handledIds: ReadonlySet<number>;
   /** 후보 화면 동작. */
   actions: CandidateActions;
+  /** 버튼 접근성 이름에 쓰는 메시지 설명(같은 사람·같은 초면 순번이 붙는다, K22). */
+  messageLabels: MessageLabels;
 }
 
 /** 메시지 한 줄 속성. */
@@ -43,6 +46,8 @@ interface MessageRowProps {
   isHandled: boolean;
   /** 후보 화면 동작. */
   actions: CandidateActions;
+  /** 버튼 접근성 이름 앞부분(예: "닉네임의 시:분:초 2번째 메시지", K22). */
+  label: string;
 }
 
 /** 카드에 처음 보여 줄 최근 메시지 수(스펙 6장). 나머지는 '더 보기'로 펼친다(W2). */
@@ -54,7 +59,7 @@ const VISIBLE_MESSAGES = 3;
  * 왜: 3건만 보이면 나머지 판정은 숨기기·무시할 방법이 없어 10분 창이 지날 때까지 남는다.
  * 임시 제한은 성공·시간 초과 뒤 60초 동안 다시 보내지 않는다(shouldHoldAfterDone, W2·M20).
  */
-export function CandidateGroupCard({ group, kind, permissions, run, lockedKeys, handledIds, actions }: CandidateGroupCardProps) {
+export function CandidateGroupCard({ group, kind, permissions, run, lockedKeys, handledIds, actions, messageLabels }: CandidateGroupCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const canHide = permissions.includes("hide_message");
   const restrictKey = senderLockKey(group.senderChannelId);
@@ -73,7 +78,8 @@ export function CandidateGroupCard({ group, kind, permissions, run, lockedKeys, 
       </header>
       <ul className="messages">
         {shownVerdicts.map((verdict) => (
-          <MessageRow key={verdict.id} verdict={verdict} kind={kind} canHide={canHide} run={run} isLocked={lockedKeys.has(verdictLockKey(verdict.id))} isHandled={handledIds.has(verdict.id)} actions={actions} />
+          <MessageRow key={verdict.id} verdict={verdict} kind={kind} canHide={canHide} run={run} isLocked={lockedKeys.has(verdictLockKey(verdict.id))} isHandled={handledIds.has(verdict.id)} actions={actions}
+            label={messageLabelOf(messageLabels, verdict)} />
         ))}
       </ul>
       {hiddenCount > 0 && (
@@ -86,7 +92,7 @@ export function CandidateGroupCard({ group, kind, permissions, run, lockedKeys, 
 }
 
 /** 메시지 한 줄과 이유·버튼. 채팅 원문은 텍스트로만 넣는다(React가 이스케이프한다). 처리된 줄은 흐리게 "처리됨"을 단다. */
-function MessageRow({ verdict, kind, canHide, run, isLocked, isHandled, actions }: MessageRowProps) {
+function MessageRow({ verdict, kind, canHide, run, isLocked, isHandled, actions, label }: MessageRowProps) {
   const lockKey = verdictLockKey(verdict.id);
   const isDisabled = !canHide || isLocked || isHandled;
   return (
@@ -95,11 +101,11 @@ function MessageRow({ verdict, kind, canHide, run, isLocked, isHandled, actions 
       <span className="content">{verdict.content}</span>
       <span className="reason">{describeReason(verdict.reason)}{isHandled && <span className="handled-label">처리됨</span>}</span>
       <span className="buttons">
-        <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 숨기기`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.hide(verdict), verdict.id)}>숨기기</button>
+        <button type="button" aria-label={`${label} 숨기기`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.hide(verdict), verdict.id)}>숨기기</button>
         {kind === "shadow" ? (
-          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 오판 신고`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.reportFalsePositive(verdict), verdict.id)}>오판</button>
+          <button type="button" aria-label={`${label} 오판 신고`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.reportFalsePositive(verdict), verdict.id)}>오판</button>
         ) : (
-          <button type="button" aria-label={`${verdict.senderNickname}의 ${formatClockTime(verdict.createdAt)} 메시지 무시`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.ignore(verdict), verdict.id)}>무시</button>
+          <button type="button" aria-label={`${label} 무시`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.ignore(verdict), verdict.id)}>무시</button>
         )}
       </span>
     </li>
