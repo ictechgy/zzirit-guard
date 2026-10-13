@@ -126,6 +126,18 @@ describe("serverReducer", () => {
     expect(serverReducer(replaced, { type: "connection", connected: true }).realtimeReplaced).toBe(false);
   });
 
+  it("손으로 다시 연결을 시작하면 멈춤 표시(거절·밀림)를 바로 지운다", () => {
+    const replaced = reduce([{ type: "realtime_replaced" }, { type: "reconnect_started" }]);
+    expect(replaced).toMatchObject({ realtimeReplaced: false, realtimeRejected: false });
+    const rejected = reduce([{ type: "realtime_rejected" }, { type: "reconnect_started" }]);
+    expect(rejected).toMatchObject({ realtimeReplaced: false, realtimeRejected: false });
+  });
+
+  it("거절과 밀림은 함께 표시하지 않는다: 나중에 멈춘 이유만 남긴다", () => {
+    expect(reduce([{ type: "realtime_replaced" }, { type: "realtime_rejected" }])).toMatchObject({ realtimeRejected: true, realtimeReplaced: false });
+    expect(reduce([{ type: "realtime_rejected" }, { type: "realtime_replaced" }])).toMatchObject({ realtimeRejected: false, realtimeReplaced: true });
+  });
+
   it("실시간 연결이 거듭 거절되면 표시하고, 다시 연결되면 지운다(R-6)", () => {
     const rejected = reduce([{ type: "connection", connected: true }, { type: "realtime_rejected" }]);
     expect(rejected).toMatchObject({ realtimeRejected: true, realtimeConnected: false });

@@ -39,9 +39,12 @@ export interface ServerState {
   nextChatSeq: number;
   /** 실시간 연결이 열려 서버 메시지를 받고 있는지. */
   realtimeConnected: boolean;
-  /** 실시간 연결이 거듭 거절돼(4003) 다시 연결을 멈췄는지(R-6). */
+  /** 실시간 연결이 거듭 거절돼(4003) 다시 연결을 멈췄는지(R-6). realtimeReplaced와 함께 참이 되지 않는다. */
   realtimeRejected: boolean;
-  /** 같은 세션의 다른 창에 실시간 연결이 밀려(4002) 다시 연결을 멈췄는지. 다시 연결되면 지운다. */
+  /**
+   * 같은 세션의 다른 창에 실시간 연결이 밀려(4002) 다시 연결을 멈췄는지. realtimeRejected와 함께 참이 되지 않는다.
+   * 둘 다 손으로 다시 연결을 시작하거나(reconnect_started) 연결되면 지운다.
+   */
   realtimeReplaced: boolean;
   /** 세션이 끝난 이유. 값이 생기면 로그인 화면으로 돌아간다. */
   sessionEndedReason: string | null;
@@ -63,6 +66,7 @@ export type ServerAction =
   | { type: "connection"; connected: boolean }
   | { type: "realtime_rejected" }
   | { type: "realtime_replaced" }
+  | { type: "reconnect_started" }
   | AutoHideApplied;
 
 /** 처음 상태. */
@@ -84,10 +88,14 @@ export function serverReducer(state: ServerState, action: ServerAction): ServerS
       return { ...state, loadError: action.message, replayLog: null };
     case "connection":
       return action.connected ? { ...state, realtimeConnected: true, realtimeRejected: false, realtimeReplaced: false } : { ...state, realtimeConnected: false };
+    // 멈춘 이유는 마지막 것 하나만 남긴다: 둘 다 남으면 안내와 '다시 연결' 버튼이 두 개 뜬다.
     case "realtime_rejected":
-      return { ...state, realtimeConnected: false, realtimeRejected: true };
+      return { ...state, realtimeConnected: false, realtimeRejected: true, realtimeReplaced: false };
     case "realtime_replaced":
-      return { ...state, realtimeConnected: false, realtimeReplaced: true };
+      return { ...state, realtimeConnected: false, realtimeRejected: false, realtimeReplaced: true };
+    // 손으로 다시 연결을 시작하면 멈춤 표시를 바로 지운다: 새 시도가 백오프(429·1013)로 기다리는 동안 "멈췄다"고 하면 틀린 안내다.
+    case "reconnect_started":
+      return { ...state, realtimeRejected: false, realtimeReplaced: false };
     case "event":
       return recordForReplay(applyEvent(state, action.event), action.event);
     case "auto_hide_applied":

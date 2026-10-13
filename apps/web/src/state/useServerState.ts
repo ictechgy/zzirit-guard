@@ -10,7 +10,7 @@ export interface ServerConnection {
   state: ServerState;
   /** 상태·후보를 서버에서 다시 읽는다('다시 불러오기', 409 already_handled). */
   reload(): void;
-  /** 거절(R-6)이나 다른 창에 밀려(4002) 멈춘 실시간 연결을 다시 시작한다. */
+  /** 거절(R-6)이나 다른 창에 밀려(4002) 멈춘 실시간 연결을 다시 시작한다. 시작하자마자 멈춤 표시를 지운다(reconnect_started). */
   reconnect(): void;
   /**
    * 자동 숨김 스위치 요청의 응답 값을 바로 상태에 넣는다(K17). 렌더마다 같은 함수다.
@@ -97,7 +97,12 @@ export function useServerState(): ServerConnection {
     };
   }, []);
   const reload = useCallback(() => controls.current?.loader.request(), []);
-  const reconnect = useCallback(() => controls.current?.connection.start(), []);
+  // 왜 먼저 알리나: 연결은 첫 메시지를 받아야 "연결됨"이 되므로, 그 전(티켓 429·1013 백오프 중)에 멈춤 안내가 남지 않게 바로 지운다.
+  const reconnect = useCallback(() => {
+    if (!controls.current) return;
+    dispatch({ type: "reconnect_started" });
+    controls.current.connection.start();
+  }, []);
   const applyAutoHide = useCallback((enabled: boolean) => dispatch({ type: "auto_hide_applied", enabled }), []);
   const statusEventCount = useCallback(() => statusEvents.current.count, []);
   return { state, reload, reconnect, applyAutoHide, statusEventCount };
