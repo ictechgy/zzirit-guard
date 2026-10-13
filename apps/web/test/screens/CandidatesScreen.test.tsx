@@ -505,3 +505,35 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     expect(screen.getByRole("alert").textContent).not.toMatch(/다시 누르지 마세요/);
   });
 });
+
+describe("CandidatesScreen 서버의 새 409 처리(K1·K2와 맞춤)", () => {
+  /** 실패하는 동작을 숨기기 또는 임시 제한 자리에 넣는다. */
+  type Placement = (action: () => Promise<string | null>) => Partial<CandidateActions>;
+  const asHide: Placement = (action) => ({ hide: action });
+  const asRestrict: Placement = (action) => ({ temporaryRestrict: action });
+
+  it.each([
+    ["숨기기", asHide, /^악플러의 .+ 메시지 숨기기$/, "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요."],
+    ["임시 제한", asRestrict, /^악플러 임시 제한$/, "임시 제한 결과를 알 수 없습니다."],
+  ])("%s의 409 result_unknown은 서버 문구에 '다시 누르지 마세요'를 붙여 알리고 60초 동안 다시 보내지 않는다", async (_label, place, name, message) => {
+    vi.useFakeTimers();
+    const action = vi.fn(async (): Promise<string | null> => { throw new ApiError(409, "result_unknown", message); });
+    renderScreen([verdict(1)], fakeActions(place(action)));
+    const button = () => screen.getByRole("button", { name }) as HTMLButtonElement;
+    fireEvent.click(button());
+    await act(async () => undefined);
+    expect(screen.getByRole("alert").querySelector("p")?.textContent).toBe(`${message} 다시 누르지 마세요.`);
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(button());
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it("임시 제한의 409 already_handled(진행 중·방금 제한)는 빨간 오류가 아니라 안내로 알리고 목록을 다시 읽는다", async () => {
+    const temporaryRestrict = vi.fn(async (): Promise<string | null> => { throw new ApiError(409, "already_handled", "방금 제한했습니다."); });
+    const { onReload } = renderScreen([verdict(1)], fakeActions({ temporaryRestrict }));
+    await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+});
