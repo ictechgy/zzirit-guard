@@ -579,3 +579,34 @@ describe("CandidatesScreen 결과를 알 수 없는 조치 알림 유지(K20)", 
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 });
+
+describe("CandidatesScreen 처리할 목록 나눠 그리기(K21)", () => {
+  it("후보 묶음은 처음 50명만 그리고 '더 보기 (N명)'을 누를 때마다 50명씩 더 그리며, 전체 수는 제목에 보인다", async () => {
+    const many = Array.from({ length: 120 }, (_unused, index) => verdict(index + 1, { senderChannelId: `s${index}`, senderNickname: `시청자${index}` }));
+    renderScreen(many);
+    const section = screen.getByRole("heading", { name: "후보 120명" }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("article")).toHaveLength(50);
+    await userEvent.click(within(section).getByRole("button", { name: "더 보기 (70명)" }));
+    expect(within(section).getAllByRole("article")).toHaveLength(100);
+    await userEvent.click(within(section).getByRole("button", { name: "더 보기 (20명)" }));
+    expect(within(section).getAllByRole("article")).toHaveLength(120);
+    expect(within(section).queryByRole("button", { name: /명\)$/ })).toBeNull();
+  });
+
+  it("도움 필요 묶음도 처음 50명만 그린다", () => {
+    const many = Array.from({ length: 51 }, (_unused, index) => verdict(index + 1, { decision: "needs_care", senderChannelId: `c${index}`, senderNickname: `도움${index}` }));
+    renderScreen(many);
+    const section = screen.getByRole("heading", { name: /^도움 필요/ }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("article")).toHaveLength(50);
+    expect(within(section).getByRole("button", { name: "더 보기 (1명)" })).toBeTruthy();
+  });
+
+  it("숨김 대기·실패도 처음 50건만 그리고 '더 보기 (N건)'으로 더 그린다", async () => {
+    const pending = Array.from({ length: 60 }, (_unused, index) => verdict(index + 1, { decision: "auto_hide" }));
+    renderScreen(pending);
+    const section = screen.getByRole("heading", { name: /숨김 대기·실패\(60건\)/ }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("listitem")).toHaveLength(50);
+    await userEvent.click(within(section).getByRole("button", { name: "더 보기 (10건)" }));
+    expect(within(section).getAllByRole("listitem")).toHaveLength(60);
+  });
+});

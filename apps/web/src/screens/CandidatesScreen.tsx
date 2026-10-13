@@ -6,8 +6,9 @@ import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
 import { StatusBanner } from "../components/StatusBanner";
-import { countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { ACTIONABLE_PAGE_SIZE, countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
+import { usePageLimit } from "../state/usePageLimit";
 import { useStableSections } from "../state/useStableSections";
 import { useTimeoutHolds, type TimeoutHolds } from "../state/useTimeoutHolds";
 import { useUnknownOutcomeAlerts } from "../state/useUnknownOutcomeAlerts";
@@ -57,8 +58,9 @@ export interface CandidatesScreenProps {
 
 
 /**
- * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수(null이면 모두). 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
- * 섀도만 줄이는 이유: 처리하지 않아도 되는 정보라 떼도배 때 수백 명이 쌓여도 다 그릴 필요가 없다(F4). 도움 필요·후보는 매니저가 처리해야 해서 모두 그린다.
+ * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수. 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
+ * 섀도만 고정 수로 자르는 이유: 처리하지 않아도 되는 정보라 떼도배 때 수백 명이 쌓여도 다 그릴 필요가 없다(F4).
+ * 도움 필요·후보(limit null)는 매니저가 처리해야 해서 자르지 않고, ACTIONABLE_PAGE_SIZE씩 '더 보기'로 나눠 그린다(K21).
  */
 const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kind: GroupKind; title: string; limit: number | null }> = [
   { key: "care", kind: "care", title: "도움 필요(자해·자살 신호)", limit: null },
@@ -261,7 +263,7 @@ interface GroupSectionProps {
   title: string;
   /** 이 구역의 사람 묶음. */
   groups: readonly SenderGroup[];
-  /** 그릴 최대 묶음 수. null이면 모두 그린다. 넘친 묶음은 "외 N명"으로 알린다. */
+  /** 그릴 최대 묶음 수. 넘친 묶음은 "외 N명"으로 알린다. null이면 ACTIONABLE_PAGE_SIZE씩 '더 보기'로 나눠 그린다(K21). */
   limit: number | null;
   /** 카드 종류. */
   kind: GroupKind;
@@ -277,17 +279,21 @@ interface GroupSectionProps {
   actions: CandidateActions;
 }
 
-/** 구역 하나. 비어 있으면 그리지 않는다. */
+/** 구역 하나. 비어 있으면 그리지 않는다. 제목에 전체 사람 수를 보인다(나눠 그려도 전체 규모를 알게, K21). */
 function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handledIds, actions }: GroupSectionProps) {
+  const page = usePageLimit(ACTIONABLE_PAGE_SIZE);
   if (groups.length === 0) return null;
-  const shown = limit === null ? groups : groups.slice(0, limit);
+  const shown = groups.slice(0, limit ?? page.limit);
+  const remaining = groups.length - shown.length;
   return (
     <section className={`section section-${kind}`}>
-      <h2>{title}</h2>
+      <h2>{title} {groups.length}명</h2>
       {shown.map((group) => (
         <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} handledIds={handledIds} actions={actions} />
       ))}
-      {groups.length > shown.length && <p className="hint">외 {groups.length - shown.length}명</p>}
+      {remaining > 0 && (limit === null
+        ? <button type="button" className="more" onClick={page.showMore}>더 보기 ({remaining}명)</button>
+        : <p className="hint">외 {remaining}명</p>)}
     </section>
   );
 }

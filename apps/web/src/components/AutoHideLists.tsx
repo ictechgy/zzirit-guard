@@ -1,9 +1,10 @@
 import type { VerdictDto } from "@zzirit-guard/shared";
-import { MAX_LISTED_ROWS } from "../domain/candidates";
+import { ACTIONABLE_PAGE_SIZE, MAX_LISTED_ROWS } from "../domain/candidates";
 import { formatClockTime } from "../domain/timeFormat";
 import { describeReason } from "../domain/verdictReason";
 import type { ActionRunner, CandidateActions } from "../screens/CandidatesScreen";
 import { verdictLockKey } from "../state/useActionLocks";
+import { usePageLimit } from "../state/usePageLimit";
 
 /** 자동 숨김 목록 속성. */
 export interface AutoHideListProps {
@@ -75,17 +76,21 @@ function VerdictRow({ list, verdict, buttons }: VerdictRowProps) {
 
 /**
  * 자동 숨김 판정인데 아직 숨겨지지 않은 것(실행 대기·스위치가 꺼져 취소·재시도 실패, R-4).
- * 펼쳐 두고 숨기기 버튼을 준다: 접어 두면 숨겨지지 않은 메시지를 매니저가 놓친다. 처리해야 하는 목록이라 줄이지 않는다.
+ * 펼쳐 두고 숨기기 버튼을 준다: 접어 두면 숨겨지지 않은 메시지를 매니저가 놓친다.
+ * 처리해야 하는 목록이라 잘라 버리지 않고, ACTIONABLE_PAGE_SIZE씩 '더 보기'로 나눠 그린다(K21: 스위치가 꺼져 취소된 판정이 수천 건 쌓일 수 있다).
  */
 export function AutoHidePendingList(props: AutoHideListProps) {
+  const page = usePageLimit(ACTIONABLE_PAGE_SIZE);
   if (props.verdicts.length === 0) return null;
+  const remaining = props.verdicts.length - page.limit;
   return (
     <section className="section section-auto-pending">
       <h2>숨김 대기·실패({props.verdicts.length}건)</h2>
       <p className="hint">자동 숨김이 아직 처리 중이거나, 스위치가 꺼져 취소됐거나, 실패한 메시지입니다. 필요하면 직접 숨기세요.</p>
       <ul className="messages">
-        {props.verdicts.map((verdict) => <VerdictRow key={verdict.id} list={props} verdict={verdict} buttons={["hide", "falsePositive"]} />)}
+        {props.verdicts.slice(0, page.limit).map((verdict) => <VerdictRow key={verdict.id} list={props} verdict={verdict} buttons={["hide", "falsePositive"]} />)}
       </ul>
+      {remaining > 0 && <button type="button" className="more" onClick={page.showMore}>더 보기 ({remaining}건)</button>}
     </section>
   );
 }
