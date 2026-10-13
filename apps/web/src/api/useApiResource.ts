@@ -57,12 +57,17 @@ function stateAfterFailure<T>(previous: ResourceState<T>, path: string, error: u
  * refreshIntervalMs를 주면 그 간격으로 다시 읽는다(상태 점검처럼 서버가 방송하지 않는 값, R-7).
  * refreshKey가 바뀌면 다시 읽는다(설정 탭을 다시 열거나 '새로 고침'을 눌렀을 때, F6).
  * 화면이 사라진 뒤 도착한 응답은 버린다. 경로가 바뀌면 새 응답이 오기 전에도 이전 경로의 결과를 내주지 않는다(W1).
+ * 경로가 null이 되면(권한을 잃으면) 이전 응답을 상태에서도 지운다(K23).
  */
 export function useApiResource<T>(path: string | null, refreshIntervalMs: number | null = null, refreshKey = 0): ApiResource<T> {
   const [state, setState] = useState<ResourceState<T>>(() => emptyState<T>(path));
   const [version, setVersion] = useState(0);
   useEffect(() => {
-    if (path === null) return;
+    if (path === null) {
+      // 왜 상태에서도 지우나: 가리기만 하면 메모리에 남고, 권한을 되찾아 같은 경로로 돌아오는 순간 새 응답 전에 옛 데이터가 보인다.
+      setState((previous) => (previous.forPath === null ? previous : emptyState<T>(null)));
+      return;
+    }
     let cancelled = false;
     apiGet<T>(path).then(
       (data) => {

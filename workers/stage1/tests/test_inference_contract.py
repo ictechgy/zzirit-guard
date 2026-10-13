@@ -118,3 +118,28 @@ def test_evaluate_falls_back_to_card_then_default(tmp_path: Path) -> None:
     """계약이 없으면 카드의 값을, 카드도 없으면 128을 쓴다."""
     assert evaluate.resolve_max_length(tmp_path, {"hyperparameters": {"max_length": 96}}) == 96
     assert evaluate.resolve_max_length(tmp_path, None) == 128
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"schema_version": 2}, {"toxic_class_index": 0}, {"max_length": 1}, {"max_length": 7}, {"max_length": 513}],
+)
+def test_read_rejects_contract_with_invalid_semantics(wrapped_tokenizer: PreTrainedTokenizerBase, tmp_path: Path, overrides: dict) -> None:
+    """정수이기만 한 계약(모르는 버전·뒤집힌 유해 칸·범위 밖 max_length)은 거부한다."""
+    contract = {**build_inference_contract(wrapped_tokenizer, max_length=128), **overrides}
+    (tmp_path / INFERENCE_CONTRACT_FILE_NAME).write_text(json.dumps(contract), encoding="utf-8")
+    with pytest.raises(ModelFormatError, match="write_inference_contract"):
+        read_inference_contract(tmp_path)
+
+
+@pytest.mark.parametrize("max_length", [8, 512])
+def test_read_accepts_boundary_max_length(wrapped_tokenizer: PreTrainedTokenizerBase, tmp_path: Path, max_length: int) -> None:
+    """허용 범위의 양 끝값은 통과한다."""
+    write_inference_contract_file(tmp_path, build_inference_contract(wrapped_tokenizer, max_length=max_length))
+    assert read_inference_contract(tmp_path)["max_length"] == max_length
+
+
+def test_build_refuses_out_of_range_max_length(wrapped_tokenizer: PreTrainedTokenizerBase) -> None:
+    """범위 밖 max_length로는 계약을 만들지 않는다(쓴 뒤 읽을 수 없게 되므로)."""
+    with pytest.raises(ModelFormatError):
+        build_inference_contract(wrapped_tokenizer, max_length=4)

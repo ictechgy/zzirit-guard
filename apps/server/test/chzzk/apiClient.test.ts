@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChzzkApiError, createChzzkApi, type ChzzkApi } from "../../src/chzzk/apiClient.js";
+import { describeError } from "../../src/logger.js";
 import { startFakeChzzk, type FakeChzzk } from "../fakes/fakeChzzk.js";
 
 let fake: FakeChzzk;
@@ -49,6 +50,18 @@ describe("ChzzkApi", () => {
     const settings = await api.getChatSettings(owner.accessToken);
     await api.updateChatSettings(owner.accessToken, { ...settings, chatSlowModeSec: 5 });
     expect(fake.chatSettings.chatSlowModeSec).toBe(5);
+  });
+
+  it("채팅 구독이 400이어도 오류 문구·경로·로그 문구에 sessionKey가 남지 않는다(K5)", async () => {
+    const owner = fake.issueTokens(fake.owner);
+    const sessionKey = "secret-session-key-0123";
+    const error = await api.subscribeChat(owner.accessToken, sessionKey).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChzzkApiError);
+    expect(error).toMatchObject({ status: 400, path: "/open/v1/sessions/events/subscribe/chat" });
+    for (const text of [(error as ChzzkApiError).message, (error as ChzzkApiError).path, describeError(error)]) {
+      expect(text).not.toContain(sessionKey);
+      expect(text).not.toContain("sessionKey=");
+    }
   });
 
   it("관리자 목록과 세션 URL을 읽는다", async () => {

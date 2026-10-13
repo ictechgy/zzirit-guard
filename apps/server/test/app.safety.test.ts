@@ -1,9 +1,11 @@
+import { chmodSync, statSync } from "node:fs";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp, type App } from "../src/app.js";
 import type { Logger } from "../src/logger.js";
 import { startFakeChzzk, type FakeChzzk } from "./fakes/fakeChzzk.js";
-import { buildTestConfig, cleanupDataDirectories, createDataDirectory, newEncryptionKey } from "./helpers/appHarness.js";
+import { buildTestConfig, cleanupDataDirectories, countPushSubscriptions, createDataDirectory, newEncryptionKey, ORIGIN } from "./helpers/appHarness.js";
 import { waitFor } from "./helpers/waitFor.js";
 
 /** 기록한 로그 한 줄. */
@@ -48,6 +50,9 @@ describe("시작 안전장치: 저장된 채널이 설정과 다를 때", () => 
     const sessionCookie = /zg_session=([^;]+)/.exec(String(callback.headers["set-cookie"]))?.[1] as string;
     const meBefore = await first.http.inject({ method: "GET", url: "/api/me", headers: { cookie: `zg_session=${sessionCookie}` } });
     expect(meBefore.statusCode).toBe(200);
+    const pushHeaders = { cookie: `zg_session=${sessionCookie}`, origin: ORIGIN, "x-zzirit-request": "1" };
+    const pushPayload = { endpoint: "https://fcm.googleapis.com/fcm/send/owner-phone", keys: { p256dh: "p256dh-value", auth: "auth-value" } };
+    expect((await first.http.inject({ method: "POST", url: "/api/push/subscriptions", headers: pushHeaders, payload: pushPayload })).statusCode).toBe(200);
     await waitFor(() => fake?.subscribedSessionCount() === 1);
     await first.stop();
     apps = [];
@@ -61,6 +66,8 @@ describe("시작 안전장치: 저장된 채널이 설정과 다를 때", () => 
     const meAfter = await second.http.inject({ method: "GET", url: "/api/me", headers: { cookie: `zg_session=${sessionCookie}` } });
     expect(meAfter.statusCode).toBe(401);
     expect(second.status()).toMatchObject({ channelConnected: false, chatConnected: false });
+    // 저장된 채널이 바뀌면 옛 채널 매니저의 장애 알림 구독도 지운다(K11).
+    expect(countPushSubscriptions(dataDirectory)).toBe(0);
     expect(fake.subscribedSessionCount()).toBe(0);
     expect(fake.calls.filter((call) => call.path.startsWith("/open/v1/sessions")).length).toBe(sessionCallsBefore);
     expect(fake.calls.some((call) => call.path.includes("revoke"))).toBe(false);
@@ -70,5 +77,18 @@ describe("시작 안전장치: 저장된 채널이 설정과 다를 때", () => 
     expect(issuedTokens.length).toBeGreaterThan(0);
     const loggedText = JSON.stringify(recording.lines);
     issuedTokens.forEach((token) => expect(loggedText).not.toContain(token));
+  });
+});
+
+describe("데이터 파일 권한(K13)", () => {
+  it("시작할 때 데이터 폴더를 0700, DB와 -wal·-shm을 0600으로 맞춘다", async () => {
+    fake = await startFakeChzzk();
+    const dataDirectory = createDataDirectory();
+    chmodSync(dataDirectory, 0o755);
+    const app = await createApp(buildTestConfig(fake, dataDirectory), { encryptionKey: newEncryptionKey(), logger: createRecordingLogger().logger, pushSender: async () => ({}) });
+    apps.push(app);
+    const modeOf = (name: string) => statSync(join(dataDirectory, name)).mode & 0o777;
+    expect(modeOf(".")).toBe(0o700);
+    expect(["zzirit-guard.sqlite", "zzirit-guard.sqlite-wal", "zzirit-guard.sqlite-shm"].map(modeOf)).toEqual([0o600, 0o600, 0o600]);
   });
 });

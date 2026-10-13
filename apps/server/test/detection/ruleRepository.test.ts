@@ -45,4 +45,30 @@ describe("RuleRepository", () => {
     repository.seedDefaults("c1");
     expect(repository.list("c1")).toHaveLength(DEFAULT_RULES.length);
   });
+
+  it.each([
+    ["com", "점이 없는 한 단어"],
+    ["https://com/", "주소로 넣은 한 단어"],
+    ["co.kr", "공용 접미사"],
+    ["https://www.co.uk/", "주소로 넣은 공용 접미사"],
+    ["example.com:8080", "포트"],
+    ["user@example.com", "아이디"],
+    ["https://user:pw@example.com", "아이디와 비밀번호"],
+    ["example.com/watch", "경로"],
+    ["example.com?x=1", "쿼리"],
+    ["example..com", "빈 라벨"],
+    ["*.example.com", "와일드카드"],
+  ])("허용 도메인 %s(%s)는 거부한다(K14)", (pattern) => {
+    expect(() => createRepository().add("c1", "allow_domain", pattern, "m")).toThrow(RuleValidationError);
+  });
+
+  it.each(["example.com", "sub.example.co.kr", "https://www.YouTube.com/", "네이버.com"])("허용 도메인 %s는 받는다(K14)", (pattern) => {
+    expect(createRepository().add("c1", "allow_domain", pattern, "m")).toMatchObject({ kind: "allow_domain" });
+  });
+
+  it("허용 도메인 거부 문구는 예와 함께 고칠 방법을 알려 준다(K14)", () => {
+    const repository = createRepository();
+    expect(() => repository.add("c1", "allow_domain", "com", "m")).toThrow(/youtube\.com/);
+    expect(() => repository.add("c1", "allow_domain", "co.kr", "m")).toThrow(/co\.kr.*example\.co\.kr/);
+  });
 });

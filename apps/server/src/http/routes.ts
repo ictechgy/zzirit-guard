@@ -3,8 +3,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
 import type { Broadcaster } from "../actions/decisionHandler.js";
-import type { ActionOutcome, Actor, Executor } from "../actions/executor.js";
-import type { VerdictClaims } from "../actions/verdictClaims.js";
+import type { ActionOutcome, ActionRequest, Actor, Executor } from "../actions/executor.js";
+import { RESTRICT_REPEAT_BLOCK_MS, type SenderActionBlock, type SenderActionGuard, type SenderActionKind } from "../actions/senderActionGuard.js";
+import { settleHideClaim, type VerdictClaims } from "../actions/verdictClaims.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
 import type { RuleRepository } from "../detection/ruleRepository.js";
 import { describeError, type Logger } from "../logger.js";
@@ -26,6 +27,8 @@ export interface RouteServices {
   verdicts: VerdictRepository;
   /** 숨김을 보내는 중인 판정 모음. 자동 숨김(decisionHandler)과 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
   claims: VerdictClaims;
+  /** 사람 단위 제재(임시 제한·활동 제한)가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). */
+  senderActions: SenderActionGuard;
   executor: Executor;
   autoHide: AutoHideSwitch;
   rules: RuleRepository;
@@ -88,6 +91,26 @@ const ACTION_IN_PROGRESS_MESSAGE = "다른 요청이 이 판정을 숨기는 중
  * 왜 already_handled와 가르나: 자동 숨김은 아직 끝나지 않아 다시 불러와도 대기 중으로 보이므로 "이미 처리됨"은 틀린 안내다.
  */
 const AUTO_HIDE_IN_PROGRESS_MESSAGE = "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다.";
+/**
+ * 앞선 숨김의 결과를 알 수 없는 판정을 다시 숨기려 할 때의 안내 문구(K1). 코드는 result_unknown이다.
+ * 왜 다시 보내지 않나: 치지직이 이미 숨겼을 수 있어, 서버가 다시 보내면 되돌릴 수 없는 숨김이 겹친다. 확인은 매니저가 치지직에서 한다.
+ */
+const HIDE_RESULT_UNKNOWN_MESSAGE = "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요.";
+/** 다른 요청이 같은 사람에게 같은 제재를 보내는 중일 때의 안내 문구(K2). 화면이 다시 불러오게 already_handled 코드를 쓴다. */
+const RESTRICT_IN_PROGRESS_MESSAGE = "다른 요청이 이 사용자를 제한하는 중입니다. 잠시 뒤 '다시 불러오기'를 눌러 결과를 확인하세요.";
+/** 같은 사람에게 같은 제재가 방금 성공했을 때의 안내 문구(K2). 코드는 already_handled다. */
+const RESTRICT_RECENTLY_SUCCEEDED_MESSAGE = `방금 제한했습니다. 같은 제한은 ${RESTRICT_REPEAT_BLOCK_MS / 1000}초 뒤에 다시 보낼 수 있습니다.`;
+/**
+ * 앞선 제재의 결과를 알 수 없을 때 같은 제재를 다시 보내려 할 때의 안내 문구(K2). 코드는 result_unknown이다.
+ * 왜 다시 보내지 않나: 치지직이 이미 제한했을 수 있어, 확인은 매니저가 치지직에서 한다.
+ */
+const RESTRICT_RESULT_UNKNOWN_MESSAGE = "제한 결과를 알 수 없습니다. 치지직 채팅에서 제한됐는지 확인하고, 제한되지 않았다면 치지직 기본 도구로 제한하세요.";
+
+/**
+ * 실시간 연결 티켓을 1분 한도(세션당 10개, K8)보다 많이 요청했을 때의 안내 문구.
+ * 화면은 이 오류에서 기다렸다가 스스로 다시 연결하므로, 사람이 할 일은 기다리는 것뿐이다.
+ */
+const WS_TICKET_RATE_LIMITED_MESSAGE = "실시간 연결 요청이 너무 잦습니다. 잠시 뒤 다시 연결합니다.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -199,28 +222,34 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
 
 /**
  * 판정 하나를 숨긴다. 대기 중인 판정만 받고, 보내기 전에 판정을 붙잡아 동시에 누른 요청 중 하나만 실행기로 보낸다(S12, M10).
- * 확인(findVerdict·상태)과 붙잡기 사이에 await가 없어 다른 요청이 끼어들 수 없다. 결과와 관계없이 끝나면 놓는다.
+ * 확인(findVerdict·상태)과 붙잡기 사이에 await가 없어 다른 요청이 끼어들 수 없다.
+ * 끝나면 놓되, 결과를 알 수 없으면 놓지 않고 unknown으로 붙잡아 둔다(K1, settleHideClaim).
  * 성공했을 때의 hidden 전이는 실행기가 pending에서만 한다(그사이 오판·제한으로 바뀌었으면 덮지 않는다).
  */
 async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
   const verdict = findVerdict(services, request.params, channelId);
   if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
   if (!services.claims.tryClaim(verdict.id, "manager")) throw claimConflict(services, verdict.id);
+  let outcome: ActionOutcome | null = null;
   try {
     const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
-    return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
+    outcome = await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager));
+    return sendOutcome(reply, outcome);
   } finally {
-    services.claims.release(verdict.id);
+    settleHideClaim(services.claims, verdict.id, outcome);
   }
 }
 
 /**
- * 이미 붙잡힌 판정에 대한 409 오류를 만든다. 자동 숨김이 붙잡았으면 in_progress와 "곧 반영" 안내, 다른 매니저면 already_handled(N4).
+ * 이미 붙잡힌 판정에 대한 409 오류를 만든다. 자동 숨김이 붙잡았으면 in_progress와 "곧 반영" 안내, 다른 매니저면 already_handled(N4),
+ * 앞선 숨김의 결과를 알 수 없으면 result_unknown과 치지직에서 확인하라는 안내(K1).
  * @param services 붙잡기 모음
  * @param verdictId 판정 번호
  */
 function claimConflict(services: RouteServices, verdictId: number): RouteError {
-  if (services.claims.holderOf(verdictId) === "auto_hide") return new RouteError(409, "in_progress", AUTO_HIDE_IN_PROGRESS_MESSAGE);
+  const holder = services.claims.holderOf(verdictId);
+  if (holder === "unknown") return new RouteError(409, "result_unknown", HIDE_RESULT_UNKNOWN_MESSAGE);
+  if (holder === "auto_hide") return new RouteError(409, "in_progress", AUTO_HIDE_IN_PROGRESS_MESSAGE);
   return new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
 }
 
@@ -241,7 +270,7 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
       const { senderChannelId } = senderParamSchema.parse(request.params);
       const verdict = findSenderVerdict(services, temporaryRestrictBodySchema.parse(request.body).verdictId, senderChannelId, channelId);
       const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: verdict.chatChannelId, verdictId: verdict.id };
-      return sendOutcome(reply, await services.executor.submit(channelId, action, actorOf(manager)));
+      return sendOutcome(reply, await submitSenderAction(services, channelId, action, manager));
     }),
   );
   app.post(
@@ -249,16 +278,53 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
     guarded(services, "restrict", async ({ request, reply, manager, channelId }) => {
       const { senderChannelId } = senderParamSchema.parse(request.params);
       const verdictId = resolveVerdictId(services, restrictBodySchema.parse(request.body)?.verdictId, senderChannelId, channelId);
-      return sendOutcome(reply, await services.executor.submit(channelId, { kind: "restrict", targetChannelId: senderChannelId, verdictId }, actorOf(manager)));
+      return sendOutcome(reply, await submitSenderAction(services, channelId, { kind: "restrict", targetChannelId: senderChannelId, verdictId }, manager));
     }),
   );
-  app.delete(
-    "/api/senders/:senderChannelId/restrict",
-    guarded(services, "restrict", async ({ request, reply, manager, channelId }) => {
-      const { senderChannelId } = senderParamSchema.parse(request.params);
-      return sendOutcome(reply, await services.executor.submit(channelId, { kind: "unrestrict", targetChannelId: senderChannelId }, actorOf(manager)));
-    }),
-  );
+  app.delete("/api/senders/:senderChannelId/restrict", guarded(services, "restrict", (context) => unrestrictSender(services, context)));
+}
+
+/**
+ * 활동 제한을 해제한다. 성공하면 그 사람의 활동 제한 막기를 지워 바로 다시 제한할 수 있게 한다(K2b).
+ * 임시 제한 막기는 지우지 않는다. 왜: 해제 API가 임시 제한도 푸는지 문서로 확인하지 못했고, 막기를 남겨 두는 쪽이 겹친 제재를 막는 안전한 방향이다.
+ * @param services 실행기와 막기 표
+ * @param context 권한 확인을 통과한 요청
+ */
+async function unrestrictSender(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
+  const { senderChannelId } = senderParamSchema.parse(request.params);
+  const outcome = await services.executor.submit(channelId, { kind: "unrestrict", targetChannelId: senderChannelId }, actorOf(manager));
+  if (outcome.ok) services.senderActions.clearSettled("restrict", senderChannelId);
+  return sendOutcome(reply, outcome);
+}
+
+/**
+ * 사람 단위 제재를 같은 사람에게 겹치지 않게 보낸다(K2). 보내는 중·방금 성공·결과 모름이면 실행기로 보내지 않고 409로 막는다.
+ * 확인과 표시(tryAcquire) 사이에 await가 없어 동시에 누른 요청 중 하나만 실행기로 간다. 끝나면 결과에 맞게 표시를 바꾼다(settle).
+ * @param services 막기 표와 실행기
+ * @param channelId 채널 ID
+ * @param action 보낼 제재(대상 사용자가 들어 있다)
+ * @param manager 요청한 매니저
+ */
+async function submitSenderAction(services: RouteServices, channelId: string, action: Extract<ActionRequest, { kind: SenderActionKind }>, manager: ManagerSession): Promise<ActionOutcome> {
+  const blocked = services.senderActions.tryAcquire(action.kind, action.targetChannelId);
+  if (blocked) throw senderActionConflict(blocked);
+  let outcome: ActionOutcome | null = null;
+  try {
+    outcome = await services.executor.submit(channelId, action, actorOf(manager));
+    return outcome;
+  } finally {
+    services.senderActions.settle(action.kind, action.targetChannelId, outcome);
+  }
+}
+
+/**
+ * 막힌 제재에 대한 409 오류를 만든다: 결과 모름은 result_unknown, 보내는 중·방금 성공은 already_handled(K2).
+ * @param block 막힌 이유
+ */
+function senderActionConflict(block: SenderActionBlock): RouteError {
+  if (block === "result_unknown") return new RouteError(409, "result_unknown", RESTRICT_RESULT_UNKNOWN_MESSAGE);
+  if (block === "recently_succeeded") return new RouteError(409, "already_handled", RESTRICT_RECENTLY_SUCCEEDED_MESSAGE);
+  return new RouteError(409, "already_handled", RESTRICT_IN_PROGRESS_MESSAGE);
 }
 
 /** 스위치·규칙·설정·채팅 설정·감사 기록·통계. */
@@ -322,7 +388,9 @@ async function issueTicketAfterRoleCheck(services: RouteServices, sessions: Sess
     throw new RouteError(401, "unauthorized", "치지직에서 매니저 권한이 해제되었습니다. 다시 로그인하세요.");
   }
   if (role !== manager.role) sessions.updateRole(manager.id, role);
-  return { ticket: sessions.issueTicket(manager.id) };
+  const ticket = sessions.issueTicket(manager.id);
+  if (!ticket) throw new RouteError(429, "rate_limited", WS_TICKET_RATE_LIMITED_MESSAGE);
+  return { ticket };
 }
 
 /**
@@ -408,17 +476,39 @@ function findSenderVerdict(services: RouteServices, verdictId: number, senderCha
  * 바꿀 수 있는 이전 상태는 MARK_ALLOWED_FROM이고, 확인과 쓰기를 조건부 UPDATE 한 번으로 해 동시 요청이 서로 덮어쓰지 못한다(S12).
  * 숨기는 중인 판정은 무시로 바꾸지 않는다: 숨김이 성공하면 무시 표시와 실제 조치가 어긋난다.
  * 오판은 숨기는 중에도 받는다: 그 뒤 숨김이 성공해도 실행기가 오판을 hidden으로 덮지 않는다.
+ * 숨김 결과를 알 수 없는 판정(unknown)은 무시·오판 모두 받는다(K1): 매니저가 치지직에서 확인한 뒤 카드를 정리할 수 있어야 한다.
  */
 function markVerdict(services: RouteServices, { request, manager, channelId }: GuardedContext, status: Extract<VerdictStatus, "ignored" | "false_positive">) {
   const verdict = findVerdict(services, request.params, channelId);
-  if (status === "ignored" && services.claims.isClaimed(verdict.id)) throw claimConflict(services, verdict.id);
+  if (status === "ignored" && isHideInFlight(services.claims, verdict.id)) throw claimConflict(services, verdict.id);
   if (!services.verdicts.transitionStatus(verdict.id, channelId, status, MARK_ALLOWED_FROM[status])) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
+  releaseUnknownClaim(services.claims, verdict.id);
   services.auditLog.record({
     channelId, actorType: "manager", actorChannelId: manager.managerChannelId, action: status,
     targetSenderChannelId: verdict.senderChannelId, verdictId: verdict.id, result: "ok", error: null,
   });
   services.broadcaster.broadcast({ type: "verdict_status", verdictId: verdict.id, status });
   return { ok: true };
+}
+
+/**
+ * 지금 숨김을 보내는 중인지(매니저·자동 숨김이 붙잡음) 본다. 결과를 알 수 없는 붙잡기(unknown)는 보내는 중이 아니다(K1).
+ * @param claims 붙잡기 모음
+ * @param verdictId 판정 번호
+ */
+function isHideInFlight(claims: VerdictClaims, verdictId: number): boolean {
+  const holder = claims.holderOf(verdictId);
+  return holder === "manager" || holder === "auto_hide";
+}
+
+/**
+ * 무시·오판으로 정리된 판정의 결과 모름 붙잡기를 놓는다(K1).
+ * 왜 놓아도 되나: 판정이 더는 대기 중이 아니어서 숨기기는 상태 확인(HIDE_ALLOWED_FROM)에서 막히고, 놓지 않으면 메모리에 계속 남는다.
+ * @param claims 붙잡기 모음
+ * @param verdictId 판정 번호
+ */
+function releaseUnknownClaim(claims: VerdictClaims, verdictId: number): void {
+  if (claims.holderOf(verdictId) === "unknown") claims.release(verdictId);
 }
 
 /**

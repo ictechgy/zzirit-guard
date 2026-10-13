@@ -181,6 +181,26 @@ describe("호스트 추출과 허용 판단 사이의 파서 차이(적대적 �
   });
 });
 
+describe("퍼센트 인코딩 등 브라우저가 고쳐 읽는 호스트(K15)", () => {
+  it.each([
+    ["점까지 인코딩한 호스트", "https://%65%76%69%6c%2e%63%6f%6d"],
+    ["일부만 인코딩한 호스트", "가입 http://%65vil.com/x"],
+    ["허용 도메인 뒤에 인코딩한 점", "https://allowed.com%2eevil.com"],
+    ["16진수 IP 주소", "https://0x7f000001/admin"],
+  ])("URL 해석기로 읽은 호스트도 본다: %s", (_label, text) => {
+    expect(containsBlockedLink(text, ["allowed.com"])).toBe(true);
+  });
+
+  it("풀어 읽은 호스트는 더할 뿐 원문 조각을 지우지 않아, 인코딩으로 가린 주소는 허용 도메인이어도 막는다(보수적)", () => {
+    expect(containsBlockedLink("https://%65xample.com/x", ["example.com"])).toBe(true);
+    expect(containsBlockedLink("https://%65%78%61%6d%70%6c%65%2e%63%6f%6d/x", ["example.com"])).toBe(false);
+  });
+
+  it.each(["https://youtube.com/watch?v=1", "https://카페.한국/공지", "https://localhost", "https://"])("호스트가 그대로이거나 해석할 수 없는 주소는 지금과 같이 본다: %s", (text) => {
+    expect(containsBlockedLink(text, ["youtube.com", "카페.한국"])).toBe(false);
+  });
+});
+
 describe("한글 낱말 + 알려진 최상위 도메인(N1): 단서가 없으면 자동 숨김 대신 후보", () => {
   /** 채널이 허용한 도메인. */
   const allow = ["youtube.com"];

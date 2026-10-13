@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "../../src/chat/chatEvent.js";
 import { openDatabase } from "../../src/db/database.js";
 import { createGroupFloodDetector, createPersonalFloodDetector } from "../../src/detection/floodDetectors.js";
@@ -222,5 +222,16 @@ describe("DetectionPipeline", () => {
   it("가벼운 반응과 중복을 표시한다", () => {
     expect(pipeline.evaluate(chat("ㅋㅋㅋㅋㅋ"))).toMatchObject({ trivial: true, duplicate: false });
     expect(pipeline.evaluate(chat("ㅋㅋㅋ", { senderChannelId: "viewer-2" }))).toMatchObject({ trivial: true, duplicate: true });
+  });
+});
+
+describe("기한이 지난 채팅 지우기(K16)", () => {
+  it("pruneExpired는 떼도배·개인 도배·중복 추적기에 같은 시각으로 정리를 맡긴다", () => {
+    const groupFlood = createGroupFloodDetector();
+    const personalFlood = createPersonalFloodDetector();
+    const duplicates = createDuplicateTracker();
+    const spies = [vi.spyOn(groupFlood, "pruneExpired"), vi.spyOn(personalFlood, "pruneExpired"), vi.spyOn(duplicates, "pruneExpired")];
+    createDetectionPipeline({ rules, auditLog, groupFlood, personalFlood, duplicates }).pruneExpired(123_456);
+    spies.forEach((spy) => expect(spy).toHaveBeenCalledWith(123_456));
   });
 });

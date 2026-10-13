@@ -30,6 +30,9 @@ ID_TO_LABEL: dict[int, str] = {0: "normal", 1: "toxic"}
 # ID_TO_LABEL의 역방향(라벨 이름 → 번호).
 LABEL_TO_ID: dict[str, int] = {label: index for index, label in ID_TO_LABEL.items()}
 
+# 라벨 이름이 없을 때 transformers가 채우는 기본 매핑. 이와 정확히 같을 때만 매핑 검사를 건너뛴다.
+GENERIC_ID_TO_LABEL: dict[int, str] = {0: "LABEL_0", 1: "LABEL_1"}
+
 # softmax 출력에서 '유해' 칸의 번호. 1차 점수는 이 칸의 확률이다.
 TOXIC_CLASS_INDEX = 1
 
@@ -149,10 +152,29 @@ def verify_saved_tokenizer_round_trip(tokenizer: PreTrainedTokenizerBase, model_
         )
 
 
+def ensure_label_mapping_matches(model: PreTrainedModel) -> None:
+    """config의 라벨 이름이 학습 때 저장한 {0: normal, 1: toxic}과 정확히 같은지 확인한다.
+
+    왜: 점수는 항상 1번 칸을 유해로 읽는다. 0번이 toxic인 모델이면 모든 점수가 뒤집히는데 겉으로는 드러나지 않는다.
+    이름이 없는 모델(transformers 기본값 LABEL_0·LABEL_1)은 뜻을 알 수 없어 통과시킨다. 이 패키지의 train이 항상
+    ID_TO_LABEL·LABEL_TO_ID를 config에 저장하므로 기존 학습 결과는 모두 이 검사를 통과한다.
+    """
+    id_to_label = {int(index): label for index, label in (model.config.id2label or {}).items()}
+    label_to_id = {str(label): int(index) for label, index in (model.config.label2id or {}).items()}
+    if id_to_label == GENERIC_ID_TO_LABEL and label_to_id == {name: index for index, name in GENERIC_ID_TO_LABEL.items()}:
+        return
+    if id_to_label != ID_TO_LABEL or label_to_id != LABEL_TO_ID:
+        raise ModelFormatError(
+            f"모델 config의 라벨 매핑 {id_to_label}이 기대값 {ID_TO_LABEL}과 다릅니다. 1번 칸이 toxic이 아니면 점수가 뒤집힙니다. "
+            "이 패키지의 train으로 만든 디렉터리를 --model-dir로 주세요."
+        )
+
+
 def ensure_binary_classifier(model: PreTrainedModel) -> None:
-    """출력이 2칸(정상·유해)인 분류 모델인지 확인한다. 아니면 점수 뜻이 달라지므로 오류를 낸다."""
+    """출력이 2칸(정상·유해)이고 라벨 매핑이 약속과 같은 분류 모델인지 확인한다. 아니면 점수 뜻이 달라지므로 오류를 낸다."""
     if model.config.num_labels != len(ID_TO_LABEL):
         raise ModelFormatError(f"분류 출력이 {model.config.num_labels}칸입니다. 2칸(normal·toxic) 모델이어야 합니다. --model-dir를 확인하세요.")
+    ensure_label_mapping_matches(model)
 
 
 def load_classifier(model_directory: Path, **config_overrides: object) -> PreTrainedModel:

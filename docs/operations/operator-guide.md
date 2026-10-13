@@ -44,6 +44,7 @@ cp ops/env.example ~/Library/Application\ Support/zzirit-guard/.env
 chmod 600 ~/Library/Application\ Support/zzirit-guard/.env
 ```
 `.env`를 채운다(**`ZG_DATA_DIR`·`ZG_WEB_DIST`는 `~` 없는 절대 경로**여야 한다. `--env-file`은 `~`를 풀지 않는다): `ZG_PUBLIC_ORIGIN`(Funnel 주소), `ZG_CHANNEL_ID`(스트리머 채널 ID: 채널 주소 `chzzk.naver.com/<채널ID>`의 끝부분), Client ID·Secret, `ZG_DATA_DIR`, `ZG_WEB_DIST`(`<설치 경로>/apps/web/dist`), VAPID 키 3개.
+- 서버는 시작할 때마다 `ZG_DATA_DIR` 폴더를 700, DB 파일(`-wal`·`-shm` 포함)을 600으로 맞춘다. 같은 기기의 다른 계정이 채팅 원문을 읽지 못하게 하려는 것이다. 그래서 `ZG_DATA_DIR`은 이 서버만 쓰는 폴더로 둔다.
 
 ## 7. 서버 시작·잠자기·재부팅
 ```bash
@@ -59,16 +60,20 @@ sudo pmset -a autorestart 1           # 정전 뒤 전기가 들어오면 켜지
 - 재시작: `launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server`
 
 ## 8. 로그
-- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`. 채팅 원문은 남지 않는다(식별자만). 다만 **로그에는 매니저 채널 ID가 남으므로 소유자만 읽을 수 있게(폴더 700, 파일 600) 둔다.**
+- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`.
+- 남지 않는 것: 채팅 원문, 토큰, 채팅 세션 키(sessionKey). 치지직 오류는 주소의 쿼리(`?` 뒤)를 떼고 경로만 남긴다.
+- 남는 식별자: 매니저 채널 ID(역할 재확인 실패 등). 저장된 채널이 `ZG_CHANNEL_ID`와 다를 때는 스트리머 채널 ID도 함께 남는다. **그래서 소유자만 읽을 수 있게(폴더 700, 파일 600) 둔다.**
 - **newsyslog 같은 자동 회전은 쓰지 않는다.** launchd는 로그 파일을 서버를 띄울 때 한 번만 열고 서버도 파일을 다시 열지 않는다. 그래서 회전 도구가 파일을 옮기면 서버는 옮겨진 옛 파일에 계속 쓰고, 압축 회전이 옛 파일을 지우면 그 뒤 로그가 사라진다.
-- 가끔 `ls -lh ~/Library/Logs/zzirit-guard`로 크기를 보고, 커졌으면 서버를 멈추고 옮긴 뒤 다시 띄운다.
+- **한 달에 한 번은 크기와 상관없이 지금 쓰는 로그도 옮긴다.** 지금 쓰는 `server.log`·`server.err.log`는 이름에 날짜가 없어 아래 30일 삭제에 걸리지 않는다. 옮기지 않으면 옛 매니저 채널 ID가 몇 달씩 남는다. 그 사이에 커졌으면(`ls -lh ~/Library/Logs/zzirit-guard`) 더 일찍 옮긴다.
+- 옮기는 방법: 서버를 멈추고, 이름에 날짜와 시각을 붙여 옮긴 뒤, 다시 띄운다. `mv -n`은 같은 이름의 파일이 있으면 덮어쓰지 않는다. 그래서 같은 날 두 번 옮겨도 앞의 파일이 남는다.
 ```bash
 launchctl bootout gui/$(id -u)/com.zzirit-guard.server
-cd ~/Library/Logs/zzirit-guard && for name in server server.err; do [[ -f $name.log ]] && mv $name.log $name-$(date +%Y%m%d).log; done
+cd ~/Library/Logs/zzirit-guard && stamp=$(date +%Y%m%d-%H%M%S) && for name in server server.err; do [[ -f $name.log ]] && mv -n $name.log $name-$stamp.log; done
 chmod 600 server*.log   # 옮긴 파일도 소유자만 읽게(새 파일은 install-launchd.sh가 600으로 만든다)
 <설치 경로>/ops/scripts/install-launchd.sh
 ```
-- **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 한 달에 한 번, 그리고 로그를 옮길 때마다 아래 한 줄을 실행한다. 지금 쓰는 `server.log`·`server.err.log`는 이름에 날짜가 없어 지워지지 않는다.
+- **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 로그를 옮길 때마다(한 달에 한 번 이상) 아래 한 줄도 실행한다.
+- 30일은 파일을 마지막으로 쓴 날부터 센다. 그래서 로그 한 줄이 남는 기간은 길어야 약 두 달이다(옮기기 전 한 달, 옮긴 뒤 30일).
 ```bash
 find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
 ```
@@ -78,7 +83,7 @@ find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
 1. 스트리머와 **운영 합의서**(`streamer-agreement-template.md`)를 먼저 주고받는다.
 2. 스트리머가 `https://<Funnel 주소>`에서 "스트리머: 채널 연결"을 누르고 치지직 동의 화면에서 허용한다.
 3. 채널 공지에 `channel-notice-template.md`를 채워 올린다(개인정보보호법 제37조의2).
-- 연결 해제(기록·설정 → 계정 → 채널 연결 해제, 스트리머만): 모든 매니저가 로그아웃되고 자동 기능이 멈춘다. **규칙·설정은 남는다**(다시 연결하면 그대로 쓴다). 연결 해제는 이 서버에 저장한 토큰만 지운다. 치지직 토큰 폐기(revoke) API는 호출하지 않으므로, 치지직 쪽 연동까지 끊으려면 스트리머가 치지직에서 직접 해제한다.
+- 연결 해제(기록·설정 → 계정 → 채널 연결 해제, 스트리머만): 모든 매니저가 로그아웃되고 자동 기능이 멈춘다. 모든 기기의 장애 알림 구독도 지운다(다시 연결한 뒤 매니저가 다시 켠다). **규칙·설정은 남는다**(다시 연결하면 그대로 쓴다). 연결 해제는 이 서버에 저장한 토큰만 지운다. 치지직 토큰 폐기(revoke) API는 호출하지 않으므로, 치지직 쪽 연동까지 끊으려면 스트리머가 치지직에서 직접 해제한다.
 
 ## 10. 매니저 안내
 1. 치지직에서 채널 관리자 또는 채팅 운영자로 등록돼 있어야 한다. **방금 등록한 매니저는 최대 5분 동안 로그인이 거부될 수 있다**(서버가 관리자 목록을 5분 동안 캐시한다). 5분 뒤 다시 시도한다.
@@ -87,7 +92,8 @@ find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
 3. 휴대폰으로 Funnel 주소 → "매니저 로그인".
 4. iPhone: Safari 공유 → "홈 화면에 추가" 후 그 앱에서 "기록·설정 → 계정 → 장애 알림 받기"(iOS 16.4 이상). 홈 화면 앱 안에서 치지직 로그인이 끝나는지는 아직 실기기로 확인하지 않았다(실기기 점검표). 확인한 결과와, 안 될 때의 방법을 이 장에 적는다.
 5. 푸시 알림은 Funnel HTTPS 주소에서만 구독할 수 있고, 서버는 FCM·Mozilla autopush·`*.push.apple.com`·`*.notify.windows.com` 구독만 받는다.
-6. 로그아웃하면 그 기기의 장애 알림 구독도 해지된다.
+6. 로그아웃하면 그 기기의 장애 알림 구독도 해지된다. 치지직에서 해제된 매니저의 구독은 로그인 세션이 없어도 5분마다 역할을 확인해 지운다.
+7. 장애 알림은 매니저 한 명당 기기 5대까지 받는다. 6번째 기기를 켜면 가장 먼저 켠 기기의 구독이 지워진다. 서버 전체로는 100대까지다.
 
 ## 11. 방송 전 점검(기록·설정 → 상태 점검)
 - 이 표는 15초마다 서버에서 다시 읽는다.

@@ -27,11 +27,27 @@ export interface GroupFloodDetector {
    * @param ref observe에 넘긴 바로 그 참조 객체. 관측하지 않았거나 창에서 빠진 참조면 아무것도 하지 않는다.
    */
   markReported(ref: MessageRef): void;
+  /**
+   * 창(10초)이 지난 관측을 지운다(K16). 앱이 1분마다 부른다.
+   * 왜: 관측에는 채팅 원문·닉네임이 든 참조가 있는데, 같은 문장이 다시 오거나 1,000번째 관측이 와야 지워져
+   * 조용한 채널에서는 판정이 끝난 통과 채팅이 서버가 꺼질 때까지 메모리에 남았다.
+   * @param now 지금 시각(ms, 관측에 넘긴 수신 시각과 같은 시계)
+   */
+  pruneExpired(now: number): void;
+  /** 지금 기억하는 관측 수(점검·테스트용). */
+  retainedCount(): number;
 }
 
 /** 개인 도배(한 사람이 짧은 시간에 여러 번) 감지기. */
 export interface PersonalFloodDetector {
   observe(senderChannelId: string, receivedAt: number): boolean;
+  /**
+   * 창(10초)이 지난 사용자를 지운다(K16). 왜: 보낸 사람 ID와 시각이 새 채팅이 없어도 오래 남지 않게 한다.
+   * @param now 지금 시각(ms, 관측에 넘긴 수신 시각과 같은 시계)
+   */
+  pruneExpired(now: number): void;
+  /** 지금 기억하는 사용자 수(점검·테스트용). */
+  retainedCount(): number;
 }
 
 /** 떼도배 기본값: 10초, 5명, 10자(스펙 5.2). */
@@ -75,6 +91,8 @@ export function createGroupFloodDetector(options: Partial<typeof GROUP_DEFAULTS>
       const entry = entryByRef.get(ref);
       if (entry) entry.reported = true;
     },
+    pruneExpired: (now) => sweep(entriesByText, now - settings.windowMs),
+    retainedCount: () => [...entriesByText.values()].reduce((total, entries) => total + entries.length, 0),
   };
 }
 
@@ -135,6 +153,8 @@ export function createPersonalFloodDetector(options: Partial<typeof PERSONAL_DEF
       timesBySender.set(senderChannelId, times);
       return times.length >= settings.maxMessages;
     },
+    pruneExpired: (now) => sweepTimes(timesBySender, now - settings.windowMs),
+    retainedCount: () => timesBySender.size,
   };
 }
 

@@ -63,6 +63,14 @@ const DEFAULT_REFRESH_MARGIN_MS = 2 * 60 * 60 * 1000;
  */
 const STALE_REFRESH_MESSAGE = "토큰을 갱신하는 동안 치지직 연결이 바뀌었거나 해제되어 요청을 멈췄습니다. 다시 시도하세요.";
 
+/** 치지직이 갱신을 거부했을 때(401: refresh token 만료·철회)의 매니저용 문구. */
+const REFRESH_REJECTED_MESSAGE = "치지직이 토큰 갱신을 거부했습니다(만료·철회). 스트리머가 다시 연결해야 합니다.";
+/**
+ * 갱신 응답이 2xx였는데 본문을 해석하지 못했을 때(wasDelivered)의 매니저용 문구(K7).
+ * 왜 잠그나: 치지직이 일회용 refresh token을 이미 썼을 수 있어, 옛 토큰으로 계속 쓰다 다음 갱신의 401로 뒤늦게 잠기기보다 지금 다시 연결을 요청한다.
+ */
+const REFRESH_RESULT_UNKNOWN_MESSAGE = "치지직 토큰 갱신 응답을 해석하지 못했습니다. 일회용 갱신 토큰이 이미 쓰였을 수 있어 쓰기를 멈췄습니다. 스트리머가 다시 연결해야 합니다.";
+
 /** reportError를 생략했을 때 쓰는 기본 기록기. 아직 로거가 없어 콘솔 경고로 남긴다. */
 const consoleReportError = (context: string, error: unknown): void => {
   console.warn(context, error);
@@ -132,11 +140,21 @@ class RefreshingTokenManager implements TokenManager {
     this.setLocked(false);
   }
 
-  /** 연결을 해제한다. 저장된 토큰을 지우고 잠근다. 치지직 revoke는 부르지 않는다(Global Constraints). 진행 중이던 갱신의 결과는 버린다. */
+  /**
+   * 연결을 해제한다. 쓰기를 먼저 잠근 뒤 저장된 토큰을 지운다. 치지직 revoke는 부르지 않는다(Global Constraints). 진행 중이던 갱신의 결과는 버린다.
+   * 왜 잠금이 먼저인가(K6): 지우기(DB 쓰기)가 실패하면 옛 토큰이 남아, 잠그지 않았다면 대기 중이던 조치가 비상 해제 뒤에도 치지직에 나간다.
+   * 지우기가 실패해도 잠금은 풀지 않고 오류를 호출자에게 그대로 넘긴다. 잠금 알림은 지우기를 시도한 뒤에 보내,
+   * 상태 방송이 연결이 사라진 상태를 보여 주게 한다.
+   */
   disconnect(): void {
     this.startNewGeneration();
-    this.options.store.clearConnection();
-    this.setLocked(true);
+    const wasLocked = this.locked;
+    this.locked = true;
+    try {
+      this.options.store.clearConnection();
+    } finally {
+      if (!wasLocked) this.notifyLockChange(true);
+    }
   }
 
   /** 잠금 상태 변화 리스너를 등록한다. 등록 순서대로 호출된다. */
@@ -226,7 +244,8 @@ class RefreshingTokenManager implements TokenManager {
   }
 
   /**
-   * 치지직에 갱신을 요청한다. 401이면 refresh token이 무효이므로 잠근다. 그 밖의 오류는 호출자에게 넘긴다.
+   * 치지직에 갱신을 요청한다. 401(refresh token 무효)이거나 2xx인데 해석하지 못한 응답(wasDelivered, K7)이면 잠그고
+   * 원인 오류를 기록한 뒤 WriteLockedError를 던진다. 그 밖의 오류는 호출자에게 넘긴다.
    * 기다리는 사이 연결이 바뀌었으면 옛 연결의 실패로 새 연결을 잠그지 않도록 먼저 세대를 확인한다.
    * @param refreshToken 쓸 refresh token
    * @param generation 갱신을 시작할 때의 세대
@@ -236,11 +255,11 @@ class RefreshingTokenManager implements TokenManager {
       return await this.options.api.refreshToken(refreshToken);
     } catch (error) {
       this.assertSameGeneration(generation);
-      if (error instanceof ChzzkApiError && error.status === 401) {
-        this.setLocked(true);
-        throw new WriteLockedError("치지직이 토큰 갱신을 거부했습니다(만료·철회). 스트리머가 다시 연결해야 합니다.");
-      }
-      throw error;
+      const lockMessage = refreshLockMessage(error);
+      if (lockMessage === null) throw error;
+      this.reportError("토큰 갱신이 실패해 쓰기를 잠급니다", error);
+      this.setLocked(true);
+      throw new WriteLockedError(lockMessage);
     }
   }
 
@@ -258,14 +277,20 @@ class RefreshingTokenManager implements TokenManager {
     }
   }
 
-  /**
-   * 잠금 상태를 바꾸고, 바뀌었을 때만 알린다.
-   * 리스너 하나가 던져도 나머지 리스너와 원래 던질 WriteLockedError가 살아남도록 각각 격리한다.
-   * 삼킨 리스너 오류는 reportError로 기록해 조용히 사라지지 않게 한다.
-   */
+  /** 잠금 상태를 바꾸고, 바뀌었을 때만 알린다. */
   private setLocked(locked: boolean): void {
     if (this.locked === locked) return;
     this.locked = locked;
+    this.notifyLockChange(locked);
+  }
+
+  /**
+   * 잠금 상태 변화를 리스너에게 알린다. 연결 해제는 잠금과 알림 사이에 저장소 지우기가 있어 따로 부른다(K6).
+   * 리스너 하나가 던져도 나머지 리스너와 원래 던질 WriteLockedError가 살아남도록 각각 격리한다.
+   * 삼킨 리스너 오류는 reportError로 기록해 조용히 사라지지 않게 한다.
+   * @param locked 바뀐 잠금 상태
+   */
+  private notifyLockChange(locked: boolean): void {
     for (const listener of this.listeners) {
       try {
         listener(locked);
@@ -274,4 +299,16 @@ class RefreshingTokenManager implements TokenManager {
       }
     }
   }
+}
+
+/**
+ * 갱신 실패 중 쓰기를 잠가야 하는 경우의 매니저용 문구를 돌려준다. 잠그지 않을 오류(일시 오류)면 null.
+ * 401은 refresh token이 무효이고, wasDelivered는 치지직이 일회용 refresh token을 이미 썼을 수 있다(K7).
+ * 진짜 5xx·네트워크 오류는 요청이 처리되지 않았을 수 있어 잠그지 않는다(아직 유효한 토큰을 계속 쓴다).
+ * @param error 갱신 요청이 던진 오류
+ */
+function refreshLockMessage(error: unknown): string | null {
+  if (!(error instanceof ChzzkApiError)) return null;
+  if (error.status === 401) return REFRESH_REJECTED_MESSAGE;
+  return error.wasDelivered ? REFRESH_RESULT_UNKNOWN_MESSAGE : null;
 }

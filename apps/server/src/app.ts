@@ -4,13 +4,17 @@ import type { FastifyInstance } from "fastify";
 import { createAutoHideSwitch } from "./actions/autoHideSwitch.js";
 import { createDecisionHandler } from "./actions/decisionHandler.js";
 import { createExecutor } from "./actions/executor.js";
+import { createSenderActionGuard } from "./actions/senderActionGuard.js";
 import { createVerdictClaims } from "./actions/verdictClaims.js";
+import type { ChatEvent } from "./chat/chatEvent.js";
 import { connectWithSocketIo, createChatReceiver, type SocketConnector } from "./chat/chatReceiver.js";
+import { createRepeatedChatFilter } from "./chat/repeatedChatFilter.js";
 import { createChzzkApi } from "./chzzk/apiClient.js";
 import type { AppConfig } from "./config.js";
 import { createCredentialStore } from "./connection/credentialStore.js";
 import { createTokenManager } from "./connection/tokenManager.js";
 import { openDatabase } from "./db/database.js";
+import { restrictDatabaseFiles, restrictDataDirectory } from "./db/filePermissions.js";
 import { createGroupFloodDetector, createPersonalFloodDetector } from "./detection/floodDetectors.js";
 import { createDuplicateTracker } from "./detection/messageTraits.js";
 import { createDetectionPipeline } from "./detection/pipeline.js";
@@ -23,7 +27,7 @@ import { recheckSessionRoles, type RevokedSession } from "./managers/roleRecheck
 import { createRoleVerifier } from "./managers/roleVerifier.js";
 import { createSessionStore } from "./managers/sessionStore.js";
 import { createPushNotifier, type PushMessage, type PushSender } from "./push/pushNotifier.js";
-import { createRealtimeHub } from "./realtime/hub.js";
+import { createRealtimeHub, SESSION_EXPIRED_REASON } from "./realtime/hub.js";
 import { createAuditLog } from "./records/auditLog.js";
 import { runBackup, runRetention } from "./records/maintenance.js";
 import { createMinuteStats } from "./records/minuteStats.js";
@@ -51,10 +55,11 @@ export interface App {
   status(): ServerStatus;
 }
 
-/** 주기 작업 간격. */
+/** 주기 작업 간격. chatMemoryPruneMs는 도배·중복 감지기가 기억하는 채팅을 정리하는 간격이다(K16, 도배 창 10초보다 넉넉하고 짧게 남도록 1분). */
 const INTERVALS = {
   tokenCheckMs: 10 * 60 * 1000,
   statsFlushMs: 60 * 1000,
+  chatMemoryPruneMs: 60 * 1000,
   roleRecheckMs: 5 * 60 * 1000,
   maintenanceMs: 24 * 60 * 60 * 1000,
   firstMaintenanceDelayMs: 5 * 60 * 1000,
@@ -69,15 +74,16 @@ const STATUS_BROADCAST_MS = 20_000;
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
 /** 주기 작업이 이만큼 연속으로 건너뛰어지면 멈춘 것으로 보고 경고 로그를 남긴다(N5). */
 const STUCK_TASK_SKIP_THRESHOLD = 3;
-/** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
-const SESSION_EXPIRED_REASON = "세션이 만료되었습니다. 다시 로그인하세요";
 
 /** 모든 구성 요소를 만들고 이벤트를 연결한다. */
 export async function createApp(config: AppConfig, options: AppOptions): Promise<App> {
   const clock = options.clock ?? systemClock;
   const logger = options.logger ?? createConsoleLogger();
+  // 데이터 폴더와 DB 파일은 소유자만 읽게 한다(K13). 예전 설치에서 넓게 만들어진 권한도 시작할 때마다 바로잡는다.
+  restrictDataDirectory(config.dataDirectory);
   mkdirSync(config.backupDirectory, { recursive: true });
   const database = openDatabase(config.databasePath);
+  restrictDatabaseFiles(config.databasePath);
   const api = createChzzkApi({
     apiBase: config.chzzkApiBase,
     clientId: config.chzzkClientId,
@@ -95,7 +101,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const settings = createSettingsRepository(database);
   const rules = createRuleRepository(database, clock);
   const sessions = createSessionStore(database, clock);
-  const hub = createRealtimeHub();
+  const hub = createRealtimeHub({ clock });
   const push = createPushNotifier({
     database, clock, logger,
     vapid: { publicKey: config.vapidPublicKey, privateKey: config.vapidPrivateKey, subject: config.vapidSubject },
@@ -105,9 +111,11 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     api, tokenManager, auditLog, verdicts, clock, logger,
     onVerdictStatus: (verdictId, status) => hub.broadcast({ type: "verdict_status", verdictId, status }),
   });
-  const autoHide = createAutoHideSwitch({ settings, auditLog, clock, logger });
+  const autoHide = createAutoHideSwitch({ database, settings, auditLog, clock, logger });
   /** 숨김을 보내는 중인 판정 모음. 매니저 숨기기(routes)와 자동 숨김이 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
   const claims = createVerdictClaims();
+  /** 사람 단위 제재가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). 제재는 매니저 라우트에서만 보낸다. */
+  const senderActions = createSenderActionGuard(clock);
   const decisionHandler = createDecisionHandler({ verdicts, executor, autoHide, claims, stats, broadcaster: hub, logger });
   const pipeline = createDetectionPipeline({
     rules, auditLog,
@@ -115,6 +123,8 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     personalFlood: createPersonalFloodDetector(),
     duplicates: createDuplicateTracker(),
   });
+  /** 같은 채팅이 다시 전달되면(재연결·중복 전달) 판정 전에 버린다(K4). 숨김 요청이 한 메시지에 두 번 나가지 않게 한다. */
+  const repeatedChats = createRepeatedChatFilter();
   const roleVerifier = createRoleVerifier({ api, tokenManager, credentialStore, clock, logger });
   /** 마지막으로 채팅을 받은 시각(ms). 화면의 "채팅 수신 중" 표시에 쓰며, 아직 받은 적이 없으면 null이다. */
   let lastChatAt: number | null = null;
@@ -159,12 +169,28 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   /** 현재 상태를 열린 모든 매니저 화면에 즉시 보낸다. 연결·잠금·스위치가 바뀔 때 부른다. */
   const broadcastStatus = () => hub.broadcast({ type: "status", status: status() });
 
+  /**
+   * 채팅을 판정한다. 판정이 예외로 끝나면 중복 기억을 지우고 예외를 그대로 넘긴다.
+   * 왜 판정 단계만인가: 판정은 판정 행·숨김 요청을 만들기 전이라, 다시 온 같은 채팅을 처리해도 숨김이 두 번 나가지 않는다.
+   * 그 뒤 단계(decisionHandler)에서 실패하면 숨김이 이미 나갔을 수 있어 기억을 그대로 둔다(되돌릴 수 없는 조치를 두 번 보내지 않는 쪽).
+   * @param event 받은 채팅
+   */
+  const evaluateOrForget = (event: ChatEvent) => {
+    try {
+      return pipeline.evaluate(event);
+    } catch (error) {
+      repeatedChats.forget(event);
+      throw error;
+    }
+  };
   const receiver = createChatReceiver({
     api, tokenManager, clock, logger, connect: options.connect ?? connectWithSocketIo,
     connectedChannelId: () => credentialStore.loadChannel()?.channelId ?? null,
     onChat: (event) => {
       lastChatAt = event.receivedAt;
-      decisionHandler.handle(event, pipeline.evaluate(event));
+      // 중복 전달은 도배 집계·판정·통계·실행기 어디에도 넣지 않는다(K4). 수신 자체는 살아 있다는 신호라 lastChatAt은 갱신한다.
+      if (repeatedChats.isRepeat(event)) return;
+      decisionHandler.handle(event, evaluateOrForget(event));
     },
     onConnectionChange: () => broadcastStatus(),
     onInvalidEvent: () => {
@@ -199,12 +225,25 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     }
   };
   /**
-   * 스트리머 요청으로 채널 연결을 해제한다: 수신 중지, 토큰·연결 삭제, 모든 세션 삭제와 소켓 종료.
+   * 채널 연결을 풀 때 모든 장애 알림 구독을 지운다(K11). 실패해도 연결 해제는 끝까지 하고 오류만 남긴다.
+   * 왜: 연결이 풀린 채널의 매니저가 그 채널의 장애 알림을 계속 받으면 안 된다. 토큰을 지운 뒤에 불러,
+   * 해제 중에 장애 알림이 잘못 나가는지(F10) 확인할 수 있는 순서를 지킨다.
+   */
+  const removeAllPushSubscriptions = (): void => {
+    try {
+      push.unsubscribeAll();
+    } catch (error) {
+      logger.error("연결을 해제했지만 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
+    }
+  };
+  /**
+   * 스트리머 요청으로 채널 연결을 해제한다: 수신 중지, 토큰·연결 삭제, 장애 알림 구독 삭제, 모든 세션 삭제와 소켓 종료.
    * 왜 세션도 지우나: 연결이 없는 채널의 화면을 열어 둘 이유가 없고, 다시 연결하면 새로 로그인해야 안전하다.
    */
   const disconnectChannel = (): void => {
     receiver.stop();
     disconnectTokensOnPurpose();
+    removeAllPushSubscriptions();
     const ids = sessions.listActive().map((session) => session.id);
     ids.forEach((id) => sessions.deleteById(id));
     hub.closeSessions(ids, "채널 연결이 해제되었습니다");
@@ -230,7 +269,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
 
   const services: RouteServices = {
     channel: () => credentialStore.loadChannel(),
-    status, verdicts, claims, executor, autoHide, rules, settings, auditLog, stats, push,
+    status, verdicts, claims, senderActions, executor, autoHide, rules, settings, auditLog, stats, push,
     broadcaster: hub,
     clock,
     getChatSettings: async () => api.getChatSettings(await tokenManager.getAccessToken()),
@@ -287,24 +326,35 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     }
   };
   /**
+   * 해임된 매니저들의 장애 알림 구독(모든 기기)을 지운다.
+   * 왜: 해임된 매니저가 채널 장애 알림을 계속 받으면 안 된다(F10, K11). 지우기가 실패해도 다른 정리는 이어지게 기록만 남긴다.
+   * @param managerChannelIds 해임된 매니저 채널 ID들
+   */
+  const removeRevokedManagerPush = (managerChannelIds: Iterable<string>): void => {
+    try {
+      for (const managerChannelId of managerChannelIds) push.unsubscribeManager(managerChannelId);
+    } catch (error) {
+      logger.error("해임된 매니저의 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
+    }
+  };
+  /**
    * 해임된 매니저의 소켓을 닫고 장애 알림 구독(모든 기기)을 지운다.
-   * 왜 구독도 지우나: 해임된 매니저가 채널 장애 알림을 계속 받으면 안 된다(F10). 지우기가 실패해도 다른 정리는 이어지게 기록만 남긴다.
    * @param revoked 해임으로 지운 세션과 그 매니저
    */
   const handleRevokedSessions = (revoked: RevokedSession[]): void => {
     hub.closeSessions(revoked.map(({ sessionId }) => sessionId), "치지직에서 매니저 권한이 해제되었습니다");
-    try {
-      new Set(revoked.map(({ managerChannelId }) => managerChannelId)).forEach((managerChannelId) => push.unsubscribeManager(managerChannelId));
-    } catch (error) {
-      logger.error("해임된 매니저의 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
-    }
+    removeRevokedManagerPush(new Set(revoked.map(({ managerChannelId }) => managerChannelId)));
   };
   /**
    * 활성 세션의 역할을 다시 확인한 뒤, 활성 목록에 없는 세션(12시간 만료 등)의 소켓을 닫는다.
    * 왜: 세션 만료는 DB에서만 일어나 허브가 모르므로, 재확인 주기마다 맞추지 않으면 만료된 화면이 판정·채팅을 계속 받는다(스펙 7장, F2).
    */
   const recheckRolesAndCloseExpired = async (): Promise<void> => {
-    await recheckSessionRoles({ sessions, roleVerifier, logger, onRevoked: handleRevokedSessions });
+    await recheckSessionRoles({
+      sessions, roleVerifier, logger, onRevoked: handleRevokedSessions,
+      subscriberIds: () => push.subscriberIds(),
+      onRevokedSubscribers: removeRevokedManagerPush,
+    });
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
   /**
@@ -324,11 +374,12 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const recheckRolesOnce = oneAtATime("역할 재확인", recheckRolesAndCloseExpired);
   /** 보관 기한 정리와 백업(겹침 방지). 첫 실행 타이머와 하루 주기 타이머가 이 함수 하나를 함께 써야 서로 겹치지 않는다. */
   const runMaintenanceOnce = oneAtATime("정리·백업", runMaintenance);
-  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
+  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·채팅 기억 정리·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
   const startTimers = (): void => {
     intervalTimers.push(setInterval(guarded("상태 방송 실패", broadcastStatus), STATUS_BROADCAST_MS));
     intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenOnce), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
+    intervalTimers.push(setInterval(guarded("채팅 기억 정리 실패", () => pipeline.pruneExpired(clock())), INTERVALS.chatMemoryPruneMs));
     intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesOnce), INTERVALS.roleRecheckMs));
     timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.firstMaintenanceDelayMs));
     intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.maintenanceMs));
@@ -350,6 +401,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     const stored = credentialStore.loadChannel();
     if (!stored || stored.channelId === config.channelId) return false;
     disconnectTokensOnPurpose();
+    removeAllPushSubscriptions();
     const ids = sessions.listActive().map((session) => session.id);
     ids.forEach((id) => sessions.deleteById(id));
     logger.error("저장된 채널이 ZG_CHANNEL_ID와 다릅니다. 연결을 해제했습니다. 설정한 스트리머 계정으로 다시 연결하세요.", { storedChannelId: stored.channelId, configuredChannelId: config.channelId });

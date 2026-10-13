@@ -34,6 +34,15 @@ export interface PushNotifier {
    * @param managerChannelId 매니저 채널 ID
    */
   unsubscribeManager(managerChannelId: string): void;
+  /**
+   * 구독을 가진 매니저 채널 ID들(중복 없음). 세션이 없는 매니저의 해임도 확인하려고 역할 재확인이 쓴다(K11).
+   */
+  subscriberIds(): string[];
+  /**
+   * 모든 구독을 지운다. 채널 연결을 해제하거나 저장 채널이 설정과 달라 풀 때 쓴다(K11).
+   * 왜: 연결이 풀린 채널의 매니저가 그 채널의 장애 알림을 계속 받을 이유가 없고, 다시 연결하면 매니저가 새로 켜면 된다.
+   */
+  unsubscribeAll(): void;
   notifyAll(message: PushMessage): Promise<void>;
 }
 
@@ -54,6 +63,29 @@ export class PushSubscriptionError extends Error {
   override readonly name = "PushSubscriptionError";
   readonly statusCode = 400;
 }
+
+/**
+ * 구독 수가 서버 전체 상한(MAX_PUSH_SUBSCRIPTIONS_TOTAL)에 닿아 새 기기를 받지 못할 때의 오류(K10). HTTP 계층은 statusCode(409)로 응답한다.
+ * 왜 409인가: 요청 형식은 맞지만 지금 서버 상태(상한) 때문에 받을 수 없다. 메시지는 사용자에게 그대로 보여 줄 수 있는 문장이다.
+ */
+export class PushSubscriptionLimitError extends Error {
+  override readonly name = "PushSubscriptionLimitError";
+  readonly statusCode = 409;
+}
+
+/**
+ * 매니저 한 명이 둘 수 있는 장애 알림 구독(기기) 수(5, K10). 넘으면 그 매니저의 가장 오래된 구독을 지운다.
+ * 왜: 상한이 없으면 매니저 한 명이 주소를 바꿔 가며 끝없이 등록해 DB가 커지고, 알림마다 그만큼 전송이 몰린다.
+ * 왜 지우나: 휴대폰·태블릿을 바꾸거나 브라우저가 구독을 새로 만들면 옛 구독은 대개 이미 쓰이지 않는다.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_MANAGER = 5;
+/**
+ * 서버 전체의 장애 알림 구독 수 상한(100, K10). 넘는 새 구독은 409로 거절한다.
+ * 왜 지우지 않고 거절하나: 다른 매니저의 구독을 지우면 그 사람이 장애 알림을 모르는 사이에 잃는다.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = 100;
+/** 전체 구독 상한에 닿았을 때의 안내 문구. 로그아웃하면 그 기기의 구독이 해지된다(화면의 disablePush). */
+const SUBSCRIPTION_LIMIT_MESSAGE = `장애 알림을 받는 기기가 서버 상한(${MAX_PUSH_SUBSCRIPTIONS_TOTAL}대)에 닿았습니다. 쓰지 않는 기기에서 로그아웃해 알림을 해지하거나 운영자에게 알려 주세요.`;
 
 /**
  * 허용하는 푸시 서비스 호스트 전체 일치 목록.
@@ -159,6 +191,8 @@ export function createPushNotifier(deps: PushNotifierDeps): PushNotifier {
     unsubscribe: (managerChannelId, endpoint) =>
       void deps.database.prepare("DELETE FROM push_subscription WHERE endpoint = ? AND manager_channel_id = ?").run(endpoint, managerChannelId),
     unsubscribeManager: (managerChannelId) => void deps.database.prepare("DELETE FROM push_subscription WHERE manager_channel_id = ?").run(managerChannelId),
+    subscriberIds: () => (deps.database.prepare("SELECT DISTINCT manager_channel_id AS id FROM push_subscription").all() as Array<{ id: string }>).map((row) => row.id),
+    unsubscribeAll: () => void deps.database.prepare("DELETE FROM push_subscription").run(),
     notifyAll: (message) => notifyAll(deps, send, message),
   };
 }
@@ -181,19 +215,58 @@ function validateVapid(vapid: PushNotifierDeps["vapid"]): void {
 }
 
 /**
- * 허용된 주소인지 확인한 뒤 구독을 저장한다. 같은 endpoint는 키와 채널만 갱신한다.
+ * 허용된 주소인지 확인한 뒤 상한 안에서 구독을 저장한다(K10). 같은 endpoint는 키와 채널만 갱신한다(행을 늘리지 않는다).
+ * 저장·오래된 구독 정리·전체 상한 확인을 한 트랜잭션으로 묶는다. 왜: 상한에 걸려 거절할 때 앞서 지운 구독까지 되돌려야 한다.
  * @throws PushSubscriptionError 허용 목록에 없는 주소일 때(아무것도 저장하지 않는다)
+ * @throws PushSubscriptionLimitError 새 주소인데 전체 상한을 넘을 때(아무것도 바꾸지 않는다)
  */
 function saveSubscription(deps: PushNotifierDeps, managerChannelId: string, subscription: PushSubscriptionInput): void {
   if (!isAllowedPushEndpoint(subscription.endpoint)) {
     throw new PushSubscriptionError("지원하지 않는 푸시 주소입니다. 크롬·사파리·파이어폭스·엣지 브라우저에서 알림을 다시 켜 주세요.");
   }
+  deps.database.transaction(() => {
+    const isNewEndpoint = deps.database.prepare("SELECT 1 FROM push_subscription WHERE endpoint = ?").get(subscription.endpoint) === undefined;
+    upsertSubscription(deps, managerChannelId, subscription);
+    removeOldestBeyondManagerLimit(deps.database, managerChannelId, subscription.endpoint);
+    if (isNewEndpoint && countSubscriptions(deps.database) > MAX_PUSH_SUBSCRIPTIONS_TOTAL) throw new PushSubscriptionLimitError(SUBSCRIPTION_LIMIT_MESSAGE);
+  })();
+}
+
+/**
+ * 구독 한 건을 넣거나, 같은 endpoint가 있으면 키와 채널만 바꾼다. created_at은 처음 넣은 시각을 그대로 둔다.
+ * @param deps DB와 시계
+ * @param managerChannelId 등록한 매니저 채널 ID
+ * @param subscription 브라우저가 준 구독
+ */
+function upsertSubscription(deps: PushNotifierDeps, managerChannelId: string, subscription: PushSubscriptionInput): void {
   deps.database
     .prepare(
       `INSERT INTO push_subscription (manager_channel_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (endpoint) DO UPDATE SET manager_channel_id = excluded.manager_channel_id, p256dh = excluded.p256dh, auth = excluded.auth`,
     )
     .run(managerChannelId, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth, deps.clock());
+}
+
+/**
+ * 매니저의 구독이 상한(5개)을 넘으면 가장 오래된 것(created_at, id 순)부터 지운다. 방금 저장한 주소는 지우지 않는다.
+ * 왜 방금 저장한 주소를 빼나: 다른 매니저에게서 넘겨받은 주소는 created_at이 오래돼, 빼지 않으면 등록하자마자 지워진다.
+ * @param database DB
+ * @param managerChannelId 매니저 채널 ID
+ * @param keptEndpoint 방금 저장한 주소
+ */
+function removeOldestBeyondManagerLimit(database: Database, managerChannelId: string, keptEndpoint: string): void {
+  database
+    .prepare(
+      `DELETE FROM push_subscription WHERE id IN (
+         SELECT id FROM push_subscription WHERE manager_channel_id = ? AND endpoint != ? ORDER BY created_at, id
+         LIMIT max(0, (SELECT COUNT(*) FROM push_subscription WHERE manager_channel_id = ?) - ?))`,
+    )
+    .run(managerChannelId, keptEndpoint, managerChannelId, MAX_PUSH_SUBSCRIPTIONS_PER_MANAGER);
+}
+
+/** 전체 구독 수. */
+function countSubscriptions(database: Database): number {
+  return (database.prepare("SELECT COUNT(*) AS count FROM push_subscription").get() as { count: number }).count;
 }
 
 /**

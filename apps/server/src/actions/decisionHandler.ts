@@ -6,8 +6,8 @@ import { describeError, type Logger } from "../logger.js";
 import type { MinuteStats } from "../records/minuteStats.js";
 import type { VerdictRepository } from "../records/verdictRepository.js";
 import type { AutoHideSwitch } from "./autoHideSwitch.js";
-import type { Executor } from "./executor.js";
-import type { VerdictClaims } from "./verdictClaims.js";
+import type { ActionOutcome, Executor } from "./executor.js";
+import { settleHideClaim, type VerdictClaims } from "./verdictClaims.js";
 
 /** 실시간 화면으로 보내는 통로. Task 18의 RealtimeHub가 구현한다. */
 export interface Broadcaster {
@@ -125,6 +125,7 @@ function recordAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
  * 숨김을 실행기에 보내고, 결과가 오면 기록한다. 대기열에서 나중에 끝나므로 결과는 비동기로 처리한다.
  * 성공했을 때만 auto_hidden을 센다(S5, M01). 왜: 취소(스위치 꺼짐)·실패까지 세면 통계가 실제로 숨긴 수보다 많아 보인다.
  * 실패·취소는 따로 세는 칸이 없어 세지 않고 경고 로그(원문 없음)만 남긴다.
+ * 결과를 알 수 없으면 붙잡기를 놓지 않고 unknown으로 바꾼다(K1). 왜: 치지직이 이미 숨겼을 수 있어, 놓으면 매니저가 같은 메시지를 다시 숨긴다.
  * @param deps 실행기·스위치·통계·로거
  * @param channelId 채널 ID
  * @param ref 숨길 메시지
@@ -134,17 +135,32 @@ function submitAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
   const target = { chatChannelId: ref.chatChannelId, messageTime: ref.messageTime, senderChannelId: ref.senderChannelId };
   // 방금 만든 판정이라 붙잡기는 늘 성공한다. 결과가 오기 전까지 매니저의 숨기기·무시가 같은 판정에 겹치지 않게 한다(S12).
   deps.claims.tryClaim(verdictId, "auto_hide");
+  // 예외로 끝나 결과가 없으면 null로 남아 settleHideClaim이 놓는다(지금까지와 같다).
+  let settled: ActionOutcome | null = null;
   // submit은 거절하지 않도록 설계됐지만, 예외가 나면 Node 22가 프로세스를 끝내므로 반드시 잡는다.
   void deps.executor
     .submit(channelId, { kind: "hide", target, verdictId }, RULE_ACTOR, { shouldRun: () => deps.autoHide.isEnabled(channelId) })
     .then((outcome) => {
-      if (outcome.ok) deps.stats.increment(channelId, "auto_hidden");
-      else deps.logger.warn("자동 숨김 실패", { verdictId, outcomeMessage: outcome.message });
+      settled = outcome;
+      recordAutoHideOutcome(deps, channelId, verdictId, outcome);
     })
     .catch((error: unknown) => {
       deps.logger.error("자동 숨김 요청 처리 중 예외", { verdictId, error: describeError(error) });
     })
-    .finally(() => deps.claims.release(verdictId));
+    .finally(() => settleHideClaim(deps.claims, verdictId, settled));
+}
+
+/**
+ * 자동 숨김 결과를 통계·로그에 남긴다. 성공만 auto_hidden으로 세고, 실패·취소는 경고 로그(원문 없음)만 남긴다(S5, M01).
+ * 왜 message 대신 outcomeMessage인가: 기록기의 message 칸을 덮지 않기 위해서다(F8).
+ * @param deps 통계·로거
+ * @param channelId 채널 ID
+ * @param verdictId 판정 번호
+ * @param outcome 실행 결과
+ */
+function recordAutoHideOutcome(deps: DecisionHandlerDeps, channelId: string, verdictId: number, outcome: ActionOutcome): void {
+  if (outcome.ok) deps.stats.increment(channelId, "auto_hidden");
+  else deps.logger.warn("자동 숨김 실패", { verdictId, outcomeMessage: outcome.message });
 }
 
 /**

@@ -7,6 +7,7 @@ scikit-learn을 쓰지 않는 이유: 필요한 지표가 몇 개뿐이라 직�
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -38,6 +39,21 @@ def ensure_same_length(scores: Sequence[float], labels: Sequence[int]) -> None:
         raise MetricError(f"점수 {len(scores)}개와 라벨 {len(labels)}개의 개수가 다릅니다. 입력 순서를 맞췄는지 확인하세요.")
 
 
+def ensure_valid_scores_and_labels(scores: Sequence[float], labels: Sequence[int]) -> None:
+    """점수가 모두 유한한 [0,1] 값이고 라벨이 모두 0 또는 1인지 확인한다. 아니면 지표를 계산하지 않고 오류를 낸다.
+
+    왜: 학습이 발산해 점수가 NaN이 되면 동점 순위가 입력 순서로 매겨져 AUC가 1.0처럼 보일 수 있다.
+    그런 epoch가 '최고 모델'로 저장되지 않도록 지표 계산 앞단에서 막는다. 메시지에는 건수만 넣고 값 원문은 넣지 않는다.
+    """
+    ensure_same_length(scores, labels)
+    invalid_score_count = sum(1 for score in scores if not (math.isfinite(score) and 0.0 <= score <= 1.0))
+    if invalid_score_count:
+        raise MetricError(f"점수 {invalid_score_count}개가 유한한 0~1 값이 아닙니다. 학습이 발산했을 수 있으니 학습률을 낮추거나 데이터를 확인하세요.")
+    invalid_label_count = sum(1 for label in labels if label not in (0, 1))
+    if invalid_label_count:
+        raise MetricError(f"라벨 {invalid_label_count}개가 0 또는 1이 아닙니다. 데이터 파일의 라벨 변환을 확인하세요.")
+
+
 def safe_divide(numerator: float, denominator: float) -> float:
     """분모가 0이면 0.0을 돌려주는 나눗셈.
 
@@ -48,7 +64,7 @@ def safe_divide(numerator: float, denominator: float) -> float:
 
 def count_confusion(scores: Sequence[float], labels: Sequence[int], threshold: float) -> ConfusionCounts:
     """점수 ≥ threshold를 '유해로 표시'로 보고 혼동 행렬 칸 수를 센다."""
-    ensure_same_length(scores, labels)
+    ensure_valid_scores_and_labels(scores, labels)
     true_positive = false_positive = true_negative = false_negative = 0
     for score, label in zip(scores, labels, strict=True):
         is_flagged = score >= threshold
@@ -110,7 +126,7 @@ def compute_roc_auc(scores: Sequence[float], labels: Sequence[int]) -> float:
     반환: 0~1. 무작위 점수면 약 0.5다.
     주의: 정상·유해가 모두 있어야 정의된다. 한쪽만 있으면 오류를 낸다(--limit를 너무 작게 줬을 때 생길 수 있다).
     """
-    ensure_same_length(scores, labels)
+    ensure_valid_scores_and_labels(scores, labels)
     positive_count = sum(1 for label in labels if label == 1)
     negative_count = len(labels) - positive_count
     if positive_count == 0 or negative_count == 0:

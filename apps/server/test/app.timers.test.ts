@@ -13,7 +13,7 @@ const control = vi.hoisted(() => ({
   /** 다음 역할 재확인이 해임했다고 알릴 세션(세션 ID와 매니저 채널 ID). */
   revokedOnRecheck: [] as Array<{ sessionId: string; managerChannelId: string }>,
   /** 주기 작업이 불린 횟수(겹침 방지 확인용). */
-  calls: { recheck: 0, retention: 0, accessToken: 0 },
+  calls: { recheck: 0, retention: 0, accessToken: 0, prune: 0 },
   /** 설정되면 해당 주기 작업이 이 Promise가 끝날 때까지 멈춘다(이전 실행이 길어진 상황). */
   recheckGate: null as Promise<void> | null,
   backupGate: null as Promise<void> | null,
@@ -83,6 +83,17 @@ vi.mock("../src/db/database.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/db/database.js")>();
   return { ...original, openDatabase: (path: string) => (control.database = original.openDatabase(path)) };
 });
+// 판정 파이프라인의 기억 정리(K16)가 1분마다 불리는지 세려고 실제 파이프라인을 감싼다.
+vi.mock("../src/detection/pipeline.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/detection/pipeline.js")>();
+  return {
+    ...original,
+    createDetectionPipeline: (...args: Parameters<typeof original.createDetectionPipeline>) => {
+      const real = original.createDetectionPipeline(...args);
+      return { ...real, pruneExpired: (now: number) => { control.calls.prune += 1; real.pruneExpired(now); } };
+    },
+  };
+});
 // 앱이 만든 실제 허브를 붙잡아, 테스트에서 가짜 소켓을 붙이고 역할 재확인 주기 뒤의 종료를 확인한다.
 vi.mock("../src/realtime/hub.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/realtime/hub.js")>();
@@ -108,7 +119,7 @@ beforeEach(async () => {
   control.recheckError = null;
   control.loadChannelError = null;
   control.revokedOnRecheck = [];
-  control.calls = { recheck: 0, retention: 0, accessToken: 0 };
+  control.calls = { recheck: 0, retention: 0, accessToken: 0, prune: 0 };
   control.recheckGate = null;
   control.backupGate = null;
   control.accessTokenGate = null;
@@ -222,8 +233,10 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
     control.database?.prepare("INSERT INTO manager_session (id, manager_channel_id, manager_channel_name, role, expires_at, last_role_check_at) VALUES ('active', 'm1', '매니저', 'STREAMING_CHAT_MANAGER', ?, 0)").run(Date.now() + 60 * 60_000);
     const expired = recordingSocket();
     const active = recordingSocket();
-    hub.attach(expired, { id: "expired", managerChannelId: "m2", managerChannelName: "매니저2", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
-    hub.attach(active, { id: "active", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    // 허브는 보내기 전에 세션 만료 시각도 본다(K9). 여기서는 DB 행이 사라진 세션을 주기 정리가 닫는지만 보려고 만료 시각을 미래로 둔다.
+    const expiresAt = Date.now() + 60 * 60_000;
+    hub.attach(expired, { id: "expired", managerChannelId: "m2", managerChannelName: "매니저2", role: "STREAMING_CHAT_MANAGER", expiresAt, lastRoleCheckAt: 0 });
+    hub.attach(active, { id: "active", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt, lastRoleCheckAt: 0 });
     await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
     expect(expired.closedWith).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
@@ -234,11 +247,23 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
   });
 });
 
+describe("채팅 기억 정리(K16)", () => {
+  it("1분마다 도배·중복 감지기의 기한 지난 기억을 지우고, stop() 뒤에는 멈춘다", async () => {
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(control.calls.prune).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(control.calls.prune).toBe(1);
+    await app.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(control.calls.prune).toBe(1);
+  });
+});
+
 describe("주기 상태 방송(B19-2)", () => {
   it("20초마다 열린 화면에 status를 보내, 채팅이 없는 조용한 채널도 살아 있는 연결로 보이게 한다", async () => {
     const hub = control.hub as RealtimeHub;
     const socket = recordingSocket();
-    hub.attach(socket, { id: "s1", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    hub.attach(socket, { id: "s1", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: Date.now() + 60 * 60_000, lastRoleCheckAt: 0 });
     await vi.advanceTimersByTimeAsync(19_999);
     expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);

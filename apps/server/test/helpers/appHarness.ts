@@ -1,3 +1,4 @@
+import BetterSqlite3 from "better-sqlite3";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,4 +38,18 @@ export function buildTestConfig(fake: FakeChzzk, dataDirectory: string, channelI
 /** 테스트용 암호화 키. 같은 데이터 디렉터리를 다시 열 때는 같은 키를 넘겨야 한다. */
 export function newEncryptionKey(): Buffer {
   return randomBytes(32);
+}
+
+/**
+ * 데이터 디렉터리의 DB에 남은 장애 알림 구독 수를 읽는다. 앱이 연 DB와 따로 읽기 전용으로 열었다 닫는다.
+ * 왜: 앱은 DB를 밖으로 내주지 않으므로, 연결 해제가 구독을 지웠는지 파일에서 직접 확인한다(K11).
+ * @param dataDirectory buildTestConfig에 넘긴 데이터 디렉터리
+ */
+export function countPushSubscriptions(dataDirectory: string): number {
+  const database = new BetterSqlite3(join(dataDirectory, "zzirit-guard.sqlite"), { readonly: true });
+  try {
+    return (database.prepare("SELECT COUNT(*) AS count FROM push_subscription").get() as { count: number }).count;
+  } finally {
+    database.close();
+  }
 }

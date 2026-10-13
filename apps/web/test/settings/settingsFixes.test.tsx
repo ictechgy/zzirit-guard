@@ -48,7 +48,8 @@ describe("중복 제출 방지", () => {
   it("한도 저장: 두 번 눌러도 PUT은 한 번이고 버튼이 잠긴다", async () => {
     const fetchMock = stubPending({ "GET /api/settings": () => json(200, settings) });
     render(<LimitsSection me={manager} />);
-    const button = (await screen.findByRole("button", { name: "저장" })) as HTMLButtonElement;
+    await userEvent.type(await screen.findByLabelText(/원문 보관 기간/), "1");
+    const button = screen.getByRole("button", { name: "저장" }) as HTMLButtonElement;
     await userEvent.dblClick(button);
     await waitFor(() => expect(button.disabled).toBe(true));
     expect(callsTo(fetchMock, "PUT", "/api/settings")).toBe(1);
@@ -68,12 +69,57 @@ describe("LimitsSection 검증", () => {
   });
 
   it("저장 메시지는 다시 고치면 사라진다", async () => {
-    stubFetch({ "GET /api/settings": () => json(200, settings), "PUT /api/settings": () => json(200, settings) });
+    stubFetch({ "GET /api/settings": () => json(200, settings), "PUT /api/settings": () => json(200, { ...settings, retentionDaysContent: 71 }) });
     render(<LimitsSection me={manager} />);
-    await userEvent.click(await screen.findByRole("button", { name: "저장" }));
+    await userEvent.type(await screen.findByLabelText(/원문 보관 기간/), "1");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
     expect(await screen.findByText("저장했습니다.")).toBeTruthy();
     await userEvent.type(screen.getByLabelText(/원문 보관 기간/), "1");
     expect(screen.queryByText("저장했습니다.")).toBeNull();
+  });
+});
+
+describe("LimitsSection 바꾼 항목만 보내기(K19)", () => {
+  /** 보낸 PUT 본문들. */
+  function putBodies(fetchMock: ReturnType<typeof vi.fn>): unknown[] {
+    return fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PUT").map(([, init]) => JSON.parse(String((init as RequestInit).body)) as unknown);
+  }
+
+  it("바꾼 항목만 보내, 그사이 다른 매니저가 바꾼 항목을 옛 값으로 되돌리지 않는다", async () => {
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, settings), "PUT /api/settings": () => json(200, { ...settings, breakerPerMinute: 50, retentionDaysContent: 1 }) });
+    render(<LimitsSection me={manager} />);
+    const breaker = await screen.findByLabelText(/자동 숨김 1분 한도/);
+    await userEvent.clear(breaker);
+    await userEvent.type(breaker, "50");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장했습니다.")).toBeTruthy();
+    expect(putBodies(fetchMock)).toEqual([{ breakerPerMinute: 50 }]);
+    // 응답(다른 매니저가 바꾼 원문 보관 기간 1일 포함)을 새 기준으로 보여 준다.
+    expect((screen.getByLabelText(/원문 보관 기간/) as HTMLInputElement).value).toBe("1");
+  });
+
+  it("저장한 뒤에는 응답을 기준으로 삼아, 다음 저장에 이미 저장한 항목을 다시 보내지 않는다", async () => {
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, settings), "PUT /api/settings": (init) => json(200, { ...settings, ...(JSON.parse(String(init?.body)) as Partial<SettingsDto>) }) });
+    render(<LimitsSection me={manager} />);
+    const breaker = await screen.findByLabelText(/자동 숨김 1분 한도/);
+    await userEvent.clear(breaker);
+    await userEvent.type(breaker, "50");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByText("저장했습니다.");
+    const audit = screen.getByLabelText(/감사 기록 보관 기간/);
+    await userEvent.clear(audit);
+    await userEvent.type(audit, "30");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    await screen.findByText("저장했습니다.");
+    expect(putBodies(fetchMock)).toEqual([{ breakerPerMinute: 50 }, { retentionDaysAudit: 30 }]);
+  });
+
+  it("바꾼 것이 없으면 보내지 않고 알린다", async () => {
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, settings) });
+    render(<LimitsSection me={manager} />);
+    await userEvent.click(await screen.findByRole("button", { name: "저장" }));
+    expect(screen.getByRole("status").textContent).toBe("바꾼 값이 없습니다.");
+    expect(callsTo(fetchMock, "PUT", "/api/settings")).toBe(0);
   });
 });
 

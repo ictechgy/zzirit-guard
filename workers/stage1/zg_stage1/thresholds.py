@@ -19,7 +19,7 @@ from pathlib import Path
 
 from zg_stage1.arguments import probability_argument
 from zg_stage1.errors import DatasetFormatError, MetricError, PathResolutionError, run_command_line
-from zg_stage1.metrics import METRIC_DECIMALS, REPORT_THRESHOLDS, build_threshold_table, summarize_at_threshold
+from zg_stage1.metrics import METRIC_DECIMALS, REPORT_THRESHOLDS, build_threshold_table, ensure_valid_scores_and_labels, summarize_at_threshold
 
 # 재현율 목표 기본값. 유해 댓글 100건 중 97건 이상은 2차로 보내야 한다는 뜻이다.
 DEFAULT_TARGET_RECALL = 0.97
@@ -29,9 +29,6 @@ SPEC_STAGE1_THRESHOLD = 0.05
 
 # 보고하는 임계값의 소수 자릿수. 이 자릿수로 '내림'해서, 보고한 값을 그대로 써도 재현율 목표를 지키게 한다.
 THRESHOLD_DECIMALS = 6
-
-# 부동소수 곱셈 오차로 필요한 건수가 1 늘어나는 것을 막는 여유값(예: 0.97 × 100 = 97.00000000000001).
-CEILING_TOLERANCE = 1e-9
 
 
 @dataclass(frozen=True)
@@ -72,12 +69,21 @@ def round_down_threshold(score: float) -> float:
 
 def collect_toxic_scores_descending(scores: Sequence[float], labels: Sequence[int]) -> list[float]:
     """유해(라벨 1) 문장의 점수만 내림차순으로 모은다. 유해 문장이 없으면 재현율을 정의할 수 없어 오류를 낸다."""
-    if len(scores) != len(labels):
-        raise MetricError(f"점수 {len(scores)}개와 라벨 {len(labels)}개의 개수가 다릅니다.")
+    ensure_valid_scores_and_labels(scores, labels)
     toxic_scores = sorted((score for score, label in zip(scores, labels, strict=True) if label == 1), reverse=True)
     if not toxic_scores:
         raise MetricError("검증 점수에 유해(라벨 1) 문장이 없습니다. --limit를 늘리거나 검증 파일을 확인하세요.")
     return toxic_scores
+
+
+def compute_required_toxic_count(target_recall: float, toxic_count: int) -> int:
+    """재현율 목표를 채우는 데 필요한 유해 건수 ceil(목표 × 유해 수)를 정확한 십진 계산으로 구한다. 최소 1이다.
+
+    왜 Decimal인가: float 곱(0.97 × 100 = 97.00000000000001)은 필요 건수를 1 늘리고, 여유값을 빼 보정하면 반대로
+    목표를 못 채우는 값(0.970000000001 → 97건)이 나온다. 사용자가 입력한 십진 표기 그대로 계산하면 둘 다 없다.
+    최소 1로 묶는 이유는 아주 작은 목표에서 인덱스 -1(가장 낮은 점수)을 고르지 않기 위해서다.
+    """
+    return max(1, math.ceil(Decimal(str(target_recall)) * toxic_count))
 
 
 def select_threshold_for_recall(scores: Sequence[float], labels: Sequence[int], target_recall: float = DEFAULT_TARGET_RECALL) -> ThresholdSelection:
@@ -91,7 +97,7 @@ def select_threshold_for_recall(scores: Sequence[float], labels: Sequence[int], 
     """
     validate_target_recall(target_recall)
     toxic_scores = collect_toxic_scores_descending(scores, labels)
-    required_count = math.ceil(target_recall * len(toxic_scores) - CEILING_TOLERANCE)
+    required_count = compute_required_toxic_count(target_recall, len(toxic_scores))
     threshold = round_down_threshold(toxic_scores[required_count - 1])
     selected = summarize_at_threshold(scores, labels, threshold)
     spec_default = summarize_at_threshold(scores, labels, SPEC_STAGE1_THRESHOLD)

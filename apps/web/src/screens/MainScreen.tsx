@@ -1,6 +1,6 @@
 import type { AutoHideOffReason, MeDto, ServerStatus } from "@zzirit-guard/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiSend, requiresSignIn } from "../api/client";
+import { ApiError, apiGet, apiSend, requiresSignIn } from "../api/client";
 import { TabBar, type Tab } from "../components/TabBar";
 import { buildSections, countActionable } from "../domain/candidates";
 import { useNow } from "../state/useNow";
@@ -19,6 +19,13 @@ const IGNORE_DONE = "무시했습니다.";
 const TEMPORARY_RESTRICT_DONE = "임시 제한했습니다. 같은 사람의 남은 메시지는 숨기기나 무시로 정리하세요.";
 /** 오판 신고 성공 안내. 신고한 판정은 후보 화면에서 빠지고 오판 검토 목록에 오른다. */
 const FALSE_POSITIVE_DONE = "오판으로 신고했습니다. 기록·설정 → 오판 검토에서 볼 수 있습니다.";
+/**
+ * 되돌릴 수 없는 조치(숨기기·임시 제한)가 네트워크 오류로 끝났을 때의 안내(K18). 요청이 서버에 닿았을 수 있어 실패라 단정하지 않는다.
+ * 후보 화면이 뒤에 "다시 누르지 마세요."를 붙인다.
+ */
+const NETWORK_RESULT_UNKNOWN_MESSAGE = "응답을 받지 못해 처리 결과를 알 수 없습니다. 네트워크를 확인하고 잠시 뒤 목록에서 결과를 보세요.";
+/** 같은 세션의 다른 창에 실시간 연결이 밀렸을 때(4002)의 안내. 이 창은 스스로 다시 연결하지 않는다. */
+const REALTIME_REPLACED_MESSAGE = "다른 창에서 실시간 연결을 열어 이 창은 멈췄어요. 이 창에서 보려면 '다시 연결'을 누르세요.";
 /** 실시간 연결이 거듭 거절됐을 때의 안내(R-6). 출처 불일치(다른 주소로 연 경우)가 가장 흔한 원인이다. */
 const REALTIME_REJECTED_MESSAGE = "실시간 연결이 계속 거절됩니다. 운영자가 알려 준 주소(https://…ts.net)로 열었는지 확인한 뒤 '다시 연결'을 누르세요.";
 
@@ -26,6 +33,73 @@ const REALTIME_REJECTED_MESSAGE = "실시간 연결이 계속 거절됩니다. �
 interface ActionResponse {
   /** 매니저에게 보여 줄 안내(예: "이미 사라진 메시지입니다"). */
   note?: string | null;
+  /** 자동 숨김 스위치의 지금 값(스위치 응답에만 있다). */
+  enabled?: boolean;
+}
+
+/** 조치 요청 함수. 로그인이 필요한 오류면 로그인 화면으로 보내고 오류를 다시 던진다. */
+type SendAction = (path: string, body?: unknown) => Promise<ActionResponse>;
+
+/**
+ * 서버에 닿았는지 모르는 실패(네트워크 오류)를 "결과를 알 수 없음"(result_unknown)으로 바꿔 던진다(K18). 숨기기·임시 제한에만 쓴다.
+ * 왜: 네트워크 오류는 요청이 서버 실행기에 들어간 뒤 응답만 잃은 것일 수 있다. 그대로 두면 후보 화면이 잠금을 바로 풀어,
+ * 다시 누른 매니저가 되돌릴 수 없는 조치를 두 번 보낸다. result_unknown이면 후보 화면이 잠금을 붙잡는다.
+ * @param error 요청이 던진 오류
+ * @throws ApiError network면 result_unknown으로 바꾼 오류(원래 오류는 cause), 그 밖에는 받은 오류 그대로
+ */
+function treatNetworkFailureAsUnknown(error: unknown): never {
+  if (error instanceof ApiError && error.code === "network") throw new ApiError(0, "result_unknown", NETWORK_RESULT_UNKNOWN_MESSAGE, { cause: error });
+  throw error;
+}
+
+/** 스위치 응답을 화면의 서버 상태와 맞추는 도구. */
+interface AutoHideSync {
+  /** 응답의 스위치 값을 바로 상태에 넣는다(useServerState.applyAutoHide). */
+  apply(enabled: boolean): void;
+  /** 서버 상태를 다시 읽는다(useServerState.reload). */
+  reload(): void;
+  /** 지금까지 받은 실시간 status 이벤트 수(useServerState.statusEventCount). */
+  statusEventCount(): number;
+  /**
+   * 마지막으로 보낸 스위치 요청의 순번. MainScreen이 ref로 들고 있다.
+   * 왜 ref인가: 동작 묶음(createCandidateActions)이 다시 만들어져도 순번이 이어져야, 앞 묶음이 보낸 요청의 늦은 응답을 가려낼 수 있다.
+   */
+  sequence: { latest: number };
+}
+
+/**
+ * 자동 숨김 스위치 요청 함수를 만든다(K17). 성공하면 응답의 enabled를 바로 상태에 넣고, 실패하면 서버 상태를 다시 읽는다.
+ * 왜: 실시간 연결이 끊긴 동안에는 status 방송이 오지 않는다. 응답 값을 버리면 스위치가 옛 값(꺼짐)에 머물러,
+ * 다음 누름이 끄기 대신 켜기를 다시 보내 이 기기로는 자동 숨김을 끌 수 없다.
+ * 마지막으로 보낸 요청의 응답만 넣는다: 늦게 온 앞 요청의 응답이 뒤에 보낸 요청의 결과를 덮지 않게 한다.
+ * 요청을 보낸 뒤 실시간 status가 왔으면 응답을 넣지 않는다: 그 status가 더 새 서버 값이다(예: 그사이 다른 매니저가 다시 켰다).
+ * 실시간이 끊겨 있으면 status가 오지 않으므로 응답을 넣는다(위 이유).
+ * @param send 요청 함수
+ * @param sync 상태 반영·다시 읽기·status 이벤트 수
+ */
+function createAutoHideSender(send: SendAction, sync: AutoHideSync): (enabled: boolean) => Promise<string | null> {
+  return async (enabled) => {
+    const request = ++sync.sequence.latest;
+    const statusEventsAtSend = sync.statusEventCount();
+    const response = await send("/api/auto-hide", { enabled }).catch((error: unknown) => {
+      // 로그인 화면으로 가는 중이면 다시 읽지 않는다(어차피 버려지는 요청이다).
+      if (!requiresSignIn(error)) sync.reload();
+      throw error;
+    });
+    const isNewest = request === sync.sequence.latest && sync.statusEventCount() === statusEventsAtSend;
+    if (isNewest) applyToggleResponse(response, sync);
+    return response.note ?? null;
+  };
+}
+
+/**
+ * 스위치 응답 값을 넣는다. 응답에 값이 없으면(모르는 응답 모양) 추측하지 않고 서버 상태를 다시 읽는다.
+ * @param response 스위치 응답
+ * @param sync 상태 반영·다시 읽기
+ */
+function applyToggleResponse(response: ActionResponse, sync: AutoHideSync): void {
+  if (typeof response.enabled === "boolean") sync.apply(response.enabled);
+  else sync.reload();
 }
 
 /** MainScreen 속성. */
@@ -34,27 +108,32 @@ export interface MainScreenProps {
   me: MeDto;
   /** 세션이 끝났을 때 로그인 화면으로 돌아간다(message는 안내 문구). 렌더마다 바뀌지 않는 함수여야 한다. */
   onSignedOut(message: string | null): void;
+  /** 내 정보(역할·권한)를 다시 읽는다(K23). 화면이 다시 보이거나 실시간이 열릴 때 부른다. 렌더마다 바뀌지 않는 함수여야 한다. */
+  onRefreshMe(): void;
 }
 
 /**
  * 후보 화면 동작을 API로 채운다. 결과 상태는 서버가 WebSocket으로 다시 알려 화면이 바뀐다.
  * 로그인이 필요한 오류(401·409 no_channel)면 로그인 화면으로 보내고, 오류는 다시 던져 화면에 남긴다.
  * @param onSignedOut 로그인 화면으로 보낸다
+ * @param autoHideSync 스위치 응답을 서버 상태에 넣거나 다시 읽는다(K17)
  */
-function createCandidateActions(onSignedOut: (message: string | null) => void): CandidateActions {
-  const send = (path: string, body?: unknown) =>
+function createCandidateActions(onSignedOut: (message: string | null) => void, autoHideSync: AutoHideSync): CandidateActions {
+  const send: SendAction = (path, body) =>
     apiSend<ActionResponse>("POST", path, body).catch((error: unknown) => {
       if (requiresSignIn(error)) onSignedOut(error.message);
       throw error;
     });
+  // 되돌릴 수 없는 조치는 네트워크 오류를 결과를 알 수 없음으로 본다(K18).
+  const sendIrreversible: SendAction = (path, body) => send(path, body).catch(treatNetworkFailureAsUnknown);
   return {
-    hide: async (verdict) => (await send(`/api/verdicts/${verdict.id}/hide`)).note ?? HIDE_DONE,
+    hide: async (verdict) => (await sendIrreversible(`/api/verdicts/${verdict.id}/hide`)).note ?? HIDE_DONE,
     // 판정 번호만 보낸다. 채팅 채널은 서버가 저장된 판정에서 읽는다(S13). 묶음에는 판정이 늘 하나 이상 있다(groupBySender).
     temporaryRestrict: async (group) =>
-      (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { verdictId: group.verdicts[0]?.id })).note ?? TEMPORARY_RESTRICT_DONE,
+      (await sendIrreversible(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { verdictId: group.verdicts[0]?.id })).note ?? TEMPORARY_RESTRICT_DONE,
     ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? IGNORE_DONE,
     reportFalsePositive: async (verdict) => (await send(`/api/verdicts/${verdict.id}/false-positive`)).note ?? FALSE_POSITIVE_DONE,
-    setAutoHide: async (enabled) => (await send("/api/auto-hide", { enabled })).note ?? null,
+    setAutoHide: createAutoHideSender(send, autoHideSync),
   };
 }
 
@@ -73,6 +152,34 @@ function describeSystemDisable(reason: Exclude<AutoHideOffReason, "manual"> | nu
   return canViewAudit ? `${headline} ${AUDIT_HINT}` : headline;
 }
 
+/**
+ * 실시간 연결이 열릴 때마다(첫 연결 포함) 내 정보를 다시 읽게 한다(K23).
+ * 왜: 서버는 역할을 주기적으로, 그리고 티켓을 줄 때 다시 확인해 세션 권한을 바꾸지만 화면에 알리지 않는다.
+ * 첫 연결도 넣는 이유: 앱을 열 때 읽은 /api/me 뒤에 첫 티켓 발급의 역할 확인이 역할을 바꿀 수 있다.
+ * 처음 읽은 권한에 머물면 권한을 잃은 매니저에게 감사 기록 같은 화면이 그대로 남는다.
+ * @param isRealtimeConnected 실시간 연결이 열려 있는지
+ * @param onRefreshMe 내 정보를 다시 읽는다(렌더마다 같은 함수여야 연결된 동안 다시 부르지 않는다)
+ */
+function useRefreshMeOnConnect(isRealtimeConnected: boolean, onRefreshMe: () => void): void {
+  useEffect(() => {
+    if (isRealtimeConnected) onRefreshMe();
+  }, [isRealtimeConnected, onRefreshMe]);
+}
+
+/**
+ * 화면이 다시 보이면 내 정보를 다시 읽게 한다(K23). 휴대폰은 앱을 오래 두었다 다시 여는 일이 잦고, 그사이 역할이 바뀌었을 수 있다.
+ * @param onRefreshMe 내 정보를 다시 읽는다(렌더마다 같은 함수)
+ */
+function useRefreshMeOnVisible(onRefreshMe: () => void): void {
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") onRefreshMe();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [onRefreshMe]);
+}
+
 /** useSystemDisableNotice 결과. */
 interface SystemDisableNotice {
   /** 보여 줄 안내 문구. 없으면 null. */
@@ -86,11 +193,13 @@ interface SystemDisableNotice {
  * 왜: 서버가 스위치를 끄면 이유는 푸시와 감사 기록에만 남아, 화면을 보던 매니저는 왜 꺼졌는지 모른다.
  * 이유를 서버 상태(autoHideOffReason)로 받으므로, 이 기기든 다른 매니저든 손으로 끈 것에는 안내하지 않는다.
  * 처음 받은 상태(모름→값)는 바뀐 것으로 보지 않는다. 다시 켜지면 낡은 안내를 지운다.
+ * 문구는 그릴 때 만든다: 떠 있는 동안 감사 기록 권한을 잃으면 감사 기록 안내를 바로 뺀다(K23).
  * @param status 서버 상태(모르면 null)
  * @param canViewAudit 감사 기록 안내를 붙일지(view_audit)
  */
 function useSystemDisableNotice(status: ServerStatus | null, canViewAudit: boolean): SystemDisableNotice {
-  const [message, setMessage] = useState<string | null>(null);
+  // 안내할 꺼짐(이유 포함). 안내가 없으면 null.
+  const [notice, setNotice] = useState<{ reason: Exclude<AutoHideOffReason, "manual"> | null } | null>(null);
   const previousRef = useRef<boolean | null>(null);
   const enabled = status?.autoHideEnabled ?? null;
   const reason = status?.autoHideOffReason ?? null;
@@ -98,14 +207,14 @@ function useSystemDisableNotice(status: ServerStatus | null, canViewAudit: boole
     const previous = previousRef.current;
     previousRef.current = enabled;
     if (enabled === null || previous === null || previous === enabled) return;
-    setMessage(enabled || reason === "manual" ? null : describeSystemDisable(reason, canViewAudit));
-  }, [enabled, reason, canViewAudit]);
-  const dismiss = useCallback(() => setMessage(null), []);
-  return { message, dismiss };
+    setNotice(enabled || reason === "manual" ? null : { reason });
+  }, [enabled, reason]);
+  const dismiss = useCallback(() => setNotice(null), []);
+  return { message: notice ? describeSystemDisable(notice.reason, canViewAudit) : null, dismiss };
 }
 
 /** 로그인 뒤 본 화면: 탭 3개(스펙 6장). 세션이 끝나면 로그인 화면으로 돌아간다. */
-export function MainScreen({ me, onSignedOut }: MainScreenProps) {
+export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
   const [tab, setTab] = useState<Tab>("candidates");
   // 왜 처음 방문 때 마운트하나: 설정 화면은 마운트되자마자 감사 기록·규칙·통계와 치지직 API를 직접 부르는 /api/chat-settings를 읽고 15초 상태 갱신을 시작한다. 설정을 열지 않는 매니저에게는 필요 없는 호출이다.
   const [hasVisitedSettings, setHasVisitedSettings] = useState(false);
@@ -119,10 +228,17 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
     }
     setTab(next);
   };
-  const { state, reload, reconnect } = useServerState();
+  const { state, reload, reconnect, applyAutoHide, statusEventCount } = useServerState();
   const now = useNow(NOW_REFRESH_MS);
-  const actions = useMemo(() => createCandidateActions(onSignedOut), [onSignedOut]);
+  // 스위치 요청 순번(K17). 동작 묶음이 다시 만들어져도 이어져야 늦게 온 앞 요청의 응답을 가려내므로 ref에 둔다.
+  const autoHideSequence = useRef({ latest: 0 });
+  const actions = useMemo(
+    () => createCandidateActions(onSignedOut, { apply: applyAutoHide, reload, statusEventCount, sequence: autoHideSequence.current }),
+    [onSignedOut, applyAutoHide, reload, statusEventCount],
+  );
   const systemDisableNotice = useSystemDisableNotice(state.status, me.permissions.includes("view_audit"));
+  useRefreshMeOnConnect(state.realtimeConnected, onRefreshMe);
+  useRefreshMeOnVisible(onRefreshMe);
   useEffect(() => {
     if (state.sessionEndedReason !== null) onSignedOut(state.sessionEndedReason);
   }, [state.sessionEndedReason, onSignedOut]);
@@ -132,9 +248,11 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
     <div className="app">
       {state.loadError && <p className="error" role="alert">{state.loadError}</p>}
       {state.realtimeRejected && <RealtimeRejectedNotice onRetry={reconnect} onSignedOut={onSignedOut} />}
+      {state.realtimeReplaced && <RealtimeReplacedNotice onRetry={reconnect} />}
       {/* 후보·채팅은 처음부터, 설정은 처음 열 때 마운트하고 이후에는 숨기기만 한다: 탭을 오가도 진행 중인 요청 결과·처리 중 잠금·채팅 필터가 사라지지 않는다. */}
       <div hidden={tab !== "candidates"}>
-        <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected} actions={actions} onReload={reload}
+        <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected}
+          realtimePaused={state.realtimeRejected || state.realtimeReplaced} actions={actions} onReload={reload}
           systemDisableNotice={systemDisableNotice.message} onDismissSystemDisableNotice={systemDisableNotice.dismiss} />
       </div>
       <div hidden={tab !== "chat"}>
@@ -146,6 +264,20 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
         </div>
       )}
       <TabBar active={tab} onChange={changeTab} pendingCount={countActionable(sections)} />
+    </div>
+  );
+}
+
+/**
+ * 같은 세션의 다른 창에 실시간 연결이 밀렸을 때(4002)의 안내와 '다시 연결'.
+ * 오류가 아니라 알림이라 status로 읽어 준다. '다시 연결'을 누르면 이 창이 다시 연결하고, 서버는 그 세션의 가장 오래된 연결을 닫는다.
+ * @param onRetry '다시 연결'을 누르면 부른다
+ */
+function RealtimeReplacedNotice({ onRetry }: { onRetry(): void }) {
+  return (
+    <div className="notice" role="status">
+      <p>{REALTIME_REPLACED_MESSAGE}</p>
+      <button type="button" onClick={onRetry}>다시 연결</button>
     </div>
   );
 }

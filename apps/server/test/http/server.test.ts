@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import { createDecisionHandler } from "../../src/actions/decisionHandler.js";
 import { toSocketSink } from "../../src/http/server.js";
+import { silentLogger } from "../../src/logger.js";
 import { AuthError } from "../../src/managers/authFlow.js";
 import { createHttpHarness, mutatingHeaders, ORIGIN } from "../helpers/httpHarness.js";
 
@@ -49,6 +51,34 @@ describe("인증과 요청 출처", () => {
     const response = await harness.app.inject({ method: "GET", url: "/api/me" });
     expect(response.headers["content-security-policy"]).toContain("default-src 'self'");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
+  });
+});
+
+describe("API·인증 응답의 캐시 금지(K12)", () => {
+  it("/api/* 응답은 성공·오류 모두 Cache-Control: no-store다", async () => {
+    const cookie = `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}`;
+    const responses = await Promise.all([
+      harness.app.inject({ method: "GET", url: "/api/candidates", headers: { cookie } }),
+      harness.app.inject({ method: "GET", url: "/api/me" }),
+      harness.app.inject({ method: "GET", url: "/api/no-such-route", headers: { cookie } }),
+      harness.app.inject({ method: "POST", url: "/api/auto-hide", headers: { cookie }, payload: { enabled: false } }),
+      harness.app.inject({ method: "GET", url: "/api/verdicts/abc", headers: { cookie } }),
+    ]);
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 401, 404, 403, 404]);
+    expect(responses.map((response) => response.headers["cache-control"])).toEqual(Array(5).fill("no-store"));
+  });
+
+  it("/auth/* 응답(치지직으로 보내기·오류로 돌려보내기)도 no-store다", async () => {
+    const start = await harness.app.inject({ method: "GET", url: "/auth/login" });
+    const callback = await harness.app.inject({ method: "GET", url: "/auth/callback" });
+    expect([start.statusCode, callback.statusCode]).toEqual([302, 302]);
+    expect([start.headers["cache-control"], callback.headers["cache-control"]]).toEqual(["no-store", "no-store"]);
+  });
+
+  it("인코딩한 경로로 API 라우트에 닿아도 no-store다", async () => {
+    const response = await harness.app.inject({ method: "GET", url: "/%61pi/me", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
   });
 });
 
@@ -157,6 +187,48 @@ describe("판정 조치", () => {
     expect(response.json()).toEqual({ error: "result_unknown", message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다." });
   });
 
+  it("숨김 결과를 알 수 없으면 같은 판정의 다음 숨기기는 실행기로 보내지 않고 409 result_unknown과 확인 안내를 준다(K1)", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const verdict = insertCandidate();
+    const url = `/api/verdicts/${verdict.id}/hide`;
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    expect((await harness.app.inject({ method: "POST", url, headers })).statusCode).toBe(502);
+    const second = await harness.app.inject({ method: "POST", url, headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({
+      error: "result_unknown",
+      message: "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요.",
+    });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("자동 숨김 결과를 알 수 없으면 매니저 숨기기도 409 result_unknown이다(K1)", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const { services } = harness;
+    const handler = createDecisionHandler({ verdicts: harness.verdicts, executor: services.executor, autoHide: services.autoHide, claims: services.claims, stats: services.stats, broadcaster: harness.hub, logger: silentLogger });
+    services.autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    const ref = { chatChannelId: "chat-1", messageTime: 5, senderChannelId: "bad", nickname: "악플러", content: "느금마", privileged: false, isRoleUnknown: false };
+    const event = { channelId: "c1", senderChannelId: "bad", chatChannelId: "chat-1", nickname: "악플러", userRoleCode: "common_user", content: "느금마", messageTime: 5, receivedAt: 5 };
+    handler.handle(event, { decision: "auto_hide", reason: "rule:strong:1", ref, earlierFloodRefs: [], trivial: false, duplicate: false });
+    await vi.waitFor(() => expect(services.claims.holderOf(harness.verdicts.listRecent("c1", 0)[0]?.id as number)).toBe("unknown"));
+    const verdictId = harness.verdicts.listRecent("c1", 0)[0]?.id as number;
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdictId}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "result_unknown" });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["ignore", "false-positive"] as const)("숨김 결과를 알 수 없는 판정도 %s로 정리할 수 있다(K1)", async (action) => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const verdict = insertCandidate();
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers });
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/${action}`, headers });
+    expect(response.statusCode).toBe(200);
+    expect(harness.verdicts.get(verdict.id)?.status).toBe(action === "ignore" ? "ignored" : "false_positive");
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
   it("숨김이 실패하면 붙잡은 판정을 놓아 다시 숨길 수 있다(S12)", async () => {
     harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 서버 오류로 실패했습니다." });
     const verdict = insertCandidate();
@@ -214,6 +286,15 @@ describe("규칙·감사 기록", () => {
     const response = await harness.app.inject({ method: "POST", url: "/api/rules", headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")), payload: { kind: "weak", pattern: "!!!" } });
     expect(response.statusCode).toBe(400);
     expect(response.json().message).toMatch(/규칙이 비었습니다/);
+  });
+
+  it("한 단어·공용 접미사 허용 도메인은 400과 이유를 준다(K14)", async () => {
+    const headers = mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER"));
+    for (const pattern of ["com", "co.kr", "https://com/"]) {
+      const response = await harness.app.inject({ method: "POST", url: "/api/rules", headers, payload: { kind: "allow_domain", pattern } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toContain("허용 도메인");
+    }
   });
 
   it("감사 기록은 채팅 운영자에게 보이지 않는다", async () => {
@@ -454,6 +535,26 @@ describe("WebSocket", () => {
     socket.terminate();
   });
 
+  it("세션 만료 시각이 지나면 열린 소켓은 다음 방송 대신 만료 이유를 받고 4001로 닫힌다(K9)", async () => {
+    await harness.close();
+    const clock = { now: 1_000_000 };
+    harness = await createHttpHarness({}, { clock: () => clock.now });
+    const ticket = (await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) })).json().ticket as string;
+    const messages: string[] = [];
+    const closed = new Promise<number>((resolve) => {
+      const onInit = (client: WebSocket) => {
+        client.on("message", (data) => messages.push(String(data)));
+        client.on("close", (code) => resolve(code));
+      };
+      void harness.app.injectWS(`/ws?ticket=${ticket}`, { headers: { origin: ORIGIN } }, { onInit });
+    });
+    await vi.waitFor(() => expect(messages).toHaveLength(1));
+    clock.now += 12 * 60 * 60 * 1000;
+    harness.hub.broadcast({ type: "verdict_status", verdictId: 1, status: "hidden" });
+    expect(await closed).toBe(4001);
+    expect(messages.map((message) => JSON.parse(message).type)).toEqual(["status", "session_ended"]);
+  });
+
   it("치지직에서 해임된 매니저는 티켓을 받지 못하고 세션이 지워진다", async () => {
     const rawId = harness.login("STREAMING_CHAT_MANAGER");
     harness.services.verifyRole = async () => null;
@@ -484,6 +585,30 @@ describe("WebSocket", () => {
     expect(response.json().message).toMatch(/매니저 권한이 해제되었습니다/);
     expect(harness.sessions.get(rawId)).toBeNull();
     expect(logger.error).toHaveBeenCalledWith(expect.any(String), { error: "Error: database is locked" });
+  });
+
+  it("티켓은 세션마다 1분에 10번까지 주고, 넘으면 429 rate_limited로 거절한다(K8)", async () => {
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) statuses.push((await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers })).statusCode);
+    expect(statuses).toEqual([...Array(10).fill(200), 429]);
+    const limited = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers });
+    expect(limited.json()).toEqual({ error: "rate_limited", message: expect.stringContaining("잠시 뒤") });
+    const other = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+    expect(other.statusCode).toBe(200);
+  });
+
+  it("허브가 붙이지 않은 연결(상한 초과 등)에는 상태(status)를 보내지 않는다(K8)", async () => {
+    // 허브가 거절만 하고 닫지는 않게 바꿔, 서버가 attach의 결과를 보고 상태 전송을 건너뛰는지 확인한다.
+    vi.spyOn(harness.hub, "attach").mockReturnValue(false);
+    const ticket = (await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) })).json().ticket as string;
+    const messages: string[] = [];
+    // 서버는 붙인 직후 상태를 보내므로, 열리기 전에 듣기 시작해야 놓치지 않는다.
+    const onInit = (client: WebSocket) => void client.on("message", (data) => messages.push(String(data)));
+    const socket = await harness.app.injectWS(`/ws?ticket=${ticket}`, { headers: { origin: ORIGIN } }, { onInit });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(messages).toEqual([]);
+    socket.terminate();
   });
 
   it("잘못된 티켓은 4003으로 닫는다", async () => {
@@ -614,6 +739,104 @@ describe("판정 ID 검증", () => {
   });
 });
 
+describe("사람 단위 제재 중복 막기(K2)", () => {
+  /** 제재 종류별 주소와 역할(임시 제한은 채팅 운영자도, 활동 제한은 채널 관리자부터). */
+  const ROUTES = [
+    { kind: "temporary_restrict", url: "/api/senders/bad/temporary-restrict", role: "STREAMING_CHAT_MANAGER" },
+    { kind: "restrict", url: "/api/senders/bad/restrict", role: "STREAMING_CHANNEL_MANAGER" },
+  ] as const;
+
+  /** 결과를 알 수 없는 실행 결과. */
+  const UNKNOWN_OUTCOME = { ok: false as const, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true as const };
+
+  /** 시계를 직접 움직이는 하네스로 바꾼다. */
+  async function useControlledClock() {
+    await harness.close();
+    const clock = { now: 1_000_000 };
+    harness = await createHttpHarness({}, { clock: () => clock.now });
+    return clock;
+  }
+
+  /** 제재 요청을 보낸다. */
+  function send(route: (typeof ROUTES)[number], verdictId: number) {
+    return harness.app.inject({ method: "POST", url: route.url, headers: mutatingHeaders(harness.login(route.role)), payload: { verdictId } });
+  }
+
+  it.each(ROUTES)("$kind: 두 요청이 거의 동시에 와도 실행기에는 한 번만 보내고, 늦은 쪽은 409 already_handled", async (route) => {
+    const releases: Array<() => void> = [];
+    harness.submit.mockImplementation(() => new Promise((resolve) => void releases.push(() => resolve({ ok: true, note: null }))));
+    const verdict = insertCandidate();
+    const first = send(route, verdict.id);
+    const second = send(route, verdict.id);
+    await vi.waitFor(() => expect(harness.submit).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releases.forEach((finish) => finish());
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    expect(responses.find((response) => response.statusCode === 409)?.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(ROUTES)("$kind: 성공한 뒤 60초 안에 다시 보내면 409 already_handled이고, 60초가 지나면 다시 보낸다", async (route) => {
+    const clock = await useControlledClock();
+    const verdict = insertCandidate();
+    expect((await send(route, verdict.id)).statusCode).toBe(200);
+    clock.now += 59_999;
+    const repeated = await send(route, verdict.id);
+    expect(repeated.statusCode).toBe(409);
+    expect(repeated.json()).toMatchObject({ error: "already_handled", message: expect.stringMatching(/^방금 제한했습니다/) });
+    clock.now += 1;
+    expect((await send(route, verdict.id)).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(ROUTES)("$kind: 결과를 알 수 없으면 다음 요청은 실행기로 보내지 않고 409 result_unknown", async (route) => {
+    harness.submit.mockResolvedValueOnce(UNKNOWN_OUTCOME);
+    const verdict = insertCandidate();
+    expect((await send(route, verdict.id)).json()).toMatchObject({ error: "result_unknown" });
+    const repeated = await send(route, verdict.id);
+    expect(repeated.statusCode).toBe(409);
+    expect(repeated.json()).toEqual({ error: "result_unknown", message: "제한 결과를 알 수 없습니다. 치지직 채팅에서 제한됐는지 확인하고, 제한되지 않았다면 치지직 기본 도구로 제한하세요." });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("실패로 끝나면 막지 않아 바로 다시 보낼 수 있다", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 서버 오류로 실패했습니다." });
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(502);
+    expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(2);
+  });
+
+  /** 활동 제한 해제를 보낸다. */
+  function unrestrict() {
+    return harness.app.inject({ method: "DELETE", url: "/api/senders/bad/restrict", headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+  }
+
+  it("활동 제한 해제가 성공하면 그 사람의 활동 제한 막기를 지워 바로 다시 제한할 수 있다(K2b)", async () => {
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(200);
+    expect((await unrestrict()).statusCode).toBe(200);
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(3);
+  });
+
+  it("활동 제한 해제가 성공해도 임시 제한 막기는 그대로다(K2b)", async () => {
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(200);
+    expect((await unrestrict()).statusCode).toBe(200);
+    expect((await send(ROUTES[0], verdict.id)).json()).toMatchObject({ error: "already_handled" });
+  });
+
+  it("활동 제한 해제가 실패하면 활동 제한 막기를 지우지 않는다(K2b)", async () => {
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(200);
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 서버 오류로 실패했습니다." });
+    expect((await unrestrict()).statusCode).toBe(502);
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(409);
+  });
+});
+
 describe("오류 가림과 정적 폴백", () => {
   it("5xx 예외의 메시지는 사용자에게 보이지 않는다", async () => {
     harness.services.getChatSettings = async () => { throw Object.assign(new Error("secret internals"), { statusCode: 503 }); };
@@ -649,6 +872,14 @@ describe("푸시 구독 입력", () => {
     const response = await harness.app.inject({ method: "POST", url: "/api/push/subscriptions", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")), payload: { endpoint: "http://127.0.0.1/x", keys: validKeys } });
     expect(response.statusCode).toBe(400);
     expect(response.json().message).toEqual(expect.any(String));
+  });
+
+  it("전체 구독이 상한(100개)이면 새 기기 등록은 409와 이유를 준다(K10)", async () => {
+    const insert = harness.database.prepare("INSERT INTO push_subscription (manager_channel_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, 'p', 'a', 0)");
+    for (let index = 0; index < 100; index += 1) insert.run(`m${Math.floor(index / 5)}`, `https://fcm.googleapis.com/fcm/send/${index}`);
+    const response = await harness.app.inject({ method: "POST", url: "/api/push/subscriptions", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")), payload: { endpoint: "https://fcm.googleapis.com/fcm/send/new", keys: validKeys } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().message).toContain("100");
   });
 
   it("너무 긴 주소는 400", async () => {

@@ -129,7 +129,7 @@ function buildPipeline() {
   const pipeline = createDetectionPipeline({ rules, auditLog, groupFlood: createGroupFloodDetector(), personalFlood: createPersonalFloodDetector(), duplicates: createDuplicateTracker() });
   const handler = createDecisionHandler({
     verdicts: createVerdictRepository(database, clock), executor, claims: createVerdictClaims(), stats: createMinuteStats(database, clock), logger: silentLogger,
-    autoHide: createAutoHideSwitch({ settings: createSettingsRepository(database), auditLog, clock, logger: silentLogger }),
+    autoHide: createAutoHideSwitch({ database, settings: createSettingsRepository(database), auditLog, clock, logger: silentLogger }),
     broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
   });
   return { pipeline, handler };

@@ -88,6 +88,18 @@ describe("serverReducer", () => {
     expect(state.replayLog).toBeNull();
   });
 
+  it("스위치 응답 값을 상태에 넣고, 조회 중이면 조회 결과 위에 다시 적용한다(K17)", () => {
+    const loaded = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [] }]);
+    expect(serverReducer(loaded, { type: "auto_hide_applied", enabled: true }).status).toEqual({ ...status, autoHideEnabled: true, autoHideOffReason: null });
+    const turnedOff = reduce([{ type: "snapshot_started" }, { type: "auto_hide_applied", enabled: false }, { type: "snapshot_loaded", status: { ...status, autoHideEnabled: true }, verdicts: [] }], loaded);
+    expect(turnedOff.status).toMatchObject({ autoHideEnabled: false, autoHideOffReason: "manual" });
+    expect(turnedOff.replayLog).toBeNull();
+  });
+
+  it("상태를 아직 모르면 스위치 응답을 넣지 않는다(K17)", () => {
+    expect(serverReducer(initialServerState, { type: "auto_hide_applied", enabled: true })).toBe(initialServerState);
+  });
+
   it("다시 조회하면 기존 판정과 id로 합친다(재연결, R-3)", () => {
     const before = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [verdict(1), verdict(2)] }]);
     const after = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [verdict(1, { status: "ignored" }), verdict(3)] }], before);
@@ -106,6 +118,24 @@ describe("serverReducer", () => {
     const before = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [verdict(1)] }]);
     const after = serverReducer(before, { type: "event", event: { type: "future_event", payload: 1 } as unknown as RealtimeEvent });
     expect(after).toBe(before);
+  });
+
+  it("같은 세션의 다른 창에 실시간 연결이 밀리면(4002) 표시하고, 다시 연결되면 지운다", () => {
+    const replaced = reduce([{ type: "connection", connected: true }, { type: "realtime_replaced" }]);
+    expect(replaced).toMatchObject({ realtimeReplaced: true, realtimeConnected: false });
+    expect(serverReducer(replaced, { type: "connection", connected: true }).realtimeReplaced).toBe(false);
+  });
+
+  it("손으로 다시 연결을 시작하면 멈춤 표시(거절·밀림)를 바로 지운다", () => {
+    const replaced = reduce([{ type: "realtime_replaced" }, { type: "reconnect_started" }]);
+    expect(replaced).toMatchObject({ realtimeReplaced: false, realtimeRejected: false });
+    const rejected = reduce([{ type: "realtime_rejected" }, { type: "reconnect_started" }]);
+    expect(rejected).toMatchObject({ realtimeReplaced: false, realtimeRejected: false });
+  });
+
+  it("거절과 밀림은 함께 표시하지 않는다: 나중에 멈춘 이유만 남긴다", () => {
+    expect(reduce([{ type: "realtime_replaced" }, { type: "realtime_rejected" }])).toMatchObject({ realtimeRejected: true, realtimeReplaced: false });
+    expect(reduce([{ type: "realtime_rejected" }, { type: "realtime_replaced" }])).toMatchObject({ realtimeRejected: false, realtimeReplaced: true });
   });
 
   it("실시간 연결이 거듭 거절되면 표시하고, 다시 연결되면 지운다(R-6)", () => {

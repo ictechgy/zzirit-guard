@@ -1,15 +1,18 @@
 import type { MeDto, ServerStatus, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ApiError, describeApiError } from "../api/client";
-import { ActionToast, type ActionFeedback } from "../components/ActionToast";
+import { ActionToast, UnknownOutcomeToasts, type ActionFeedback } from "../components/ActionToast";
 import { AutoHiddenList, AutoHidePendingList, RestrictedAutoHideList } from "../components/AutoHideLists";
 import { AutoHideToggle } from "../components/AutoHideToggle";
 import { CandidateGroupCard, type GroupKind } from "../components/CandidateGroupCard";
 import { StatusBanner } from "../components/StatusBanner";
-import { countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { ACTIONABLE_PAGE_SIZE, allVerdicts, countActionable, findVerdictStatus, MAX_LISTED_ROWS, type CandidateSections, type SenderGroup } from "../domain/candidates";
+import { buildMessageLabels, type MessageLabels } from "../domain/messageLabels";
 import { autoHideLockKey, useActionLocks, type ActionLocks } from "../state/useActionLocks";
+import { usePageLimit } from "../state/usePageLimit";
 import { useStableSections } from "../state/useStableSections";
 import { useTimeoutHolds, type TimeoutHolds } from "../state/useTimeoutHolds";
+import { useUnknownOutcomeAlerts } from "../state/useUnknownOutcomeAlerts";
 
 /** 후보 화면이 부르는 동작. 성공하면 화면에 보여 줄 안내(없으면 null)를 돌려준다. MainScreen이 API로 채우고, 테스트는 가짜를 넘긴다. */
 export interface CandidateActions {
@@ -44,6 +47,8 @@ export interface CandidatesScreenProps {
   sections: CandidateSections;
   /** 실시간 연결이 살아 있는지. */
   realtimeConnected: boolean;
+  /** 실시간 연결이 스스로 다시 연결하지 않고 멈춰 있는지(거듭 거절·다른 창에 밀림). 배너 문구를 고른다. */
+  realtimePaused: boolean;
   /** 후보 화면 동작. */
   actions: CandidateActions;
   /** 서버에서 상태·후보를 다시 읽는다(iOS 홈 화면 앱에는 새로고침이 없다). */
@@ -56,8 +61,9 @@ export interface CandidatesScreenProps {
 
 
 /**
- * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수(null이면 모두). 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
- * 섀도만 줄이는 이유: 처리하지 않아도 되는 정보라 떼도배 때 수백 명이 쌓여도 다 그릴 필요가 없다(F4). 도움 필요·후보는 매니저가 처리해야 해서 모두 그린다.
+ * 사람 단위 구역의 제목·종류·그릴 최대 묶음 수. 순서가 화면 순서다(스펙 5.1: 섀도는 후보 목록 위).
+ * 섀도만 고정 수로 자르는 이유: 처리하지 않아도 되는 정보라 떼도배 때 수백 명이 쌓여도 다 그릴 필요가 없다(F4).
+ * 도움 필요·후보(limit null)는 매니저가 처리해야 해서 자르지 않고, ACTIONABLE_PAGE_SIZE씩 '더 보기'로 나눠 그린다(K21).
  */
 const GROUP_SECTIONS: ReadonlyArray<{ key: "care" | "shadow" | "candidates"; kind: GroupKind; title: string; limit: number | null }> = [
   { key: "care", kind: "care", title: "도움 필요(자해·자살 신호)", limit: null },
@@ -76,8 +82,10 @@ const TIMEOUT_HOLD_SUFFIX = "다시 누르지 마세요.";
 
 /** 동작 실행기가 쓰는 화면 쪽 도구. */
 interface RunnerContext {
-  /** 결과를 화면에 남긴다. */
+  /** 결과를 화면에 남긴다. 다음 동작이 시작되거나 끝나면 바뀐다. */
   setFeedback(feedback: ActionFeedback): void;
+  /** 결과를 알 수 없는 실패의 알림을 매니저가 닫을 때까지 남긴다(K20). */
+  keepUnknownOutcome(message: string): void;
   /** 목록을 다시 읽는다. */
   onReload(): void;
   /** 열쇠별 잠금(같은 열쇠의 동작만 막는다). */
@@ -90,6 +98,7 @@ interface RunnerContext {
 
 /**
  * 동작 실행기를 만든다. 성공하면 안내를, 실패하면 서버 문구를 남긴다.
+ * 결과를 알 수 없는 실패(시간 초과·result_unknown)는 따로 남겨, 다른 동작의 시작·결과가 지우지 못하게 한다(K20).
  * 이미 처리된 판정(409 already_handled)이면 화면이 낡은 것이므로 목록을 다시 읽고 안내(info)로 알린다(R-13·B19-6).
  * 시간이 초과되면(지켜볼 판정이 있을 때) 잠금을 바로 풀지 않고 붙잡는다(B19-7).
  * @param context 결과 표시·다시 읽기·잠금·판정 상태 조회
@@ -127,8 +136,9 @@ interface TimeoutHoldRequest {
 }
 
 /**
- * 처리 결과를 알 수 없는 오류인지 본다: 요청 시간 초과(timeout)이거나, 서버가 치지직 처리 결과를 알 수 없다고 알린 것(502 result_unknown, N4).
- * 둘 다 조치가 이미 처리됐을 수 있어 곧바로 다시 보내면 두 번 간다.
+ * 처리 결과를 알 수 없는 오류인지 본다: 요청 시간 초과(timeout)이거나, 코드가 result_unknown인 것.
+ * result_unknown은 서버가 치지직 처리 결과를 알 수 없다고 알린 것(502·409, N4)과, 숨기기·임시 제한의 네트워크 오류를 MainScreen이 바꾼 것(K18)이다.
+ * 모두 조치가 이미 처리됐을 수 있어 곧바로 다시 보내면 두 번 간다.
  * @param error 동작이 던진 오류
  */
 function isOutcomeUnknown(error: unknown): boolean {
@@ -153,6 +163,7 @@ function holdAfterTimeout(context: RunnerContext, error: unknown, request: Timeo
 
 /**
  * 실패를 화면에 남긴다. 이미 처리된 판정이면 목록을 다시 읽고 안내로, 잠금을 붙잡았으면 다시 누르지 말라고 덧붙인다.
+ * 결과를 알 수 없는 실패는 닫을 때까지 남는 알림으로 보낸다(K20).
  * 자동 숨김이 진행 중(409 in_progress)이면 서버 문구를 그대로 안내로 보여 주고 다시 읽지 않는다(N4).
  * 왜: 자동 숨김이 끝나면 실시간으로 반영되고, 지금 다시 읽어도 대기 중으로 보여 "이미 처리됨"은 틀린 안내다.
  * @param context 결과 표시·다시 읽기
@@ -169,8 +180,9 @@ function reportFailure(context: RunnerContext, error: unknown, isHeld: boolean):
     context.onReload();
     return;
   }
-  const message = describeApiError(error);
-  context.setFeedback({ kind: "error", message: isHeld ? `${message} ${TIMEOUT_HOLD_SUFFIX}` : message });
+  const message = isHeld ? `${describeApiError(error)} ${TIMEOUT_HOLD_SUFFIX}` : describeApiError(error);
+  if (isOutcomeUnknown(error)) context.keepUnknownOutcome(message);
+  else context.setFeedback({ kind: "error", message });
 }
 
 /**
@@ -191,13 +203,14 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  * 감싸지 않으면 판정 수천 건의 목록을 초당 4번 다시 그려 휴대폰이 멈춘다(F4). 속성은 MainScreen이 useMemo·useCallback으로 고정한다.
  * 목록을 만지는 동안에는 구역을 고정해 줄이 손가락 밑에서 움직이지 않게 한다(useStableSections, 스모크 S1).
  */
-export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, systemDisableNotice, onDismissSystemDisableNotice }: CandidatesScreenProps) {
+export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, realtimePaused, actions, onReload, systemDisableNotice, onDismissSystemDisableNotice }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<ActionFeedback>(null);
   // 알림 닫기. ActionToast가 4초 타이머의 의존성으로 쓰므로 렌더마다 같은 함수여야 한다(아니면 타이머가 다시 시작된다).
   const dismissFeedback = useCallback(() => setFeedback(null), []);
+  const unknownOutcomes = useUnknownOutcomeAlerts();
   const locks = useActionLocks();
   const holds = useTimeoutHolds(sections, locks.unlock);
-  const run = createRunner({ setFeedback, onReload, locks, holds, statusOf: (verdictId) => findVerdictStatus(sections, verdictId) });
+  const run = createRunner({ setFeedback, keepUnknownOutcome: unknownOutcomes.keep, onReload, locks, holds, statusOf: (verdictId) => findVerdictStatus(sections, verdictId) });
   const { lockedKeys } = locks;
   const canHide = me.permissions.includes("hide_message");
   const autoHideEnabled = status?.autoHideEnabled ?? null;
@@ -205,11 +218,13 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   const listRef = useRef<HTMLDivElement>(null);
   const stable = useStableSections(sections, listRef);
   const shown = stable.sections;
+  // 버튼 접근성 이름에 쓰는 메시지 설명. 같은 사람·같은 초가 겹치지 않게 화면 전체로 센다(K22).
+  const messageLabels = useMemo(() => buildMessageLabels(allVerdicts(shown)), [shown]);
   // 자동 숨김 목록 세 개가 함께 쓰는 속성.
-  const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions };
+  const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions, messageLabels };
   return (
     <section className="screen">
-      <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
+      <StatusBanner status={status} realtimeConnected={realtimeConnected} isRealtimePaused={realtimePaused} canReconnectChannel={me.permissions.includes("connect_channel")} />
       <div className="toolbar">
         <AutoHideToggle enabled={autoHideEnabled} canEnable={me.permissions.includes("enable_auto_hide")}
           canDisable={me.permissions.includes("disable_auto_hide")} isBusy={autoHideEnabled !== null && lockedKeys.has(autoHideLockKey(!autoHideEnabled))}
@@ -218,7 +233,7 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
       </div>
       <div ref={listRef} className="candidate-list">
         {GROUP_SECTIONS.map(({ key, kind, title, limit }) => (
-          <GroupSection key={key} title={title} groups={shown[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} handledIds={stable.handledIds} actions={actions} />
+          <GroupSection key={key} title={title} groups={shown[key]} limit={limit} kind={kind} me={me} run={run} lockedKeys={lockedKeys} handledIds={stable.handledIds} actions={actions} messageLabels={messageLabels} />
         ))}
         {countActionable(shown) === 0 && <p className="empty">지금 확인할 후보가 없습니다.</p>}
         <AutoHidePendingList verdicts={shown.autoHidePending} {...rowProps} />
@@ -240,6 +255,7 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
             <button type="button" onClick={onDismissSystemDisableNotice}>닫기</button>
           </div>
         )}
+        <UnknownOutcomeToasts messages={unknownOutcomes.messages} onDismiss={unknownOutcomes.dismiss} />
         <ActionToast feedback={feedback} onDismiss={dismissFeedback} />
       </div>
     </section>
@@ -252,7 +268,7 @@ interface GroupSectionProps {
   title: string;
   /** 이 구역의 사람 묶음. */
   groups: readonly SenderGroup[];
-  /** 그릴 최대 묶음 수. null이면 모두 그린다. 넘친 묶음은 "외 N명"으로 알린다. */
+  /** 그릴 최대 묶음 수. 넘친 묶음은 "외 N명"으로 알린다. null이면 ACTIONABLE_PAGE_SIZE씩 '더 보기'로 나눠 그린다(K21). */
   limit: number | null;
   /** 카드 종류. */
   kind: GroupKind;
@@ -266,19 +282,26 @@ interface GroupSectionProps {
   handledIds: ReadonlySet<number>;
   /** 후보 화면 동작. */
   actions: CandidateActions;
+  /** 버튼 접근성 이름에 쓰는 메시지 설명(K22). */
+  messageLabels: MessageLabels;
 }
 
-/** 구역 하나. 비어 있으면 그리지 않는다. */
-function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handledIds, actions }: GroupSectionProps) {
+/** 구역 하나. 비어 있으면 그리지 않는다. 제목에 전체 사람 수를 보인다(나눠 그려도 전체 규모를 알게, K21). */
+function GroupSection({ title, groups, limit, kind, me, run, lockedKeys, handledIds, actions, messageLabels }: GroupSectionProps) {
+  const page = usePageLimit(ACTIONABLE_PAGE_SIZE);
   if (groups.length === 0) return null;
-  const shown = limit === null ? groups : groups.slice(0, limit);
+  const shown = groups.slice(0, limit ?? page.limit);
+  const remaining = groups.length - shown.length;
   return (
     <section className={`section section-${kind}`}>
-      <h2>{title}</h2>
+      <h2>{title} {groups.length}명</h2>
       {shown.map((group) => (
-        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} handledIds={handledIds} actions={actions} />
+        <CandidateGroupCard key={group.senderChannelId} group={group} kind={kind} permissions={me.permissions} run={run} lockedKeys={lockedKeys} handledIds={handledIds} actions={actions}
+          messageLabels={messageLabels} />
       ))}
-      {groups.length > shown.length && <p className="hint">외 {groups.length - shown.length}명</p>}
+      {remaining > 0 && (limit === null
+        ? <button type="button" className="more" onClick={page.showMore}>더 보기 ({remaining}명)</button>
+        : <p className="hint">외 {remaining}명</p>)}
     </section>
   );
 }

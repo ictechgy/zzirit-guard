@@ -13,6 +13,7 @@ export interface ChzzkApiErrorOptions {
 /**
  * 치지직 API 오류. status는 HTTP 상태, apiMessage는 치지직이 준 메시지다.
  * wasDelivered가 참이면 2xx 응답의 본문을 해석하지 못해 만든 502다(요청은 치지직에 닿았다).
+ * path에는 쿼리 문자열을 빼고 경로만 담는다(K5).
  */
 export class ChzzkApiError extends Error {
   override readonly name = "ChzzkApiError";
@@ -22,12 +23,24 @@ export class ChzzkApiError extends Error {
   readonly wasDelivered: boolean;
 
   constructor(status: number, apiMessage: string, path: string, options: ChzzkApiErrorOptions = {}) {
-    super(`치지직 API 오류 ${status} (${path}): ${apiMessage}`);
+    const safePath = withoutQuery(path);
+    super(`치지직 API 오류 ${status} (${safePath}): ${apiMessage}`);
     this.status = status;
     this.apiMessage = apiMessage;
-    this.path = path;
+    this.path = safePath;
     this.wasDelivered = options.wasDelivered ?? false;
   }
+}
+
+/**
+ * 경로에서 쿼리 문자열(? 뒤)을 뗀다(K5).
+ * 왜: 채팅 구독 주소의 ?sessionKey= 같은 비밀 값이 오류 문구에 들어가면, 오류를 남기는 로그(describeError)에 그대로 저장된다.
+ * 오류를 만드는 곳마다 맡기지 않고 생성자 한 곳에서 떼어, 새 호출이 쿼리를 붙여도 새지 않게 한다.
+ * @param path 요청 경로(쿼리 포함 가능)
+ */
+function withoutQuery(path: string): string {
+  const queryStart = path.indexOf("?");
+  return queryStart === -1 ? path : path.slice(0, queryStart);
 }
 
 /** 발급·갱신된 토큰 쌍. */

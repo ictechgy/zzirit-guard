@@ -1,7 +1,7 @@
 import type { RealtimeEvent } from "@zzirit-guard/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ManagerSession } from "../../src/managers/sessionStore.js";
-import { createRealtimeHub, type RealtimeHub, type SocketSink } from "../../src/realtime/hub.js";
+import { createRealtimeHub, MAX_SOCKETS_PER_SESSION, MAX_SOCKETS_TOTAL, SESSION_EXPIRED_REASON, type RealtimeHub, type SocketSink } from "../../src/realtime/hub.js";
 
 let hub: RealtimeHub;
 afterEach(() => hub.stop());
@@ -20,9 +20,12 @@ function fakeSocket(readyState = 1) {
   return socket;
 }
 
-/** 세션 예시. */
-function session(id: string): ManagerSession {
-  return { id, managerChannelId: id, managerChannelName: id, role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 };
+/**
+ * 세션 예시. 만료 시각을 주지 않으면 끝없이 유효한 세션이다(허브는 보내기 전에 만료를 본다, K9).
+ * @param expiresAt 세션 만료 시각(ms)
+ */
+function session(id: string, expiresAt = Number.MAX_SAFE_INTEGER): ManagerSession {
+  return { id, managerChannelId: id, managerChannelName: id, role: "STREAMING_CHAT_MANAGER", expiresAt, lastRoleCheckAt: 0 };
 }
 
 describe("RealtimeHub", () => {
@@ -190,5 +193,69 @@ describe("RealtimeHub", () => {
     expect(slow.closedWith).toBe(1011);
     expect(healthy.sent).toHaveLength(1);
     expect(hub.connectionCount()).toBe(1);
+  });
+
+  it("한 세션의 소켓은 3개까지이고, 넷째가 붙으면 그 세션의 가장 오래된 소켓을 4002로 닫는다(K8)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    const sockets = Array.from({ length: MAX_SOCKETS_PER_SESSION + 1 }, () => fakeSocket());
+    const otherSession = fakeSocket();
+    hub.attach(otherSession, session("s2"));
+    expect(sockets.map((socket) => hub.attach(socket, session("s1")))).toEqual([true, true, true, true]);
+    expect(MAX_SOCKETS_PER_SESSION).toBe(3);
+    expect(sockets.map((socket) => socket.closedWith)).toEqual([4002, null, null, null]);
+    expect(otherSession.closedWith).toBeNull();
+    hub.broadcast({ type: "verdict_status", verdictId: 1, status: "hidden" });
+    expect(sockets.map((socket) => socket.sent.length)).toEqual([0, 1, 1, 1]);
+    expect(hub.connectionCount()).toBe(4);
+  });
+
+  it("전체 소켓이 50개면 새 세션의 연결은 1013으로 닫고 붙이지 않는다(K8)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    expect(MAX_SOCKETS_TOTAL).toBe(50);
+    for (let index = 0; index < MAX_SOCKETS_TOTAL; index += 1) hub.attach(fakeSocket(), session(`s${index}`));
+    const late = fakeSocket();
+    expect(hub.attach(late, session("late"))).toBe(false);
+    expect(late.closedWith).toBe(1013);
+    expect(hub.connectionCount()).toBe(MAX_SOCKETS_TOTAL);
+  });
+
+  it("전체 상한에서도 이미 3개를 연 세션의 새 연결은 가장 오래된 것을 밀어내고 붙는다(K8)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    const own = Array.from({ length: MAX_SOCKETS_PER_SESSION }, () => fakeSocket());
+    own.forEach((socket) => hub.attach(socket, session("mine")));
+    for (let index = MAX_SOCKETS_PER_SESSION; index < MAX_SOCKETS_TOTAL; index += 1) hub.attach(fakeSocket(), session(`s${index}`));
+    const newest = fakeSocket();
+    expect(hub.attach(newest, session("mine"))).toBe(true);
+    expect([own[0]?.closedWith, newest.closedWith]).toEqual([4002, null]);
+    expect(hub.connectionCount()).toBe(MAX_SOCKETS_TOTAL);
+  });
+
+  it("만료 시각이 된 세션의 소켓은 방송을 받지 않고, 만료 이유를 받은 뒤 4001로 닫힌다(K9)", () => {
+    let now = 1_000;
+    hub = createRealtimeHub({ flushIntervalMs: 60_000, clock: () => now });
+    const expiring = fakeSocket();
+    const valid = fakeSocket();
+    hub.attach(expiring, session("s1", 2_000));
+    hub.attach(valid, session("s2", 5_000));
+    hub.broadcast({ type: "verdict_status", verdictId: 1, status: "hidden" });
+    expect(expiring.sent).toHaveLength(1);
+    now = 2_000;
+    hub.broadcast({ type: "verdict_status", verdictId: 2, status: "hidden" });
+    expect(expiring.sent.slice(1)).toEqual([{ type: "session_ended", reason: SESSION_EXPIRED_REASON }]);
+    expect(expiring.closedWith).toBe(4001);
+    expect(valid.sent).toHaveLength(2);
+    expect(hub.connectionCount()).toBe(1);
+  });
+
+  it("채팅 묶음도 만료된 세션의 소켓에는 보내지 않는다(K9)", () => {
+    let now = 1_000;
+    hub = createRealtimeHub({ flushIntervalMs: 60_000, clock: () => now });
+    const expiring = fakeSocket();
+    hub.attach(expiring, session("s1", 2_000));
+    hub.pushChatLine({ senderNickname: "n", content: "채팅", messageTime: 1, decision: "pass" });
+    now = 2_001;
+    hub.flush();
+    expect(expiring.sent).toEqual([{ type: "session_ended", reason: SESSION_EXPIRED_REASON }]);
+    expect(expiring.closedWith).toBe(4001);
   });
 });

@@ -58,6 +58,23 @@ describe("TokenManager", () => {
     expect(listener).toHaveBeenCalledWith(true);
   });
 
+  it("갱신 응답이 2xx인데 해석하지 못하면(wasDelivered) 401처럼 바로 잠그고 알리며, 같은 refresh token을 다시 쓰지 않는다(K7)", async () => {
+    const listener = vi.fn();
+    const reportError = vi.fn();
+    const delivered = new ChzzkApiError(502, "UNEXPECTED_RESPONSE: JSON이 아닌 응답", "/auth/v1/token", { wasDelivered: true });
+    const refreshToken = vi.fn(async (): Promise<TokenSet> => { throw delivered; });
+    const manager = createTokenManager({ store: connectedStore(TWO_HOURS - 1), api: createFakeApi({ refreshToken }), clock: () => NOW, reportError });
+    manager.onLockChange(listener);
+    const error = await manager.getAccessToken().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(WriteLockedError);
+    expect((error as Error).message).toMatch(/다시 연결/);
+    expect(manager.isWriteLocked()).toBe(true);
+    expect(listener).toHaveBeenCalledWith(true);
+    expect(reportError).toHaveBeenCalledWith(expect.any(String), delivered);
+    await expect(manager.getAccessToken()).rejects.toBeInstanceOf(WriteLockedError);
+    expect(refreshToken).toHaveBeenCalledTimes(1);
+  });
+
   it("새 토큰 저장에 실패하면 쓰기를 잠근다(옛 refresh token은 이미 무효)", async () => {
     const store = connectedStore(0);
     store.saveCredential = () => { throw new Error("disk full"); };
@@ -115,6 +132,36 @@ describe("TokenManager", () => {
     expect(manager.isWriteLocked()).toBe(true);
     expect(store.loadCredential()).toBeNull();
     await expect(manager.getAccessToken()).rejects.toBeInstanceOf(WriteLockedError);
+  });
+
+  it("연결 해제는 저장된 연결을 지우기 전에 쓰기를 잠그고, 잠금 알림은 지운 뒤에 보낸다(K6)", () => {
+    const store = connectedStore(TWO_HOURS * 3);
+    const manager = createTokenManager({ store, api: createFakeApi({}), clock: () => NOW });
+    const clearConnection = store.clearConnection;
+    let wasLockedDuringClear: boolean | null = null;
+    store.clearConnection = () => {
+      wasLockedDuringClear = manager.isWriteLocked();
+      clearConnection();
+    };
+    const credentialsAtNotify: unknown[] = [];
+    manager.onLockChange(() => credentialsAtNotify.push(store.loadCredential()));
+    manager.disconnect();
+    expect(wasLockedDuringClear).toBe(true);
+    expect(credentialsAtNotify).toEqual([null]);
+  });
+
+  it("저장된 연결을 지우다 실패해도 쓰기는 잠긴 채로 남고, 오류는 호출자에게 전해진다(K6)", async () => {
+    const store = connectedStore(TWO_HOURS * 3);
+    store.clearConnection = () => { throw new Error("SQLITE_BUSY: database is locked"); };
+    const listener = vi.fn();
+    const manager = createTokenManager({ store, api: createFakeApi({}), clock: () => NOW });
+    manager.onLockChange(listener);
+    expect(() => manager.disconnect()).toThrow(/SQLITE_BUSY/);
+    expect(manager.isWriteLocked()).toBe(true);
+    expect(listener).toHaveBeenCalledWith(true);
+    await expect(manager.getAccessToken()).rejects.toBeInstanceOf(WriteLockedError);
+    // forceRefresh는 잠겼을 때 동기로 던지므로 Promise로 감싸 같은 방식으로 확인한다.
+    await expect(Promise.resolve().then(() => manager.forceRefresh())).rejects.toBeInstanceOf(WriteLockedError);
   });
 
   it("잠긴 뒤에는 갱신을 다시 부르지 않고 WriteLockedError를 던진다", async () => {

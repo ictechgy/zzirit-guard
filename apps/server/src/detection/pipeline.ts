@@ -24,6 +24,11 @@ export interface DetectionResult {
 /** 판정 파이프라인. */
 export interface DetectionPipeline {
   evaluate(event: ChatEvent): DetectionResult;
+  /**
+   * 도배·중복 감지기가 기억하는 채팅 중 기한이 지난 것을 지운다(K16). 앱이 1분마다 부른다.
+   * @param now 지금 시각(ms, 채팅 수신 시각과 같은 시계)
+   */
+  pruneExpired(now: number): void;
 }
 
 /** 파이프라인이 쓰는 구성 요소. */
@@ -56,7 +61,14 @@ interface RuleContext {
 
 /** 파이프라인을 만든다. */
 export function createDetectionPipeline(deps: DetectionPipelineDeps): DetectionPipeline {
-  return { evaluate: (event) => evaluate(deps, event) };
+  return {
+    evaluate: (event) => evaluate(deps, event),
+    pruneExpired(now) {
+      deps.groupFlood.pruneExpired(now);
+      deps.personalFlood.pruneExpired(now);
+      deps.duplicates.pruneExpired(now);
+    },
+  };
 }
 
 /** 관측(도배·중복은 모든 메시지를 세야 한다) → 규칙 순서대로 판정 → 권한자 예외 적용. */
