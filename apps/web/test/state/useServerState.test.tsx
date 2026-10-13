@@ -73,6 +73,17 @@ describe("useServerState", () => {
     expect(fetcher.count("/api/status")).toBe(2);
   });
 
+  it("받은 실시간 status 이벤트 수를 센다(다른 이벤트는 세지 않는다)", async () => {
+    vi.stubGlobal("WebSocket", ControlledSocket);
+    installHeldFetch();
+    const { result } = renderHook(() => useServerState());
+    await waitFor(() => expect(ControlledSocket.sockets).toHaveLength(1));
+    expect(result.current.statusEventCount()).toBe(0);
+    act(() => ControlledSocket.sockets[0]?.deliverStatus());
+    act(() => ControlledSocket.sockets[0]?.onmessage?.({ data: JSON.stringify({ type: "chat_batch", lines: [] }) }));
+    expect(result.current.statusEventCount()).toBe(1);
+  });
+
   it("조회 중 reload를 여러 번 눌러도 한 번 더만 읽는다", async () => {
     vi.stubGlobal("WebSocket", ControlledSocket);
     const fetcher = installHeldFetch();
@@ -138,5 +149,67 @@ describe("useServerState", () => {
     act(() => result.current.reload());
     expect(calls).toHaveLength(callsAfterEnd);
     expect(ControlledSocket.sockets).toHaveLength(0);
+  });
+});
+
+describe("useServerState 멈춘 실시간을 손으로 다시 연결(4002 뒤)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * 티켓 응답을 차례로 정하는 fetch. 정해 둔 것을 다 쓰면 정상 티켓을 준다. 조회는 모두 붙잡아 둔다(이 테스트는 실시간만 본다).
+   * @param tickets 티켓 응답을 만드는 함수들(앞에서부터 쓴다)
+   */
+  function installTicketFetch(tickets: Array<() => Response>) {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (`${init?.method ?? "GET"} ${String(input)}` !== "POST /api/ws-ticket") return new Promise<Response>(() => undefined);
+      return Promise.resolve((tickets.shift() ?? (() => json(200, { ticket: "t" })))());
+    }));
+  }
+
+  /** 첫 소켓을 연결한 뒤 같은 세션의 새 연결에 밀려(4002) 멈추게 하고, 손으로 다시 연결한다. */
+  async function replaceThenReconnect() {
+    const hook = renderHook(() => useServerState());
+    await waitFor(() => expect(ControlledSocket.sockets).toHaveLength(1));
+    act(() => ControlledSocket.sockets[0]?.deliverStatus());
+    act(() => ControlledSocket.sockets[0]?.onclose?.({ code: 4002 }));
+    expect(hook.result.current.state.realtimeReplaced).toBe(true);
+    act(() => hook.result.current.reconnect());
+    expect(hook.result.current.state).toMatchObject({ realtimeReplaced: false, realtimeRejected: false });
+    return hook;
+  }
+
+  it("다시 연결 뒤 티켓 429로 기다리는 동안에는 멈춤 안내가 다시 뜨지 않는다", async () => {
+    vi.stubGlobal("WebSocket", ControlledSocket);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    installTicketFetch([() => json(200, { ticket: "t1" }), () => json(429, { error: "rate_limited", message: "요청이 너무 많습니다." })]);
+    const { result } = await replaceThenReconnect();
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    expect(result.current.state).toMatchObject({ realtimeConnected: false, realtimeReplaced: false, realtimeRejected: false });
+  });
+
+  it("다시 연결 뒤 1013으로 닫혀 백오프하는 동안에도 멈춤 안내가 다시 뜨지 않는다", async () => {
+    vi.stubGlobal("WebSocket", ControlledSocket);
+    installTicketFetch([]);
+    const { result } = await replaceThenReconnect();
+    await waitFor(() => expect(ControlledSocket.sockets).toHaveLength(2));
+    act(() => ControlledSocket.sockets[1]?.onclose?.({ code: 1013 }));
+    expect(result.current.state).toMatchObject({ realtimeConnected: false, realtimeReplaced: false, realtimeRejected: false });
+  });
+
+  it("다시 연결 뒤 4003이 거듭되면 거절 안내만 남는다(밀림 안내는 함께 뜨지 않는다)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal("WebSocket", ControlledSocket);
+    installTicketFetch([]);
+    const { result } = await replaceThenReconnect();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await waitFor(() => expect(ControlledSocket.sockets).toHaveLength(2 + attempt));
+      act(() => ControlledSocket.sockets[1 + attempt]?.onclose?.({ code: 4003 }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+    }
+    expect(result.current.state).toMatchObject({ realtimeRejected: true, realtimeReplaced: false });
   });
 });

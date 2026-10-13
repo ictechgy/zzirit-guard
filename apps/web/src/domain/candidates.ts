@@ -53,6 +53,13 @@ export interface CandidateSections {
  */
 export const MAX_LISTED_ROWS = 50;
 
+/**
+ * 처리해야 하는 목록(도움 필요·후보 묶음, 숨김 대기·실패)을 처음 그리고 '더 보기'마다 더 그리는 수(50, K21).
+ * 왜: 넓은 규칙에 서로 다른 사람이 초당 수십 명씩 걸리면 카드 수천 장을 한 번에 그려 휴대폰이 멈춘다. 그때가 자동 숨김 끄기가 가장 급한 때다.
+ * 처리해야 하는 목록이라 섀도처럼 잘라 버리지 않고, '더 보기'로 나머지를 열 수 있게 둔다.
+ */
+export const ACTIONABLE_PAGE_SIZE = 50;
+
 /** 판정 목록을 화면 구역으로 나눈다. now보다 CANDIDATE_WINDOW_MS 넘게 지난 판정은 뺀다. */
 export function buildSections(verdicts: readonly VerdictDto[], now: number): CandidateSections {
   const recent = verdicts.filter((verdict) => verdict.createdAt >= now - CANDIDATE_WINDOW_MS);

@@ -10,8 +10,19 @@ export interface ServerConnection {
   state: ServerState;
   /** 상태·후보를 서버에서 다시 읽는다('다시 불러오기', 409 already_handled). */
   reload(): void;
-  /** 거절로 멈춘 실시간 연결을 다시 시작한다(R-6). */
+  /** 거절(R-6)이나 다른 창에 밀려(4002) 멈춘 실시간 연결을 다시 시작한다. 시작하자마자 멈춤 표시를 지운다(reconnect_started). */
   reconnect(): void;
+  /**
+   * 자동 숨김 스위치 요청의 응답 값을 바로 상태에 넣는다(K17). 렌더마다 같은 함수다.
+   * 왜: 실시간 연결이 끊긴 동안에는 status 방송이 오지 않아, 이것이 없으면 스위치가 옛 값에 머문다.
+   * @param enabled 서버가 응답한 스위치 값
+   */
+  applyAutoHide(enabled: boolean): void;
+  /**
+   * 지금까지 받은 실시간 status 이벤트 수. 렌더마다 같은 함수이고, 이벤트를 받는 즉시 늘어난다.
+   * 왜: 스위치 요청을 보낸 뒤 status가 왔으면 그것이 응답보다 새 서버 값이라, 늦게 온 응답으로 덮으면 안 된다(MainScreen).
+   */
+  statusEventCount(): number;
 }
 
 /** 상태·후보 조회기. 한 번에 하나만 돌고, 도는 중에 다시 요청되면 끝난 뒤 한 번 더 읽는다. */
@@ -73,8 +84,9 @@ function createLivenessTracker(): LivenessTracker {
 export function useServerState(): ServerConnection {
   const [state, dispatch] = useReducer(serverReducer, initialServerState);
   const controls = useRef<ServerControls | null>(null);
+  const statusEvents = useRef({ count: 0 });
   useEffect(() => {
-    const created = createControls(dispatch);
+    const created = createControls(dispatch, statusEvents.current);
     controls.current = created;
     created.loader.request();
     created.connection.start();
@@ -85,17 +97,25 @@ export function useServerState(): ServerConnection {
     };
   }, []);
   const reload = useCallback(() => controls.current?.loader.request(), []);
-  const reconnect = useCallback(() => controls.current?.connection.start(), []);
-  return { state, reload, reconnect };
+  // 왜 먼저 알리나: 연결은 첫 메시지를 받아야 "연결됨"이 되므로, 그 전(티켓 429·1013 백오프 중)에 멈춤 안내가 남지 않게 바로 지운다.
+  const reconnect = useCallback(() => {
+    if (!controls.current) return;
+    dispatch({ type: "reconnect_started" });
+    controls.current.connection.start();
+  }, []);
+  const applyAutoHide = useCallback((enabled: boolean) => dispatch({ type: "auto_hide_applied", enabled }), []);
+  const statusEventCount = useCallback(() => statusEvents.current.count, []);
+  return { state, reload, reconnect, applyAutoHide, statusEventCount };
 }
 
 /**
  * 조회기와 실시간 연결을 만든다. 모든 콜백은 이 묶음이 살아 있을 때만 상태를 바꾼다.
  * 왜 isMounted 깃발인가: stop()이 정리 중에 onConnectionChange(false)를 동기로 부르는데, 그때는 이미 화면이 사라졌거나 다음 effect가 새 묶음을 만든 뒤라 옛 묶음이 상태를 건드리면 안 된다.
  * @param dispatch 리듀서 디스패치
+ * @param statusEvents 받은 실시간 status 이벤트 수. 받는 즉시 올린다(렌더를 기다리지 않아 응답과 순서를 정확히 가린다).
  * @returns 조회기·연결·닫기 함수
  */
-function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
+function createControls(dispatch: Dispatch<ServerAction>, statusEvents: { count: number }): ServerControls {
   let isMounted = true;
   let wasConnected = false;
   const liveness = createLivenessTracker();
@@ -112,6 +132,7 @@ function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
   const connection = new RealtimeConnection({
     onEvent: (event) => {
       liveness.markAlive();
+      if (event.type === "status") statusEvents.count += 1;
       guarded({ type: "event", event });
     },
     onConnectionChange: (connected) => {
@@ -124,6 +145,7 @@ function createControls(dispatch: Dispatch<ServerAction>): ServerControls {
     },
     onSessionEnded: endSession,
     onRejected: () => guarded({ type: "realtime_rejected" }),
+    onReplaced: () => guarded({ type: "realtime_replaced" }),
   });
   // 연결 중이 아니면(재연결 대기·거절로 멈춤·세션 종료) 건드리지 않는다: 그때는 RealtimeConnection이 스스로 다시 연결하거나 멈춰 있어야 한다.
   const restartIfStale = () => {

@@ -20,6 +20,22 @@ function findInvalidField(draft: SettingsDto): string | null {
   return field ? `${field.label}은(는) ${field.min}에서 ${field.max} 사이의 정수여야 합니다.` : null;
 }
 
+/** 바꾼 항목이 없을 때의 안내. 보내지 않는다(빈 저장도 서버 감사 기록에 남는다). */
+const NO_CHANGES_MESSAGE = "바꾼 값이 없습니다.";
+
+/**
+ * 서버 값(baseline)과 다른 항목만 모은다(K19).
+ * 왜: 입력 전체를 보내면 화면을 연 뒤 다른 매니저가 바꾼 항목(예: 원문 보관 기간)을 이 화면의 옛 값으로 조용히 되돌린다.
+ * 서버(PUT /api/settings)는 보낸 항목만 바꾼다.
+ * @param baseline 서버에서 마지막으로 받은 값
+ * @param draft 지금 입력
+ */
+function changedFields(baseline: SettingsDto, draft: SettingsDto): Partial<SettingsDto> {
+  const patch: Partial<SettingsDto> = {};
+  for (const { key } of FIELDS) if (draft[key] !== baseline[key]) patch[key] = draft[key];
+  return patch;
+}
+
 /** 한도·보관 기간 속성. */
 export interface LimitsSectionProps {
   /** 로그인한 매니저(edit_rules 권한으로 수정 여부를 정한다). */
@@ -31,19 +47,28 @@ export interface LimitsSectionProps {
 /**
  * 한도·보관 기간 설정(스펙 5.5·9장). 수정 권한(edit_rules)이 없으면 값만 보인다.
  * 다시 읽으면 저장하지 않은 입력은 서버 값으로 바뀐다(탭을 떠났다 돌아온 경우라 최신 값이 낫다).
+ * 저장은 바꾼 항목만 보내고, 성공하면 응답(서버의 지금 값)을 새 기준과 입력으로 삼는다(K19).
  */
 export function LimitsSection({ me, refreshKey = 0 }: LimitsSectionProps) {
   const settings = useApiResource<SettingsDto>("/api/settings", null, refreshKey);
+  // 서버에서 마지막으로 받은 값. 바꾼 항목을 가려내는 기준이다(K19).
+  const [baseline, setBaseline] = useState<SettingsDto | null>(null);
   const [draft, setDraft] = useState<SettingsDto | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const busy = useBusyTask();
   const canEdit = me.permissions.includes("edit_rules");
-  useEffect(() => setDraft(settings.data), [settings.data]);
+  const adopt = (latest: SettingsDto | null) => {
+    setBaseline(latest);
+    setDraft(latest);
+  };
+  useEffect(() => adopt(settings.data), [settings.data]);
   const save = () => {
-    if (!draft) return;
+    if (!draft || !baseline) return;
     const invalid = findInvalidField(draft);
     if (invalid) return setMessage(invalid);
-    busy.run(() => apiSend<SettingsDto>("PUT", "/api/settings", draft)).then(
+    const patch = changedFields(baseline, draft);
+    if (Object.keys(patch).length === 0) return setMessage(NO_CHANGES_MESSAGE);
+    busy.run(() => apiSend<SettingsDto>("PUT", "/api/settings", patch).then(adopt)).then(
       (started) => started && setMessage("저장했습니다."),
       (error: unknown) => setMessage(describeApiError(error)),
     );

@@ -41,3 +41,19 @@ export function ActionToast({ feedback, onDismiss }: ActionToastProps) {
     </div>
   );
 }
+
+/** UnknownOutcomeToasts 속성. */
+export interface UnknownOutcomeToastsProps {
+  /** 남겨 둔 알림 문구들(useUnknownOutcomeAlerts). */
+  messages: readonly string[];
+  /** 문구 하나를 닫는다. */
+  onDismiss(message: string): void;
+}
+
+/**
+ * 결과를 알 수 없는 조치의 알림들(K20). 오류 알림과 같은 모양이고, 매니저가 닫기 전에는 사라지지 않는다.
+ * 작업 결과 알림(ActionToast 하나)과 따로 그려, 다른 조치의 결과가 이 알림을 지우거나 덮지 못한다.
+ */
+export function UnknownOutcomeToasts({ messages, onDismiss }: UnknownOutcomeToastsProps) {
+  return <>{messages.map((message) => <ActionToast key={message} feedback={{ kind: "error", message }} onDismiss={() => onDismiss(message)} />)}</>;
+}

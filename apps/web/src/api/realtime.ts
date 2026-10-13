@@ -1,5 +1,5 @@
 import type { RealtimeEvent } from "@zzirit-guard/shared";
-import { API_BASE, apiSend, requiresSignIn } from "./client";
+import { API_BASE, ApiError, apiSend, requiresSignIn } from "./client";
 
 /** 연결에 필요한 WebSocket 기능. 테스트에서 가짜로 바꾼다. onopen은 쓰지 않는다(연결됨은 첫 메시지로 판단, RealtimeOptions 참고). */
 export interface SocketLike {
@@ -27,6 +27,8 @@ export interface RealtimeOptions {
   onSessionEnded(reason: string): void;
   /** 4003 거절이 MAX_CONSECUTIVE_REJECTIONS번 이어져 다시 연결을 멈췄을 때. */
   onRejected(): void;
+  /** 같은 세션의 새 연결에 밀려(4002) 다시 연결을 멈췄을 때. 매니저가 '다시 연결'로 start()를 부를 때까지 멈춰 있다. */
+  onReplaced(): void;
   /** 티켓 발급(기본: POST /api/ws-ticket). */
   issueTicket?: () => Promise<string>;
   /** 소켓 열기(기본: 브라우저 WebSocket). */
@@ -39,6 +41,11 @@ export interface RealtimeOptions {
 
 /** 서버가 세션을 끝낼 때 쓰는 닫기 코드(hub.ts). */
 const SESSION_ENDED_CLOSE_CODE = 4001;
+/**
+ * 같은 세션의 새 연결에 밀려 닫힐 때 서버가 쓰는 닫기 코드(세션당 소켓 3개를 넘으면 가장 오래된 것을 닫는다).
+ * 왜 다시 연결하지 않나: 자동으로 다시 열면 같은 세션의 창들이 서로를 끊으며 끝없이 돈다.
+ */
+const REPLACED_CLOSE_CODE = 4002;
 /** 티켓이 틀렸거나 출처가 다를 때 서버가 쓰는 닫기 코드(server.ts). */
 const REJECTED_CLOSE_CODE = 4003;
 /**
@@ -53,6 +60,11 @@ const BACKOFF_MAX_MS = 30_000;
 
 /** 백오프 지터 폭(±20%). 여러 기기가 서버 재시작 직후 한꺼번에 몰리지 않게 흩뜨린다. */
 const BACKOFF_JITTER_RATIO = 0.2;
+/**
+ * 티켓 발급이 한도 초과(429)일 때 다시 받기까지 기다리는 최소 시간(10초).
+ * 왜: 서버는 세션당 1분에 티켓 10개만 준다. 1초부터 시작하는 백오프로 곧바로 다시 받으면 거듭 429만 받는다.
+ */
+const RATE_LIMITED_RETRY_MIN_MS = 10_000;
 
 /**
  * n번째 재연결 대기 시간(지터 없음).
@@ -72,6 +84,14 @@ export function reconnectDelayMs(attempt: number): number {
  */
 export function websocketUrl(ticket: string, base: string = API_BASE, origin: string = window.location.origin): string {
   return `${(base || origin).replace(/^http/, "ws")}/ws?ticket=${encodeURIComponent(ticket)}`;
+}
+
+/**
+ * 티켓 발급 한도 초과(429)인지 본다. 세션은 살아 있으므로 로그아웃하지 않고, 4003 거절로도 세지 않는다.
+ * @param error 티켓 발급이 던진 오류
+ */
+function isRateLimited(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 429;
 }
 
 /** 기본 티켓 발급. */
@@ -141,7 +161,7 @@ export class RealtimeConnection {
     this.options.onConnectionChange(false);
   }
 
-  /** 티켓을 받아 소켓을 연다. 로그인이 필요한 오류(401·no_channel)면 세션 종료, 그 밖의 실패는 재연결. */
+  /** 티켓을 받아 소켓을 연다. 로그인이 필요한 오류(401·no_channel)면 세션 종료, 그 밖의 실패는 재연결(한도 초과 429는 10초 이상 뒤). */
   private async connect(): Promise<void> {
     const generation = this.generation;
     try {
@@ -152,7 +172,7 @@ export class RealtimeConnection {
       if (generation !== this.generation) return;
       if (requiresSignIn(error)) return this.endSession(error.message);
       console.warn("실시간 연결 티켓 발급 실패, 다시 시도합니다", error);
-      this.scheduleReconnect();
+      this.scheduleReconnect(isRateLimited(error) ? RATE_LIMITED_RETRY_MIN_MS : 0);
     }
   }
 
@@ -194,13 +214,14 @@ export class RealtimeConnection {
     else this.options.onEvent(event);
   }
 
-  /** 닫힘 처리: 4001이면 세션 종료, 4003이 이어지면 멈춤, 그 밖에는 백오프 재연결. */
+  /** 닫힘 처리: 4001이면 세션 종료, 4002면 멈춤(다른 창에 밀림), 4003이 이어지면 멈춤, 그 밖에는(1013 서버 혼잡 포함) 백오프 재연결. */
   private handleClose(socket: SocketLike, code: number): void {
     if (this.socket !== socket) return;
     this.socket = null;
     this.options.onConnectionChange(false);
     if (this.stopped) return;
     if (code === SESSION_ENDED_CLOSE_CODE) return this.endSession("세션이 종료되었습니다. 다시 로그인하세요.");
+    if (code === REPLACED_CLOSE_CODE) return this.yieldToNewerConnection();
     if (code === REJECTED_CLOSE_CODE && ++this.rejections >= MAX_CONSECUTIVE_REJECTIONS) return this.giveUp();
     this.scheduleReconnect();
   }
@@ -218,10 +239,19 @@ export class RealtimeConnection {
     this.options.onRejected();
   }
 
-  /** 재연결 예약. */
-  private scheduleReconnect(): void {
+  /** 같은 세션의 새 연결에 밀려(4002) 멈추고 알린다. 매니저가 '다시 연결'을 누르면 start()로 다시 연다. */
+  private yieldToNewerConnection(): void {
+    this.stop();
+    this.options.onReplaced();
+  }
+
+  /**
+   * 재연결 예약.
+   * @param minimumDelayMs 백오프가 이보다 짧으면 이만큼 기다린다(티켓 한도 초과 때 쓴다)
+   */
+  private scheduleReconnect(minimumDelayMs = 0): void {
     const jitter = 1 + BACKOFF_JITTER_RATIO * (this.random() * 2 - 1);
-    const delay = Math.min(Math.round(reconnectDelayMs(this.attempt) * jitter), BACKOFF_MAX_MS);
+    const delay = Math.max(Math.min(Math.round(reconnectDelayMs(this.attempt) * jitter), BACKOFF_MAX_MS), minimumDelayMs);
     const generation = this.generation;
     this.attempt += 1;
     this.cancelReconnect = this.schedule(() => {

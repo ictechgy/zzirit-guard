@@ -14,8 +14,8 @@ const chatManager: MeDto = { channelId: "m1", channelName: "매니저1", role: "
 const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
 /** 기준 시각. */
 const NOW = 1_000_000;
-/** 시스템 꺼짐 안내를 띄우지 않는 속성(F8 안내는 MainScreen 테스트가 다룬다). */
-const noNotice = { systemDisableNotice: null, onDismissSystemDisableNotice: () => undefined };
+/** 시스템 꺼짐 안내를 띄우지 않고 실시간도 멈추지 않은 속성(F8 안내·실시간 멈춤은 MainScreen 테스트가 다룬다). */
+const noNotice = { systemDisableNotice: null, onDismissSystemDisableNotice: () => undefined, realtimePaused: false };
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
@@ -503,5 +503,132 @@ describe("CandidatesScreen 시간 초과 뒤 다시 누르기 막기(B19-7)", ()
     await userEvent.click(screen.getByRole("button", { name: /자동 숨김: 켜짐/ }));
     await waitFor(() => expect((screen.getByRole("button", { name: /자동 숨김: 켜짐/ }) as HTMLButtonElement).disabled).toBe(false));
     expect(screen.getByRole("alert").textContent).not.toMatch(/다시 누르지 마세요/);
+  });
+});
+
+describe("CandidatesScreen 서버의 새 409 처리(K1·K2와 맞춤)", () => {
+  /** 실패하는 동작을 숨기기 또는 임시 제한 자리에 넣는다. */
+  type Placement = (action: () => Promise<string | null>) => Partial<CandidateActions>;
+  const asHide: Placement = (action) => ({ hide: action });
+  const asRestrict: Placement = (action) => ({ temporaryRestrict: action });
+
+  it.each([
+    ["숨기기", asHide, /^악플러의 .+ 메시지 숨기기$/, "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요."],
+    ["임시 제한", asRestrict, /^악플러 임시 제한$/, "임시 제한 결과를 알 수 없습니다."],
+  ])("%s의 409 result_unknown은 서버 문구에 '다시 누르지 마세요'를 붙여 알리고 60초 동안 다시 보내지 않는다", async (_label, place, name, message) => {
+    vi.useFakeTimers();
+    const action = vi.fn(async (): Promise<string | null> => { throw new ApiError(409, "result_unknown", message); });
+    renderScreen([verdict(1)], fakeActions(place(action)));
+    const button = () => screen.getByRole("button", { name }) as HTMLButtonElement;
+    fireEvent.click(button());
+    await act(async () => undefined);
+    expect(screen.getByRole("alert").querySelector("p")?.textContent).toBe(`${message} 다시 누르지 마세요.`);
+    act(() => vi.advanceTimersByTime(TIMEOUT_LOCK_MS - 1));
+    fireEvent.click(button());
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it("임시 제한의 409 already_handled(진행 중·방금 제한)는 빨간 오류가 아니라 안내로 알리고 목록을 다시 읽는다", async () => {
+    const temporaryRestrict = vi.fn(async (): Promise<string | null> => { throw new ApiError(409, "already_handled", "방금 제한했습니다."); });
+    const { onReload } = renderScreen([verdict(1)], fakeActions({ temporaryRestrict }));
+    await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("이미 처리된 항목입니다. 목록을 다시 불러왔습니다."));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CandidatesScreen 결과를 알 수 없는 조치 알림 유지(K20)", () => {
+  /** 시간 초과 오류. */
+  const timeoutError = () => new ApiError(0, "timeout", "응답이 늦습니다. 결과는 잠시 뒤 목록에 반영됩니다.");
+  /** 악플러의 숨기기 버튼과 다른사람의 무시 버튼이 있는 화면. */
+  const twoSenders = () => [verdict(1), verdict(2, { senderChannelId: "other", senderNickname: "다른사람" })];
+
+  it("시간 초과 알림은 다른 조치를 시작하거나 성공해도 지워지지 않고, 닫아야 사라진다", async () => {
+    const hide = vi.fn(async (): Promise<string | null> => { throw timeoutError(); });
+    renderScreen(twoSenders(), fakeActions({ hide, ignore: async () => "무시했습니다." }));
+    await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/응답이 늦습니다.*다시 누르지 마세요/));
+    await userEvent.click(screen.getByRole("button", { name: /^다른사람의 .+ 메시지 무시$/ }));
+    await waitFor(() => expect(actionToast()?.textContent).toBe("무시했습니다."));
+    expect(screen.getByRole("alert").textContent).toMatch(/응답이 늦습니다.*다시 누르지 마세요/);
+    await userEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "작업 결과 닫기" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("결과를 알 수 없음 알림은 다른 조치의 실패 알림에 덮이지 않는다", async () => {
+    const hide = vi.fn(async (): Promise<string | null> => { throw new ApiError(502, "result_unknown", "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다."); });
+    const ignore = vi.fn(async (): Promise<string | null> => { throw new ApiError(502, "chzzk_failed", "치지직 서버 오류로 실패했습니다."); });
+    renderScreen(twoSenders(), fakeActions({ hide, ignore }));
+    await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    await userEvent.click(screen.getByRole("button", { name: /^다른사람의 .+ 메시지 무시$/ }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    const texts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
+    expect(texts.some((text) => /처리 결과를 알 수 없습니다.*다시 누르지 마세요/.test(text))).toBe(true);
+    expect(texts.some((text) => /치지직 서버 오류로 실패했습니다/.test(text))).toBe(true);
+  });
+
+  it("같은 문구의 알림은 하나만 남긴다(실패가 몰려도 알림이 화면을 덮지 않게)", async () => {
+    const hide = vi.fn(async (_target: VerdictDto): Promise<string | null> => { throw timeoutError(); });
+    renderScreen([verdict(1), verdict(2)], fakeActions({ hide }));
+    const [first, second] = screen.getAllByRole("button", { name: /^악플러의 .+ 메시지 숨기기$/ }) as HTMLButtonElement[];
+    await userEvent.click(first as HTMLButtonElement);
+    await userEvent.click(second as HTMLButtonElement);
+    await waitFor(() => expect(hide).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+});
+
+describe("CandidatesScreen 처리할 목록 나눠 그리기(K21)", () => {
+  it("후보 묶음은 처음 50명만 그리고 '더 보기 (N명)'을 누를 때마다 50명씩 더 그리며, 전체 수는 제목에 보인다", async () => {
+    const many = Array.from({ length: 120 }, (_unused, index) => verdict(index + 1, { senderChannelId: `s${index}`, senderNickname: `시청자${index}` }));
+    renderScreen(many);
+    const section = screen.getByRole("heading", { name: "후보 120명" }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("article")).toHaveLength(50);
+    await userEvent.click(within(section).getByRole("button", { name: "더 보기 (70명)" }));
+    expect(within(section).getAllByRole("article")).toHaveLength(100);
+    await userEvent.click(within(section).getByRole("button", { name: "더 보기 (20명)" }));
+    expect(within(section).getAllByRole("article")).toHaveLength(120);
+    expect(within(section).queryByRole("button", { name: /명\)$/ })).toBeNull();
+  });
+
+  it("도움 필요 묶음도 처음 50명만 그린다", () => {
+    const many = Array.from({ length: 51 }, (_unused, index) => verdict(index + 1, { decision: "needs_care", senderChannelId: `c${index}`, senderNickname: `도움${index}` }));
+    renderScreen(many);
+    const section = screen.getByRole("heading", { name: /^도움 필요/ }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("article")).toHaveLength(50);
+    expect(within(section).getByRole("button", { name: "더 보기 (1명)" })).toBeTruthy();
+  });
+
+  it("숨김 대기·실패도 처음 50건만 그리고 '더 보기 (N건)'으로 더 그린다", async () => {
+    const pending = Array.from({ length: 60 }, (_unused, index) => verdict(index + 1, { decision: "auto_hide" }));
+    renderScreen(pending);
+    const section = screen.getByRole("heading", { name: /숨김 대기·실패\(60건\)/ }).closest("section") as HTMLElement;
+    expect(within(section).getAllByRole("listitem")).toHaveLength(50);
+    await userEvent.click(within(section).getByRole("button", { name: "더 보기 (10건)" }));
+    expect(within(section).getAllByRole("listitem")).toHaveLength(60);
+  });
+});
+
+describe("CandidatesScreen 같은 초 메시지의 버튼 이름(K22)", () => {
+  /** 같은 초(화면 시각 기준)에 보낸 두 메시지의 시각. */
+  const sameSecond = formatClockTime(NOW - 500);
+
+  it("같은 사람이 같은 초에 보낸 메시지가 여럿이면 순번을 붙여 버튼 이름이 서로 다르다", () => {
+    renderScreen([verdict(1, { createdAt: NOW - 500 }), verdict(2, { createdAt: NOW - 600 })]);
+    expect(formatClockTime(NOW - 600)).toBe(sameSecond);
+    const hideNames = screen.getAllByRole("button", { name: /메시지 숨기기$/ }).map((button) => button.getAttribute("aria-label"));
+    expect(hideNames).toEqual([`악플러의 ${sameSecond} 1번째 메시지 숨기기`, `악플러의 ${sameSecond} 2번째 메시지 숨기기`]);
+    const ignoreNames = screen.getAllByRole("button", { name: /메시지 무시$/ }).map((button) => button.getAttribute("aria-label"));
+    expect(new Set(ignoreNames).size).toBe(2);
+  });
+
+  it("구역이 달라도(후보와 숨김 대기) 같은 사람·같은 초면 숨기기 버튼 이름이 겹치지 않는다", async () => {
+    const { actions } = renderScreen([verdict(1, { createdAt: NOW - 500 }), verdict(2, { createdAt: NOW - 600, decision: "auto_hide" })]);
+    const names = screen.getAllByRole("button", { name: /메시지 숨기기$/ }).map((button) => button.getAttribute("aria-label"));
+    expect(new Set(names).size).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: `악플러의 ${sameSecond} 2번째 메시지 숨기기` }));
+    expect(actions.hide).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
   });
 });
