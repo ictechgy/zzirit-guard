@@ -1,6 +1,7 @@
 import type { ManagerRole } from "@zzirit-guard/shared";
 import { vi } from "vitest";
 import { createAutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
+import { createSenderActionGuard } from "../../src/actions/senderActionGuard.js";
 import { createVerdictClaims } from "../../src/actions/verdictClaims.js";
 import type { ActionOutcome, Executor } from "../../src/actions/executor.js";
 import { openDatabase } from "../../src/db/database.js";
@@ -48,6 +49,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }),
     verdicts, auditLog, settings, clock,
     claims: createVerdictClaims(),
+    senderActions: createSenderActionGuard(clock),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ settings, auditLog, clock, logger: silentLogger }),
     rules: createRuleRepository(database, clock),

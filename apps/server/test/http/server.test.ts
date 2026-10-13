@@ -658,6 +658,76 @@ describe("판정 ID 검증", () => {
   });
 });
 
+describe("사람 단위 제재 중복 막기(K2)", () => {
+  /** 제재 종류별 주소와 역할(임시 제한은 채팅 운영자도, 활동 제한은 채널 관리자부터). */
+  const ROUTES = [
+    { kind: "temporary_restrict", url: "/api/senders/bad/temporary-restrict", role: "STREAMING_CHAT_MANAGER" },
+    { kind: "restrict", url: "/api/senders/bad/restrict", role: "STREAMING_CHANNEL_MANAGER" },
+  ] as const;
+
+  /** 결과를 알 수 없는 실행 결과. */
+  const UNKNOWN_OUTCOME = { ok: false as const, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true as const };
+
+  /** 시계를 직접 움직이는 하네스로 바꾼다. */
+  async function useControlledClock() {
+    await harness.close();
+    const clock = { now: 1_000_000 };
+    harness = await createHttpHarness({}, { clock: () => clock.now });
+    return clock;
+  }
+
+  /** 제재 요청을 보낸다. */
+  function send(route: (typeof ROUTES)[number], verdictId: number) {
+    return harness.app.inject({ method: "POST", url: route.url, headers: mutatingHeaders(harness.login(route.role)), payload: { verdictId } });
+  }
+
+  it.each(ROUTES)("$kind: 두 요청이 거의 동시에 와도 실행기에는 한 번만 보내고, 늦은 쪽은 409 already_handled", async (route) => {
+    const releases: Array<() => void> = [];
+    harness.submit.mockImplementation(() => new Promise((resolve) => void releases.push(() => resolve({ ok: true, note: null }))));
+    const verdict = insertCandidate();
+    const first = send(route, verdict.id);
+    const second = send(route, verdict.id);
+    await vi.waitFor(() => expect(harness.submit).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releases.forEach((finish) => finish());
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    expect(responses.find((response) => response.statusCode === 409)?.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(ROUTES)("$kind: 성공한 뒤 60초 안에 다시 보내면 409 already_handled이고, 60초가 지나면 다시 보낸다", async (route) => {
+    const clock = await useControlledClock();
+    const verdict = insertCandidate();
+    expect((await send(route, verdict.id)).statusCode).toBe(200);
+    clock.now += 59_999;
+    const repeated = await send(route, verdict.id);
+    expect(repeated.statusCode).toBe(409);
+    expect(repeated.json()).toMatchObject({ error: "already_handled", message: expect.stringMatching(/^방금 제한했습니다/) });
+    clock.now += 1;
+    expect((await send(route, verdict.id)).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(ROUTES)("$kind: 결과를 알 수 없으면 다음 요청은 실행기로 보내지 않고 409 result_unknown", async (route) => {
+    harness.submit.mockResolvedValueOnce(UNKNOWN_OUTCOME);
+    const verdict = insertCandidate();
+    expect((await send(route, verdict.id)).json()).toMatchObject({ error: "result_unknown" });
+    const repeated = await send(route, verdict.id);
+    expect(repeated.statusCode).toBe(409);
+    expect(repeated.json()).toEqual({ error: "result_unknown", message: "제한 결과를 알 수 없습니다. 치지직 채팅에서 제한됐는지 확인하고, 제한되지 않았다면 치지직 기본 도구로 제한하세요." });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("실패로 끝나면 막지 않아 바로 다시 보낼 수 있다", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 서버 오류로 실패했습니다." });
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(502);
+    expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("오류 가림과 정적 폴백", () => {
   it("5xx 예외의 메시지는 사용자에게 보이지 않는다", async () => {
     harness.services.getChatSettings = async () => { throw Object.assign(new Error("secret internals"), { statusCode: 503 }); };

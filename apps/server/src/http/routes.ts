@@ -3,7 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
 import type { Broadcaster } from "../actions/decisionHandler.js";
-import type { ActionOutcome, Actor, Executor } from "../actions/executor.js";
+import type { ActionOutcome, ActionRequest, Actor, Executor } from "../actions/executor.js";
+import { RESTRICT_REPEAT_BLOCK_MS, type SenderActionBlock, type SenderActionGuard, type SenderActionKind } from "../actions/senderActionGuard.js";
 import { settleHideClaim, type VerdictClaims } from "../actions/verdictClaims.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
 import type { RuleRepository } from "../detection/ruleRepository.js";
@@ -26,6 +27,8 @@ export interface RouteServices {
   verdicts: VerdictRepository;
   /** 숨김을 보내는 중인 판정 모음. 자동 숨김(decisionHandler)과 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
   claims: VerdictClaims;
+  /** 사람 단위 제재(임시 제한·활동 제한)가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). */
+  senderActions: SenderActionGuard;
   executor: Executor;
   autoHide: AutoHideSwitch;
   rules: RuleRepository;
@@ -93,6 +96,15 @@ const AUTO_HIDE_IN_PROGRESS_MESSAGE = "자동 숨김이 진행 중입니다. 잠
  * 왜 다시 보내지 않나: 치지직이 이미 숨겼을 수 있어, 서버가 다시 보내면 되돌릴 수 없는 숨김이 겹친다. 확인은 매니저가 치지직에서 한다.
  */
 const HIDE_RESULT_UNKNOWN_MESSAGE = "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요.";
+/** 다른 요청이 같은 사람에게 같은 제재를 보내는 중일 때의 안내 문구(K2). 화면이 다시 불러오게 already_handled 코드를 쓴다. */
+const RESTRICT_IN_PROGRESS_MESSAGE = "다른 요청이 이 사용자를 제한하는 중입니다. 잠시 뒤 '다시 불러오기'를 눌러 결과를 확인하세요.";
+/** 같은 사람에게 같은 제재가 방금 성공했을 때의 안내 문구(K2). 코드는 already_handled다. */
+const RESTRICT_RECENTLY_SUCCEEDED_MESSAGE = `방금 제한했습니다. 같은 제한은 ${RESTRICT_REPEAT_BLOCK_MS / 1000}초 뒤에 다시 보낼 수 있습니다.`;
+/**
+ * 앞선 제재의 결과를 알 수 없을 때 같은 제재를 다시 보내려 할 때의 안내 문구(K2). 코드는 result_unknown이다.
+ * 왜 다시 보내지 않나: 치지직이 이미 제한했을 수 있어, 확인은 매니저가 치지직에서 한다.
+ */
+const RESTRICT_RESULT_UNKNOWN_MESSAGE = "제한 결과를 알 수 없습니다. 치지직 채팅에서 제한됐는지 확인하고, 제한되지 않았다면 치지직 기본 도구로 제한하세요.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -252,7 +264,7 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
       const { senderChannelId } = senderParamSchema.parse(request.params);
       const verdict = findSenderVerdict(services, temporaryRestrictBodySchema.parse(request.body).verdictId, senderChannelId, channelId);
       const action = { kind: "temporary_restrict" as const, targetChannelId: senderChannelId, chatChannelId: verdict.chatChannelId, verdictId: verdict.id };
-      return sendOutcome(reply, await services.executor.submit(channelId, action, actorOf(manager)));
+      return sendOutcome(reply, await submitSenderAction(services, channelId, action, manager));
     }),
   );
   app.post(
@@ -260,7 +272,7 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
     guarded(services, "restrict", async ({ request, reply, manager, channelId }) => {
       const { senderChannelId } = senderParamSchema.parse(request.params);
       const verdictId = resolveVerdictId(services, restrictBodySchema.parse(request.body)?.verdictId, senderChannelId, channelId);
-      return sendOutcome(reply, await services.executor.submit(channelId, { kind: "restrict", targetChannelId: senderChannelId, verdictId }, actorOf(manager)));
+      return sendOutcome(reply, await submitSenderAction(services, channelId, { kind: "restrict", targetChannelId: senderChannelId, verdictId }, manager));
     }),
   );
   app.delete(
@@ -270,6 +282,36 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
       return sendOutcome(reply, await services.executor.submit(channelId, { kind: "unrestrict", targetChannelId: senderChannelId }, actorOf(manager)));
     }),
   );
+}
+
+/**
+ * 사람 단위 제재를 같은 사람에게 겹치지 않게 보낸다(K2). 보내는 중·방금 성공·결과 모름이면 실행기로 보내지 않고 409로 막는다.
+ * 확인과 표시(tryAcquire) 사이에 await가 없어 동시에 누른 요청 중 하나만 실행기로 간다. 끝나면 결과에 맞게 표시를 바꾼다(settle).
+ * @param services 막기 표와 실행기
+ * @param channelId 채널 ID
+ * @param action 보낼 제재(대상 사용자가 들어 있다)
+ * @param manager 요청한 매니저
+ */
+async function submitSenderAction(services: RouteServices, channelId: string, action: Extract<ActionRequest, { kind: SenderActionKind }>, manager: ManagerSession): Promise<ActionOutcome> {
+  const blocked = services.senderActions.tryAcquire(action.kind, action.targetChannelId);
+  if (blocked) throw senderActionConflict(blocked);
+  let outcome: ActionOutcome | null = null;
+  try {
+    outcome = await services.executor.submit(channelId, action, actorOf(manager));
+    return outcome;
+  } finally {
+    services.senderActions.settle(action.kind, action.targetChannelId, outcome);
+  }
+}
+
+/**
+ * 막힌 제재에 대한 409 오류를 만든다: 결과 모름은 result_unknown, 보내는 중·방금 성공은 already_handled(K2).
+ * @param block 막힌 이유
+ */
+function senderActionConflict(block: SenderActionBlock): RouteError {
+  if (block === "result_unknown") return new RouteError(409, "result_unknown", RESTRICT_RESULT_UNKNOWN_MESSAGE);
+  if (block === "recently_succeeded") return new RouteError(409, "already_handled", RESTRICT_RECENTLY_SUCCEEDED_MESSAGE);
+  return new RouteError(409, "already_handled", RESTRICT_IN_PROGRESS_MESSAGE);
 }
 
 /** 스위치·규칙·설정·채팅 설정·감사 기록·통계. */
