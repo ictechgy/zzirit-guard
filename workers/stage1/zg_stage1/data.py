@@ -209,6 +209,17 @@ def select_regression_sample(records: list[LabeledText], per_label: int, seed: i
     return sample
 
 
+def count_exact_text_overlap(first_records: list[LabeledText], second_records: list[LabeledText]) -> int:
+    """두 묶음에 모두 나타나는 서로 다른 문장(완전 일치)의 수를 센다.
+
+    왜 해시인가: 원문을 로그·메시지로 내보내지 않고 건수만 남기기 위해서다. 공식 분할에도 같은 문장이 섞여 있을 수 있어
+    겹침 자체는 오류가 아니다(호출자가 건수를 기록한다). 검증 점수가 부풀려졌는지 사람이 판단할 근거로 쓴다.
+    """
+    first_digests = {hashlib.sha256(record.text.encode("utf-8")).digest() for record in first_records}
+    second_digests = {hashlib.sha256(record.text.encode("utf-8")).digest() for record in second_records}
+    return len(first_digests & second_digests)
+
+
 def compute_file_sha256(path: str | Path) -> str:
     """파일 전체의 sha256(16진수)을 계산한다.
 

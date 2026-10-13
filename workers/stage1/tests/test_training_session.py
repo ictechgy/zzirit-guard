@@ -126,3 +126,17 @@ def test_interrupted_run_records_failure_message(tmp_path: Path) -> None:
     assert card["status"] == "interrupted"
     assert card["stop_reason"] == "ModelFormatError"
     assert card["failure_message"] == "ModelFormatError: 다시 불러온 토크나이저의 토큰이 다릅니다. 버전을 확인하세요."
+
+
+def test_load_and_encode_splits_records_overlap_count_only(tmp_path: Path, tiny_tokenizer, capsys: pytest.CaptureFixture[str]) -> None:
+    """학습·검증에 같은 문장이 있어도 오류가 아니며, 건수만 기록하고 원문은 출력하지 않는다."""
+    from tests.conftest import write_jsonl
+
+    secret_text = "비밀문장확인용"
+    train_file = write_jsonl(tmp_path / "train.jsonl", [{"id": 1, "text": secret_text, "label": "normal"}, {"id": 2, "text": "다른", "label": "offensive"}])
+    validation_file = write_jsonl(tmp_path / "val.jsonl", [{"id": 1, "text": secret_text, "label": "normal"}])
+    paths = train.TrainingPaths(tmp_path / "base", train_file, validation_file, tmp_path / "out")
+    _, validation_split = train.load_and_encode_splits(tiny_tokenizer, paths, 16)
+    assert validation_split.train_overlap_count == 1
+    captured = capsys.readouterr().out
+    assert "1건" in captured and secret_text not in captured

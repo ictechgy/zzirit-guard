@@ -175,3 +175,15 @@ def test_train_refuses_out_dir_inside_repository(tmp_path: Path) -> None:
     inside = REPOSITORY_ROOT / "workers" / "stage1" / "outputs" / "run"
     with pytest.raises(OutputLocationError):
         resolve_and_validate(["--ml-dir", str(tmp_path), "--out-dir", str(inside)], {})
+
+
+def test_train_refuses_same_train_and_validation_file(tmp_path: Path) -> None:
+    """학습·검증에 같은 파일(심볼릭 링크 포함)을 주면 무거운 작업 전에 거부한다."""
+    make_base_model_directory(tmp_path, ["model.safetensors"])
+    make_data_files(tmp_path)
+    train_file = tmp_path / "data" / "k-haters" / "train_v2.jsonl"
+    link = tmp_path / "linked.jsonl"
+    link.symlink_to(train_file)
+    for validation_argument in (str(train_file), str(link)):
+        with pytest.raises(PathResolutionError, match="같은 파일"):
+            resolve_and_validate(["--val-file", validation_argument], {"ZG_ML_DIR": str(tmp_path)})

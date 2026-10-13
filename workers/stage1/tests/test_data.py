@@ -141,3 +141,16 @@ def test_duplicate_id_raises_with_both_locations(tmp_path: Path) -> None:
     path = write_jsonl(tmp_path / "test.jsonl", raw)
     with pytest.raises(DatasetFormatError, match=r"test\.jsonl:3.*test\.jsonl:1"):
         load_labeled_texts(path)
+
+
+def test_exact_text_overlap_counts_distinct_shared_texts() -> None:
+    """겹침은 서로 다른 문장 기준으로 세고, 같은 문장이 여러 번 있어도 한 건이다."""
+    from zg_stage1.data import LabeledText, count_exact_text_overlap
+
+    def record(text: str) -> LabeledText:
+        return LabeledText(record_id=text, text=text, original_label="normal", binary_label=0)
+
+    train_records = [record("가"), record("가"), record("나"), record("다")]
+    validation_records = [record("가"), record("라"), record("다 ")]
+    assert count_exact_text_overlap(train_records, validation_records) == 1
+    assert count_exact_text_overlap(train_records, []) == 0
