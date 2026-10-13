@@ -188,3 +188,16 @@ def test_train_refuses_same_train_and_validation_file(tmp_path: Path) -> None:
     for validation_argument in (str(train_file), str(link)):
         with pytest.raises(PathResolutionError, match="같은 파일"):
             resolve_and_validate(["--val-file", validation_argument], {"ZG_ML_DIR": str(tmp_path)})
+
+
+def test_train_refuses_hard_linked_validation_file(tmp_path: Path) -> None:
+    """하드 링크로 같은 파일을 가리켜도(resolve 경로는 다름) 거부한다."""
+    import os
+
+    make_base_model_directory(tmp_path, ["model.safetensors"])
+    make_data_files(tmp_path)
+    train_file = tmp_path / "data" / "k-haters" / "train_v2.jsonl"
+    hard_link = tmp_path / "hard.jsonl"
+    os.link(train_file, hard_link)
+    with pytest.raises(PathResolutionError, match="같은 파일"):
+        resolve_and_validate(["--val-file", str(hard_link)], {"ZG_ML_DIR": str(tmp_path)})

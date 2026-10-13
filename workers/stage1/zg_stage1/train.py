@@ -251,11 +251,13 @@ def validate_training_paths(paths: TrainingPaths) -> None:
 
 
 def ensure_distinct_train_and_validation_files(paths: TrainingPaths) -> None:
-    """학습·검증 경로가 (심볼릭 링크를 풀어도) 같은 파일이면 거부한다.
+    """학습·검증 경로가 같은 파일(심볼릭 링크·하드 링크 포함)이면 거부한다.
+
+    왜 samefile인가: resolve()는 하드 링크의 서로 다른 이름을 같은 파일로 보지 못한다. samefile은 inode로 비교한다.
 
     왜: 같은 파일을 양쪽에 주면 검증 AUC·조기 종료·최고 epoch 선택이 학습 데이터 위에서 돌아 일반화 성능이 부풀려진다.
     """
-    if paths.train_file.resolve() == paths.validation_file.resolve():
+    if paths.train_file.samefile(paths.validation_file):
         raise PathResolutionError("학습 파일과 검증 파일이 같은 파일입니다. --train-file과 --val-file에 서로 다른 파일을 주세요.")
 
 
