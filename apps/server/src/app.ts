@@ -25,7 +25,7 @@ import { recheckSessionRoles, type RevokedSession } from "./managers/roleRecheck
 import { createRoleVerifier } from "./managers/roleVerifier.js";
 import { createSessionStore } from "./managers/sessionStore.js";
 import { createPushNotifier, type PushMessage, type PushSender } from "./push/pushNotifier.js";
-import { createRealtimeHub } from "./realtime/hub.js";
+import { createRealtimeHub, SESSION_EXPIRED_REASON } from "./realtime/hub.js";
 import { createAuditLog } from "./records/auditLog.js";
 import { runBackup, runRetention } from "./records/maintenance.js";
 import { createMinuteStats } from "./records/minuteStats.js";
@@ -71,8 +71,6 @@ const STATUS_BROADCAST_MS = 20_000;
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
 /** 주기 작업이 이만큼 연속으로 건너뛰어지면 멈춘 것으로 보고 경고 로그를 남긴다(N5). */
 const STUCK_TASK_SKIP_THRESHOLD = 3;
-/** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. */
-const SESSION_EXPIRED_REASON = "세션이 만료되었습니다. 다시 로그인하세요";
 
 /** 모든 구성 요소를 만들고 이벤트를 연결한다. */
 export async function createApp(config: AppConfig, options: AppOptions): Promise<App> {
@@ -97,7 +95,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const settings = createSettingsRepository(database);
   const rules = createRuleRepository(database, clock);
   const sessions = createSessionStore(database, clock);
-  const hub = createRealtimeHub();
+  const hub = createRealtimeHub({ clock });
   const push = createPushNotifier({
     database, clock, logger,
     vapid: { publicKey: config.vapidPublicKey, privateKey: config.vapidPrivateKey, subject: config.vapidSubject },

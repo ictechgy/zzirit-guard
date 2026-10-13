@@ -526,6 +526,26 @@ describe("WebSocket", () => {
     socket.terminate();
   });
 
+  it("세션 만료 시각이 지나면 열린 소켓은 다음 방송 대신 만료 이유를 받고 4001로 닫힌다(K9)", async () => {
+    await harness.close();
+    const clock = { now: 1_000_000 };
+    harness = await createHttpHarness({}, { clock: () => clock.now });
+    const ticket = (await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) })).json().ticket as string;
+    const messages: string[] = [];
+    const closed = new Promise<number>((resolve) => {
+      const onInit = (client: WebSocket) => {
+        client.on("message", (data) => messages.push(String(data)));
+        client.on("close", (code) => resolve(code));
+      };
+      void harness.app.injectWS(`/ws?ticket=${ticket}`, { headers: { origin: ORIGIN } }, { onInit });
+    });
+    await vi.waitFor(() => expect(messages).toHaveLength(1));
+    clock.now += 12 * 60 * 60 * 1000;
+    harness.hub.broadcast({ type: "verdict_status", verdictId: 1, status: "hidden" });
+    expect(await closed).toBe(4001);
+    expect(messages.map((message) => JSON.parse(message).type)).toEqual(["status", "session_ended"]);
+  });
+
   it("치지직에서 해임된 매니저는 티켓을 받지 못하고 세션이 지워진다", async () => {
     const rawId = harness.login("STREAMING_CHAT_MANAGER");
     harness.services.verifyRole = async () => null;

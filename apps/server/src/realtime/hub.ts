@@ -1,6 +1,7 @@
 import type { ChatLine, RealtimeEvent } from "@zzirit-guard/shared";
 import type { Broadcaster } from "../actions/decisionHandler.js";
 import type { ManagerSession } from "../managers/sessionStore.js";
+import { systemClock, type Clock } from "../time.js";
 
 /** 허브가 쓰는 WebSocket 기능(ws 라이브러리 소켓이 그대로 맞는다). bufferedAmount는 아직 보내지 못하고 쌓인 바이트 수다. */
 export interface SocketSink {
@@ -62,26 +63,43 @@ export const MAX_SOCKETS_TOTAL = 50;
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 /** 채팅 묶음 전송 기본값: 250ms마다 최대 100줄. 초당 수십 건이어도 휴대폰이 버틸 만큼만 보낸다. */
 const DEFAULTS = { flushIntervalMs: 250, maxLinesPerFlush: 100 };
+/** 만료된 세션의 소켓을 닫을 때 화면에 보여 줄 이유. 허브(보내기 전 확인)와 앱(주기 정리)이 같은 문구를 쓴다. */
+export const SESSION_EXPIRED_REASON = "세션이 만료되었습니다. 다시 로그인하세요";
+
+/** createRealtimeHub 옵션. clock은 세션 만료를 잴 시계다(테스트에서 시간을 움직이려고 주입한다). */
+export type RealtimeHubOptions = Partial<typeof DEFAULTS> & { clock?: Clock };
+
+/**
+ * 목록에 붙은 소켓의 세션 정보. 만료 시각은 세션을 만들 때 정해지고 바뀌지 않아 붙일 때 한 번 읽어 둔다(K9).
+ */
+interface AttachedSession {
+  sessionId: string;
+  expiresAt: number;
+}
 
 /**
  * 허브를 만든다.
  * 왜: 판정·상태는 즉시 보내야 하고, 채팅 줄은 묶어서 보내야 휴대폰 부하를 막을 수 있다.
- * @param options 묶음 전송 주기와 한 번에 보낼 최대 줄 수. 생략하면 기본값을 쓴다.
+ * @param options 묶음 전송 주기·한 번에 보낼 최대 줄 수·시계. 생략하면 기본값(시스템 시계)을 쓴다.
  * @returns 방송·연결 관리·종료 기능을 가진 허브.
  */
-export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): RealtimeHub {
+export function createRealtimeHub(options: RealtimeHubOptions = {}): RealtimeHub {
   const settings = { ...DEFAULTS, ...options };
-  const connections = new Map<SocketSink, string>();
+  const clock = options.clock ?? systemClock;
+  const connections = new Map<SocketSink, AttachedSession>();
   let pendingLines: ChatLine[] = [];
   let isStopped = false;
 
   /**
-   * 열린 모든 소켓에 이벤트를 보낸다.
-   * 왜: 한 소켓의 전송 실패가 나머지 소켓으로 번지지 않도록 소켓마다 따로 보낸다.
+   * 열린 모든 소켓에 이벤트를 보낸다. 보내기 전에 만료 시각이 된 세션의 소켓은 만료 이유를 보내고 닫는다(K9).
+   * 왜 보내기 전에 보나: 세션 만료는 DB에서 조용히 일어나, 5분 주기 정리만 믿으면 만료된 화면이 그동안 채팅·판정을 받는다.
+   * 한 소켓의 전송 실패가 나머지 소켓으로 번지지 않도록 소켓마다 따로 보낸다.
    */
   const sendToAll = (event: RealtimeEvent) => {
+    const now = clock();
+    closeMatching(connections, (attached) => attached.expiresAt <= now, SESSION_EXPIRED_REASON);
     const data = JSON.stringify(event);
-    connections.forEach((_sessionId, socket) => {
+    connections.forEach((_attached, socket) => {
       if (socket.readyState === OPEN) sendToSocket(connections, socket, data);
     });
   };
@@ -112,15 +130,15 @@ export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): Realt
       }
       // 왜: 이미 닫힌 소켓은 'close' 이벤트가 다시 오지 않아 목록에 남으면 영원히 새므로 아예 넣지 않는다.
       if (socket.readyState !== OPEN) return false;
-      if (!admitSocket(connections, socket, session.id)) return false;
+      if (!admitSocket(connections, socket, { sessionId: session.id, expiresAt: session.expiresAt })) return false;
       socket.on("close", () => connections.delete(socket));
       return true;
     },
     closeSessions: (sessionIds, reason) => {
       const targets = new Set(sessionIds);
-      closeMatching(connections, (sessionId) => targets.has(sessionId), reason);
+      closeMatching(connections, ({ sessionId }) => targets.has(sessionId), reason);
     },
-    closeSessionsExcept: (activeSessionIds, reason) => closeMatching(connections, (sessionId) => !activeSessionIds.has(sessionId), reason),
+    closeSessionsExcept: (activeSessionIds, reason) => closeMatching(connections, ({ sessionId }) => !activeSessionIds.has(sessionId), reason),
     connectionCount: () => connections.size,
     flush,
     stop() {
@@ -139,26 +157,27 @@ export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): Realt
  * 연결 상한을 지키며 소켓을 목록에 넣는다(K8). 같은 세션의 소켓이 꽉 찼으면 가장 오래된 것부터 밀어내고,
  * 그래도 전체 상한이면 새 소켓을 1013으로 닫는다.
  * 왜 같은 세션부터 밀어내나: 그 세션의 새 연결은 밀어낸 자리를 쓰므로 전체 수가 늘지 않는다. 휴대폰이 다시 연결할 때 막히지 않게 한다.
+ * @param attached 새 소켓의 세션 정보
  * @returns 넣었으면 true
  */
-function admitSocket(connections: Map<SocketSink, string>, socket: SocketSink, sessionId: string): boolean {
-  evictOldestOfSession(connections, sessionId);
+function admitSocket(connections: Map<SocketSink, AttachedSession>, socket: SocketSink, attached: AttachedSession): boolean {
+  evictOldestOfSession(connections, attached.sessionId);
   if (connections.size >= MAX_SOCKETS_TOTAL) {
     closeSocketSafely(socket, TRY_AGAIN_LATER_CLOSE_CODE, "too many connections");
     return false;
   }
-  connections.set(socket, sessionId);
+  connections.set(socket, attached);
   return true;
 }
 
 /**
  * 같은 세션의 소켓이 새 연결 하나를 더 받을 자리가 없으면 가장 오래된 것부터 목록에서 빼고 4002로 닫는다.
  * Map은 넣은 순서를 지키므로 앞에 있는 것이 가장 오래 붙은 소켓이다.
- * @param connections 소켓 → 세션 ID
+ * @param connections 소켓 → 세션 정보
  * @param sessionId 새로 붙는 세션 ID
  */
-function evictOldestOfSession(connections: Map<SocketSink, string>, sessionId: string): void {
-  const sameSession = [...connections].filter(([, owner]) => owner === sessionId).map(([socket]) => socket);
+function evictOldestOfSession(connections: Map<SocketSink, AttachedSession>, sessionId: string): void {
+  const sameSession = [...connections].filter(([, attached]) => attached.sessionId === sessionId).map(([socket]) => socket);
   for (const socket of sameSession.slice(0, Math.max(0, sameSession.length - (MAX_SOCKETS_PER_SESSION - 1)))) {
     connections.delete(socket);
     closeSocketSafely(socket, REPLACED_CLOSE_CODE, "replaced by newer connection");
@@ -170,12 +189,12 @@ function evictOldestOfSession(connections: Map<SocketSink, string>, sessionId: s
  * 왜: 권한을 잃은 세션은 화면에 이유를 알린 뒤 전용 코드로 닫아야 재연결 루프에 빠지지 않는다.
  * 소켓은 닫기 전에 목록에서 먼저 빼서, 닫기가 실패해도 목록에 남지 않게 한다.
  * 전송이 실패한 소켓은 sendToSocket이 이미 1011로 닫았으므로 4001 닫기는 건너뛴다.
- * @param shouldClose 세션 ID를 받아 닫을지 정하는 함수. closeSessions(목록 안)와 closeSessionsExcept(목록 밖)가 같은 절차를 쓰게 한다.
+ * @param shouldClose 세션 정보를 받아 닫을지 정하는 함수. closeSessions(목록 안)·closeSessionsExcept(목록 밖)·보내기 전 만료 확인(K9)이 같은 절차를 쓰게 한다.
  */
-function closeMatching(connections: Map<SocketSink, string>, shouldClose: (sessionId: string) => boolean, reason: string): void {
+function closeMatching(connections: Map<SocketSink, AttachedSession>, shouldClose: (attached: AttachedSession) => boolean, reason: string): void {
   const message = JSON.stringify({ type: "session_ended", reason } satisfies RealtimeEvent);
-  for (const [socket, sessionId] of connections) {
-    if (!shouldClose(sessionId)) continue;
+  for (const [socket, attached] of connections) {
+    if (!shouldClose(attached)) continue;
     connections.delete(socket);
     if (socket.readyState === OPEN && !sendToSocket(connections, socket, message)) continue;
     closeSocketSafely(socket, SESSION_ENDED_CLOSE_CODE, "session ended");
@@ -187,7 +206,7 @@ function closeMatching(connections: Map<SocketSink, string>, shouldClose: (sessi
  * 왜: ws의 send는 드물게 동기적으로 throw하고, 느린 휴대폰은 버퍼만 계속 쌓는다. 이 소켓만 분리해 서버 전체를 지킨다.
  * @returns 보내기에 성공하면 true, 실패하거나 버퍼가 넘쳐 소켓을 분리했으면 false.
  */
-function sendToSocket(connections: Map<SocketSink, string>, socket: SocketSink, data: string): boolean {
+function sendToSocket(connections: Map<SocketSink, AttachedSession>, socket: SocketSink, data: string): boolean {
   if ((socket.bufferedAmount ?? 0) > MAX_BUFFERED_BYTES) {
     dropBrokenSocket(connections, socket, "buffer full");
     return false;
@@ -206,7 +225,7 @@ function sendToSocket(connections: Map<SocketSink, string>, socket: SocketSink, 
  * 왜: 목록에서 먼저 빼야 이후 방송이 다시 실패하지 않는다. 클라이언트는 재연결하고, 다음 티켓 발급 때 다시 붙는다.
  * @param reason 닫기 사유 문구. 어떤 이유로 끊었는지 연결 쪽에서 구분할 수 있게 한다.
  */
-function dropBrokenSocket(connections: Map<SocketSink, string>, socket: SocketSink, reason: string): void {
+function dropBrokenSocket(connections: Map<SocketSink, AttachedSession>, socket: SocketSink, reason: string): void {
   connections.delete(socket);
   closeSocketSafely(socket, SEND_FAILED_CLOSE_CODE, reason);
 }

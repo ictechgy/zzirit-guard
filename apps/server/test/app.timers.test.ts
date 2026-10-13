@@ -222,8 +222,10 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
     control.database?.prepare("INSERT INTO manager_session (id, manager_channel_id, manager_channel_name, role, expires_at, last_role_check_at) VALUES ('active', 'm1', '매니저', 'STREAMING_CHAT_MANAGER', ?, 0)").run(Date.now() + 60 * 60_000);
     const expired = recordingSocket();
     const active = recordingSocket();
-    hub.attach(expired, { id: "expired", managerChannelId: "m2", managerChannelName: "매니저2", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
-    hub.attach(active, { id: "active", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    // 허브는 보내기 전에 세션 만료 시각도 본다(K9). 여기서는 DB 행이 사라진 세션을 주기 정리가 닫는지만 보려고 만료 시각을 미래로 둔다.
+    const expiresAt = Date.now() + 60 * 60_000;
+    hub.attach(expired, { id: "expired", managerChannelId: "m2", managerChannelName: "매니저2", role: "STREAMING_CHAT_MANAGER", expiresAt, lastRoleCheckAt: 0 });
+    hub.attach(active, { id: "active", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt, lastRoleCheckAt: 0 });
     await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
     expect(expired.closedWith).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
@@ -238,7 +240,7 @@ describe("주기 상태 방송(B19-2)", () => {
   it("20초마다 열린 화면에 status를 보내, 채팅이 없는 조용한 채널도 살아 있는 연결로 보이게 한다", async () => {
     const hub = control.hub as RealtimeHub;
     const socket = recordingSocket();
-    hub.attach(socket, { id: "s1", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: 0, lastRoleCheckAt: 0 });
+    hub.attach(socket, { id: "s1", managerChannelId: "m1", managerChannelName: "매니저", role: "STREAMING_CHAT_MANAGER", expiresAt: Date.now() + 60 * 60_000, lastRoleCheckAt: 0 });
     await vi.advanceTimersByTimeAsync(19_999);
     expect(socket.sent.filter((event) => event.type === "status")).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);

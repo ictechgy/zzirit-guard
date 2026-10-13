@@ -42,7 +42,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
   const auditLog = createAuditLog(database, clock);
   const settings = createSettingsRepository(database);
   const sessions = createSessionStore(database, clock);
-  const hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+  const hub = createRealtimeHub({ flushIntervalMs: 60_000, clock });
   const submit = vi.fn<Executor["submit"]>(async () => ({ ok: true, note: null }) as ActionOutcome);
   const services: RouteServices = {
     channel: () => ({ channelId: "c1", channelName: "채널" }),
