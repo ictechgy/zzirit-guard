@@ -1,3 +1,4 @@
+import { domainToUnicode } from "node:url";
 import { stripInvisibleAndFullwidth } from "./normalize.js";
 
 /**
@@ -85,6 +86,12 @@ const BRACKETED_DOT_PATTERN = /\[\.\]|\(\.\)/g;
  * 왜: "https://allowed.com:pw@evil.zzz"는 사람 눈에 허용 도메인처럼 보이지만 실제 호스트는 evil.zzz다(적대적 재점검).
  */
 const URL_USERINFO_TOKEN_PATTERN = /^https?:\/\/[^/?#]*@$/;
+/** 공백 전까지 이어지는 http(s):// 토큰. URL 해석기에 넘길 덩어리다(K15). */
+const EXPLICIT_URL_TOKEN_PATTERN = /https?:\/\/\S+/g;
+/** http(s):// 토큰의 주소 부분(경로·쿼리·조각 앞). 해석 전 원문 호스트를 꺼낼 때 쓴다. */
+const URL_AUTHORITY_PATTERN = /^https?:\/\/([^/?#\\]*)/;
+/** 주소 부분 끝의 포트(":숫자"). 원문 호스트와 해석한 호스트를 견줄 때 뗀다. */
+const TRAILING_PORT_PATTERN = /:\d*$/;
 /** 공백 문자 하나. 사용자 정보 토큰의 시작(앞의 공백 다음)을 찾을 때 쓴다. */
 const WHITESPACE_PATTERN = /\s/;
 /** 한글 낱말에 붙여 쓴 호스트를 찾을 때 거꾸로 훑는 라벨 글자(한글 음절·영문·숫자·하이픈). */
@@ -171,7 +178,48 @@ function reverseOverriddenPart(segment: string): string {
  */
 function extractHostCandidates(text: string): HostCandidate[] {
   const hangulCandidates = matchHostCandidates(text, HANGUL_HOST_CANDIDATE_PATTERN).filter((candidate) => HANGUL_SYLLABLE_PATTERN.test(candidate.host));
-  return [...matchHostCandidates(text, HOST_CANDIDATE_PATTERN), ...hangulCandidates];
+  return [...matchHostCandidates(text, HOST_CANDIDATE_PATTERN), ...hangulCandidates, ...parsedUrlHostCandidates(text)];
+}
+
+/**
+ * http(s):// 토큰을 WHATWG URL 해석기로 읽어, 해석한 호스트가 원문과 다르면 접두가 있는 후보로 더한다(K15).
+ * 왜: "https://%65%76%69%6c%2e%63%6f%6d"는 브라우저가 evil.com으로 가지만, 원문에는 점이 없어 정규식이 호스트를 뽑지 못한다.
+ * 원문 후보는 지우지 않고 더하기만 한다. 그래서 인코딩으로 가린 조각("65xample.com")이 따로 걸려도 그대로 둔다(보수적).
+ * @param text 링크 검사용 전처리를 거친 텍스트
+ */
+function parsedUrlHostCandidates(text: string): HostCandidate[] {
+  return [...text.matchAll(EXPLICIT_URL_TOKEN_PATTERN)].flatMap((match) => {
+    const host = canonicalHostIfDifferent(match[0]);
+    return host ? [{ host, hasExplicitPrefix: true, hasPathCue: false, hasPortCue: false, start: match.index }] : [];
+  });
+}
+
+/**
+ * 토큰을 URL로 해석한 호스트를 한글 표기(퓨니코드를 푼 형태)로 바꿔, 원문 호스트와 다르면 돌려준다. 같으면 null이다.
+ * 왜 한글 표기로 견주나: 해석기는 "카페.한국"을 xn-- 형태로 바꾼다. 그대로 더하면 한글로 적은 허용 도메인과 맞지 않아 허용 링크가 막히고,
+ * 원문과 매번 달라 보여 모든 한글 주소를 다시 더하게 된다. 퍼센트 인코딩·숫자 IP처럼 정말 다른 호스트만 남긴다.
+ * @param token http(s)://로 시작하는 공백 없는 덩어리
+ */
+function canonicalHostIfDifferent(token: string): string | null {
+  const hostname = parseUrlHostname(token);
+  if (!hostname) return null;
+  const authority = URL_AUTHORITY_PATTERN.exec(token)?.[1] ?? "";
+  const rawHost = authority.slice(authority.lastIndexOf("@") + 1).replace(TRAILING_PORT_PATTERN, "");
+  const readableHost = domainToUnicode(hostname) || hostname;
+  return readableHost === rawHost ? null : readableHost;
+}
+
+/**
+ * URL 해석기로 호스트를 읽는다. 해석할 수 없으면 null.
+ * @param token http(s)://로 시작하는 덩어리
+ */
+function parseUrlHostname(token: string): string | null {
+  try {
+    return new URL(token).hostname || null;
+  } catch {
+    // 브라우저도 열 수 없는 주소라 이 후보는 링크가 아니다(K15). 정규식 후보는 따로 보므로 다른 단서는 그대로 남는다.
+    return null;
+  }
 }
 
 /**
