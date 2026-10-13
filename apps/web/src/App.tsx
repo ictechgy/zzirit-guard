@@ -1,5 +1,5 @@
 import type { MeDto } from "@zzirit-guard/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiGet, describeApiError, requiresSignIn } from "./api/client";
 import { describeLoginError } from "./domain/loginError";
 import { LoginScreen } from "./screens/LoginScreen";
@@ -82,11 +82,16 @@ export function App() {
       },
     );
   }, [signOut, attempt]);
-  // 역할·권한 변화를 반영하려고 내 정보를 다시 읽는다(K23). 화면이 다시 보이거나 실시간이 다시 열릴 때 MainScreen이 부른다. 렌더마다 같은 함수다.
+  // 내 정보 다시 읽기의 세대 번호. 마지막으로 보낸 다시 읽기의 결과만 쓴다(아래 refreshMe).
+  const meRefreshGeneration = useRef(0);
+  // 역할·권한 변화를 반영하려고 내 정보를 다시 읽는다(K23). 화면이 다시 보이거나 실시간이 열릴 때 MainScreen이 부른다. 렌더마다 같은 함수다.
+  // 왜 마지막 것만 쓰나: 앞서 보낸 다시 읽기가 옛 역할(채널 관리자)을 읽은 채 늦게 도착하면, 뒤에 읽은 낮은 역할을 덮어 거둔 권한을 되살린다.
   const refreshMe = useCallback(() => {
+    const generation = ++meRefreshGeneration.current;
+    const isLatest = () => generation === meRefreshGeneration.current;
     apiGet<MeDto>("/api/me").then(
-      (me) => setMeState((previous) => replaceSignedInMe(previous, me)),
-      (error: unknown) => handleMeRefreshFailure(error, signOut),
+      (me) => isLatest() && setMeState((previous) => replaceSignedInMe(previous, me)),
+      (error: unknown) => isLatest() && handleMeRefreshFailure(error, signOut),
     );
   }, [signOut]);
   // '다시 시도': 불러오는 중으로 돌리고 내 정보를 다시 읽는다. 자식에게 넘기므로 렌더마다 같은 함수로 둔다.

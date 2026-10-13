@@ -244,7 +244,7 @@ describe("MainScreen 내 정보 다시 읽기(K23)", () => {
     Reflect.deleteProperty(document, "visibilityState");
   });
 
-  it("실시간 연결이 다시 열리면 내 정보를 다시 읽고, 처음 연결 때는 읽지 않는다(앱을 열 때 막 읽었다)", () => {
+  it("실시간 연결이 열릴 때마다(첫 연결 포함) 내 정보를 다시 읽는다(티켓 발급 때 서버가 역할을 다시 확인한다)", () => {
     stubFetch({});
     const onRefreshMe = vi.fn();
     const onSignedOut = vi.fn();
@@ -252,11 +252,13 @@ describe("MainScreen 내 정보 다시 읽기(K23)", () => {
       hookState.current = { ...initialServerState, realtimeConnected };
       return <MainScreen me={me} onSignedOut={onSignedOut} onRefreshMe={onRefreshMe} />;
     };
-    const { rerender } = render(renderWith(true));
+    const { rerender } = render(renderWith(false));
     expect(onRefreshMe).not.toHaveBeenCalled();
-    rerender(renderWith(false));
     rerender(renderWith(true));
     expect(onRefreshMe).toHaveBeenCalledTimes(1);
+    rerender(renderWith(false));
+    rerender(renderWith(true));
+    expect(onRefreshMe).toHaveBeenCalledTimes(2);
   });
 
   it("화면이 다시 보이면 내 정보를 다시 읽는다", () => {

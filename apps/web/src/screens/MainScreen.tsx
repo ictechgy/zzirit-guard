@@ -100,7 +100,7 @@ export interface MainScreenProps {
   me: MeDto;
   /** 세션이 끝났을 때 로그인 화면으로 돌아간다(message는 안내 문구). 렌더마다 바뀌지 않는 함수여야 한다. */
   onSignedOut(message: string | null): void;
-  /** 내 정보(역할·권한)를 다시 읽는다(K23). 화면이 다시 보이거나 실시간이 다시 열릴 때 부른다. 렌더마다 바뀌지 않는 함수여야 한다. */
+  /** 내 정보(역할·권한)를 다시 읽는다(K23). 화면이 다시 보이거나 실시간이 열릴 때 부른다. 렌더마다 바뀌지 않는 함수여야 한다. */
   onRefreshMe(): void;
 }
 
@@ -145,18 +145,16 @@ function describeSystemDisable(reason: Exclude<AutoHideOffReason, "manual"> | nu
 }
 
 /**
- * 실시간 연결이 다시 열리면 내 정보를 다시 읽게 한다(K23). 처음 연결은 앱을 열 때 막 읽었으므로 건너뛴다.
+ * 실시간 연결이 열릴 때마다(첫 연결 포함) 내 정보를 다시 읽게 한다(K23).
  * 왜: 서버는 역할을 주기적으로, 그리고 티켓을 줄 때 다시 확인해 세션 권한을 바꾸지만 화면에 알리지 않는다.
+ * 첫 연결도 넣는 이유: 앱을 열 때 읽은 /api/me 뒤에 첫 티켓 발급의 역할 확인이 역할을 바꿀 수 있다.
  * 처음 읽은 권한에 머물면 권한을 잃은 매니저에게 감사 기록 같은 화면이 그대로 남는다.
  * @param isRealtimeConnected 실시간 연결이 열려 있는지
- * @param onRefreshMe 내 정보를 다시 읽는다(렌더마다 같은 함수)
+ * @param onRefreshMe 내 정보를 다시 읽는다(렌더마다 같은 함수여야 연결된 동안 다시 부르지 않는다)
  */
-function useRefreshMeOnReconnect(isRealtimeConnected: boolean, onRefreshMe: () => void): void {
-  const hasConnectedRef = useRef(false);
+function useRefreshMeOnConnect(isRealtimeConnected: boolean, onRefreshMe: () => void): void {
   useEffect(() => {
-    if (!isRealtimeConnected) return;
-    if (hasConnectedRef.current) onRefreshMe();
-    hasConnectedRef.current = true;
+    if (isRealtimeConnected) onRefreshMe();
   }, [isRealtimeConnected, onRefreshMe]);
 }
 
@@ -231,7 +229,7 @@ export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
     [onSignedOut, applyAutoHide, reload],
   );
   const systemDisableNotice = useSystemDisableNotice(state.status, me.permissions.includes("view_audit"));
-  useRefreshMeOnReconnect(state.realtimeConnected, onRefreshMe);
+  useRefreshMeOnConnect(state.realtimeConnected, onRefreshMe);
   useRefreshMeOnVisible(onRefreshMe);
   useEffect(() => {
     if (state.sessionEndedReason !== null) onSignedOut(state.sessionEndedReason);
