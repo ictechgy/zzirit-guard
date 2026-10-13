@@ -26,6 +26,14 @@ describe("RepeatedChatFilter(K4)", () => {
     expect(filter.isRepeat(chat("viewer-1", 100, REPEATED_CHAT_WINDOW_MS))).toBe(false);
   });
 
+  it("잊으라고 한 메시지는 다시 와도 처음 보는 메시지로 본다(판정 실패 뒤 재전달)", () => {
+    const filter = createRepeatedChatFilter();
+    filter.isRepeat(chat("viewer-1", 100));
+    filter.forget(chat("viewer-1", 100));
+    expect(filter.isRepeat(chat("viewer-1", 100, 1_000))).toBe(false);
+    expect(filter.isRepeat(chat("viewer-1", 100, 2_000))).toBe(true);
+  });
+
   it("기억하는 메시지가 상한을 넘으면 가장 먼저 본 것부터 잊는다(메모리 상한)", () => {
     const filter = createRepeatedChatFilter();
     for (let index = 0; index <= MAX_REMEMBERED_CHATS; index += 1) filter.isRepeat(chat(`viewer-${index}`, 100));

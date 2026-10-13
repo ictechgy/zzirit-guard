@@ -6,6 +6,7 @@ import { createDecisionHandler } from "./actions/decisionHandler.js";
 import { createExecutor } from "./actions/executor.js";
 import { createSenderActionGuard } from "./actions/senderActionGuard.js";
 import { createVerdictClaims } from "./actions/verdictClaims.js";
+import type { ChatEvent } from "./chat/chatEvent.js";
 import { connectWithSocketIo, createChatReceiver, type SocketConnector } from "./chat/chatReceiver.js";
 import { createRepeatedChatFilter } from "./chat/repeatedChatFilter.js";
 import { createChzzkApi } from "./chzzk/apiClient.js";
@@ -168,6 +169,20 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   /** 현재 상태를 열린 모든 매니저 화면에 즉시 보낸다. 연결·잠금·스위치가 바뀔 때 부른다. */
   const broadcastStatus = () => hub.broadcast({ type: "status", status: status() });
 
+  /**
+   * 채팅을 판정한다. 판정이 예외로 끝나면 중복 기억을 지우고 예외를 그대로 넘긴다.
+   * 왜 판정 단계만인가: 판정은 판정 행·숨김 요청을 만들기 전이라, 다시 온 같은 채팅을 처리해도 숨김이 두 번 나가지 않는다.
+   * 그 뒤 단계(decisionHandler)에서 실패하면 숨김이 이미 나갔을 수 있어 기억을 그대로 둔다(되돌릴 수 없는 조치를 두 번 보내지 않는 쪽).
+   * @param event 받은 채팅
+   */
+  const evaluateOrForget = (event: ChatEvent) => {
+    try {
+      return pipeline.evaluate(event);
+    } catch (error) {
+      repeatedChats.forget(event);
+      throw error;
+    }
+  };
   const receiver = createChatReceiver({
     api, tokenManager, clock, logger, connect: options.connect ?? connectWithSocketIo,
     connectedChannelId: () => credentialStore.loadChannel()?.channelId ?? null,
@@ -175,7 +190,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       lastChatAt = event.receivedAt;
       // 중복 전달은 도배 집계·판정·통계·실행기 어디에도 넣지 않는다(K4). 수신 자체는 살아 있다는 신호라 lastChatAt은 갱신한다.
       if (repeatedChats.isRepeat(event)) return;
-      decisionHandler.handle(event, pipeline.evaluate(event));
+      decisionHandler.handle(event, evaluateOrForget(event));
     },
     onConnectionChange: () => broadcastStatus(),
     onInvalidEvent: () => {

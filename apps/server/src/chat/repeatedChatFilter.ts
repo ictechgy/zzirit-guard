@@ -12,6 +12,12 @@ export interface RepeatedChatFilter {
    * @param event 받은 채팅. 보낸 사람·보낸 시각으로 같은 메시지인지 보고, 받은 시각(receivedAt)으로 기한을 잰다
    */
   isRepeat(event: ChatEvent): boolean;
+  /**
+   * 기억한 메시지를 잊는다. 판정이 부작용 없이 실패했을 때 불러, 치지직이 같은 채팅을 다시 보내면 그때 판정하게 한다.
+   * 왜: 기억만 남기고 판정이 실패하면 다시 온 같은 채팅이 중복으로 버려져 그 메시지는 끝내 판정되지 않는다.
+   * @param event 판정에 실패한 채팅
+   */
+  forget(event: ChatEvent): void;
 }
 
 /**
@@ -39,6 +45,7 @@ export function createRepeatedChatFilter(): RepeatedChatFilter {
       if (firstSeenAt.size > MAX_REMEMBERED_CHATS) firstSeenAt.delete(firstSeenAt.keys().next().value as string);
       return false;
     },
+    forget: (event) => void firstSeenAt.delete(messageKey(event)),
   };
 }
 
