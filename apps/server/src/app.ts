@@ -54,10 +54,11 @@ export interface App {
   status(): ServerStatus;
 }
 
-/** 주기 작업 간격. */
+/** 주기 작업 간격. chatMemoryPruneMs는 도배·중복 감지기가 기억하는 채팅을 정리하는 간격이다(K16, 도배 창 10초보다 넉넉하고 짧게 남도록 1분). */
 const INTERVALS = {
   tokenCheckMs: 10 * 60 * 1000,
   statsFlushMs: 60 * 1000,
+  chatMemoryPruneMs: 60 * 1000,
   roleRecheckMs: 5 * 60 * 1000,
   maintenanceMs: 24 * 60 * 60 * 1000,
   firstMaintenanceDelayMs: 5 * 60 * 1000,
@@ -358,11 +359,12 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const recheckRolesOnce = oneAtATime("역할 재확인", recheckRolesAndCloseExpired);
   /** 보관 기한 정리와 백업(겹침 방지). 첫 실행 타이머와 하루 주기 타이머가 이 함수 하나를 함께 써야 서로 겹치지 않는다. */
   const runMaintenanceOnce = oneAtATime("정리·백업", runMaintenance);
-  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
+  /** 주기 작업을 등록한다: 토큰 선제 갱신·통계 저장·채팅 기억 정리·역할 재확인과 만료 세션 소켓 종료·보관 기한 정리와 백업·상태 방송. */
   const startTimers = (): void => {
     intervalTimers.push(setInterval(guarded("상태 방송 실패", broadcastStatus), STATUS_BROADCAST_MS));
     intervalTimers.push(setInterval(guarded("토큰 선제 갱신 실패", refreshTokenOnce), INTERVALS.tokenCheckMs));
     intervalTimers.push(setInterval(guarded("통계 저장 실패", () => stats.flush()), INTERVALS.statsFlushMs));
+    intervalTimers.push(setInterval(guarded("채팅 기억 정리 실패", () => pipeline.pruneExpired(clock())), INTERVALS.chatMemoryPruneMs));
     intervalTimers.push(setInterval(guarded("역할 재확인 실패", recheckRolesOnce), INTERVALS.roleRecheckMs));
     timeoutTimers.push(setTimeout(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.firstMaintenanceDelayMs));
     intervalTimers.push(setInterval(guarded("정리·백업 실패", runMaintenanceOnce), INTERVALS.maintenanceMs));

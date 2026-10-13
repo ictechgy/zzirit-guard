@@ -61,3 +61,33 @@ describe("PersonalFloodDetector", () => {
     expect(detector.observe("user-1", 20_000)).toBe(false);
   });
 });
+
+describe("기한이 지난 채팅 지우기(K16)", () => {
+  it("떼도배 감지기는 창(10초)이 지난 관측을 새 채팅 없이도 지운다", () => {
+    const detector = createGroupFloodDetector();
+    detector.observe(LONG_TEXT, ref(1), 1_000);
+    detector.observe("다른문장도배입니다아아", ref(2), 5_000);
+    expect(detector.retainedCount()).toBe(2);
+    detector.pruneExpired(11_000);
+    expect(detector.retainedCount()).toBe(1);
+    detector.pruneExpired(15_000);
+    expect(detector.retainedCount()).toBe(0);
+  });
+
+  it("떼도배 감지기를 정리해도 창 안의 관측은 발동에 그대로 쓴다", () => {
+    const detector = createGroupFloodDetector();
+    for (let user = 1; user <= 4; user += 1) detector.observe(LONG_TEXT, ref(user), user * 1_000);
+    detector.pruneExpired(5_000);
+    expect(detector.observe(LONG_TEXT, ref(5), 5_000).triggered).toBe(true);
+  });
+
+  it("개인 도배 감지기는 창(10초)이 지난 사용자를 지운다", () => {
+    const detector = createPersonalFloodDetector();
+    detector.observe("user-1", 1_000);
+    detector.observe("user-2", 5_000);
+    detector.pruneExpired(11_000);
+    expect(detector.retainedCount()).toBe(1);
+    detector.pruneExpired(15_000);
+    expect(detector.retainedCount()).toBe(0);
+  });
+});

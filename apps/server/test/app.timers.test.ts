@@ -13,7 +13,7 @@ const control = vi.hoisted(() => ({
   /** 다음 역할 재확인이 해임했다고 알릴 세션(세션 ID와 매니저 채널 ID). */
   revokedOnRecheck: [] as Array<{ sessionId: string; managerChannelId: string }>,
   /** 주기 작업이 불린 횟수(겹침 방지 확인용). */
-  calls: { recheck: 0, retention: 0, accessToken: 0 },
+  calls: { recheck: 0, retention: 0, accessToken: 0, prune: 0 },
   /** 설정되면 해당 주기 작업이 이 Promise가 끝날 때까지 멈춘다(이전 실행이 길어진 상황). */
   recheckGate: null as Promise<void> | null,
   backupGate: null as Promise<void> | null,
@@ -83,6 +83,17 @@ vi.mock("../src/db/database.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/db/database.js")>();
   return { ...original, openDatabase: (path: string) => (control.database = original.openDatabase(path)) };
 });
+// 판정 파이프라인의 기억 정리(K16)가 1분마다 불리는지 세려고 실제 파이프라인을 감싼다.
+vi.mock("../src/detection/pipeline.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/detection/pipeline.js")>();
+  return {
+    ...original,
+    createDetectionPipeline: (...args: Parameters<typeof original.createDetectionPipeline>) => {
+      const real = original.createDetectionPipeline(...args);
+      return { ...real, pruneExpired: (now: number) => { control.calls.prune += 1; real.pruneExpired(now); } };
+    },
+  };
+});
 // 앱이 만든 실제 허브를 붙잡아, 테스트에서 가짜 소켓을 붙이고 역할 재확인 주기 뒤의 종료를 확인한다.
 vi.mock("../src/realtime/hub.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/realtime/hub.js")>();
@@ -108,7 +119,7 @@ beforeEach(async () => {
   control.recheckError = null;
   control.loadChannelError = null;
   control.revokedOnRecheck = [];
-  control.calls = { recheck: 0, retention: 0, accessToken: 0 };
+  control.calls = { recheck: 0, retention: 0, accessToken: 0, prune: 0 };
   control.recheckGate = null;
   control.backupGate = null;
   control.accessTokenGate = null;
@@ -233,6 +244,18 @@ describe("만료된 세션의 소켓 종료(F2)", () => {
     expect(expired.sent.filter((event) => event.type === "session_ended")).toEqual([{ type: "session_ended", reason: "세션이 만료되었습니다. 다시 로그인하세요" }]);
     expect(expired.closedWith).toBe(4001);
     expect(active.closedWith).toBeNull();
+  });
+});
+
+describe("채팅 기억 정리(K16)", () => {
+  it("1분마다 도배·중복 감지기의 기한 지난 기억을 지우고, stop() 뒤에는 멈춘다", async () => {
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(control.calls.prune).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(control.calls.prune).toBe(1);
+    await app.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(control.calls.prune).toBe(1);
   });
 });
 
