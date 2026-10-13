@@ -33,6 +33,7 @@ def expect_usage_error(parse, argv: list[str]) -> None:
         ["--weight-decay", "nan"],
         ["--weight-decay", "inf"],
         ["--max-length", "2"],
+        ["--max-length", "7"],
         ["--max-length", "513"],
         ["--device", "cuda"],
         ["--early-stop-patience", "0"],

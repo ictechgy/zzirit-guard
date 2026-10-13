@@ -27,6 +27,11 @@ INFERENCE_CONTRACT_FILE_NAME = "inference.json"
 # 계약 형식 버전. 필드 뜻이 바뀌면 올려서 워커가 모르는 형식을 거부하게 한다.
 INFERENCE_CONTRACT_SCHEMA_VERSION = 1
 
+# 계약의 max_length 허용 범위. 상한은 위치 임베딩 한계(512)다. 하한 8은 [CLS]·[SEP]을 빼고도 문장 내용이 의미 있게
+# 남는 최소치로 정했고, 학습 인자(--max-length)도 같은 범위만 받아 학습이 읽을 수 없는 계약을 만들지 않게 한다.
+MINIMUM_SUPPORTED_LENGTH = 8
+MAXIMUM_SUPPORTED_LENGTH = 512
+
 # 계약에 반드시 있어야 하는 정수 필드. 워커가 이 값 없이는 학습 때와 같은 입력·점수를 만들 수 없다.
 REQUIRED_INTEGER_FIELDS: tuple[str, ...] = ("schema_version", "max_length", "toxic_class_index")
 
@@ -38,10 +43,10 @@ def build_inference_contract(tokenizer: PreTrainedTokenizerBase, max_length: int
     """워커용 추론 계약을 만든다.
 
     tokenizer: [CLS]·[SEP] 규칙이 든 학습 결과 토크나이저. 규칙이 없으면 계약과 동작이 어긋나므로 거부한다.
-    max_length: 학습 때의 최대 토큰 수([CLS]·[SEP] 포함). 워커는 이 값으로 잘라야 한다.
+    max_length: 학습 때의 최대 토큰 수([CLS]·[SEP] 포함, 8~512). 워커는 이 값으로 잘라야 한다.
     """
     ensure_tokenizer_wraps_special_tokens(tokenizer)
-    return {
+    contract = {
         "schema_version": INFERENCE_CONTRACT_SCHEMA_VERSION,
         "max_length": max_length,
         "toxic_class_index": TOXIC_CLASS_INDEX,
@@ -59,6 +64,8 @@ def build_inference_contract(tokenizer: PreTrainedTokenizerBase, max_length: int
         "tokenizer_files": ["tokenizer.json", "tokenizer_config.json"],
         "spec_stage1_threshold": SPEC_STAGE1_THRESHOLD,
     }
+    ensure_contract_semantics(contract)  # 쓴 뒤 읽을 수 없는 계약을 만들지 않도록 쓰기 전에도 같은 검사를 한다.
+    return contract
 
 
 def write_inference_contract_file(model_directory: Path, contract: dict) -> Path:
@@ -69,13 +76,34 @@ def write_inference_contract_file(model_directory: Path, contract: dict) -> Path
 
 
 def validate_contract(contract: object) -> dict:
-    """읽은 계약이 객체이고 필수 정수 필드를 모두 갖췄는지 확인한다. 아니면 다시 만드는 방법을 담은 오류를 낸다."""
+    """읽은 계약이 객체이고 필수 정수 필드를 갖췄으며 값의 뜻이 올바른지 확인한다. 아니면 다시 만드는 방법을 담은 오류를 낸다."""
     if not isinstance(contract, dict):
         raise ModelFormatError(f"{INFERENCE_CONTRACT_FILE_NAME}이 JSON 객체가 아닙니다. {REGENERATE_HINT}")
     missing = [name for name in REQUIRED_INTEGER_FIELDS if type(contract.get(name)) is not int]
     if missing:
         raise ModelFormatError(f"{INFERENCE_CONTRACT_FILE_NAME}에 정수 필드 {missing}가 없습니다. {REGENERATE_HINT}")
+    ensure_contract_semantics(contract)
     return contract
+
+
+def ensure_contract_semantics(contract: dict) -> None:
+    """필드 값의 뜻을 확인한다: 지원하는 schema_version, 유해 칸 1번, 허용 범위의 max_length.
+
+    왜: 정수이기만 하면 통과시키면 모르는 형식(schema 2)이나 뒤집힌 유해 칸(0), 터무니없는 max_length(1)를
+    평가·워커가 그대로 믿고 학습 때와 다른 점수를 낼 수 있다.
+    """
+    if contract["schema_version"] != INFERENCE_CONTRACT_SCHEMA_VERSION:
+        raise ModelFormatError(
+            f"{INFERENCE_CONTRACT_FILE_NAME}의 schema_version {contract['schema_version']}은 지원하지 않습니다"
+            f"(지원: {INFERENCE_CONTRACT_SCHEMA_VERSION}). {REGENERATE_HINT}"
+        )
+    if contract["toxic_class_index"] != TOXIC_CLASS_INDEX:
+        raise ModelFormatError(f"{INFERENCE_CONTRACT_FILE_NAME}의 toxic_class_index는 {TOXIC_CLASS_INDEX}여야 합니다. {REGENERATE_HINT}")
+    if not MINIMUM_SUPPORTED_LENGTH <= contract["max_length"] <= MAXIMUM_SUPPORTED_LENGTH:
+        raise ModelFormatError(
+            f"{INFERENCE_CONTRACT_FILE_NAME}의 max_length {contract['max_length']}가 "
+            f"{MINIMUM_SUPPORTED_LENGTH}~{MAXIMUM_SUPPORTED_LENGTH} 범위를 벗어납니다. {REGENERATE_HINT}"
+        )
 
 
 def read_inference_contract(model_directory: Path) -> dict | None:

@@ -27,7 +27,12 @@ from zg_stage1 import modeling
 from zg_stage1.arguments import fraction_below_one, non_negative_float, non_negative_integer, positive_float, positive_integer
 from zg_stage1.batching import BUCKET_MULTIPLIER, build_length_bucketed_batches
 from zg_stage1.data import LabeledText, count_exact_text_overlap, describe_file_provenance, load_labeled_texts
-from zg_stage1.inference_contract import build_inference_contract, write_inference_contract_file
+from zg_stage1.inference_contract import (
+    MAXIMUM_SUPPORTED_LENGTH,
+    MINIMUM_SUPPORTED_LENGTH,
+    build_inference_contract,
+    write_inference_contract_file,
+)
 from zg_stage1.errors import PathResolutionError, describe_failure, run_command_line
 from zg_stage1.metrics import METRIC_DECIMALS, STANDARD_THRESHOLD, compute_roc_auc, summarize_at_threshold
 from zg_stage1.model_card import (
@@ -70,12 +75,6 @@ DEFAULT_WARMUP_RATIO = 0.06
 
 # 문장당 최대 토큰 수([CLS]·[SEP] 포함). 워커 처리량 측정도 같은 값을 쓴다. 채팅은 대부분 이보다 훨씬 짧다.
 DEFAULT_MAX_LENGTH = 128
-
-# 위치 임베딩 한계(config.max_position_embeddings) 때문에 max_length는 이 값을 넘을 수 없다.
-MAXIMUM_SUPPORTED_LENGTH = 512
-
-# max_length 하한. [CLS]·[SEP]을 빼고 내용 토큰이 최소 하나는 들어가야 한다.
-MINIMUM_SUPPORTED_LENGTH = 3
 
 # 기본 시드(스파이크·회귀 표본과 같은 값).
 DEFAULT_SEED = 20261011
