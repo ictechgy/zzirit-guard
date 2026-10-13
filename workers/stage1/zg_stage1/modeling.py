@@ -30,8 +30,8 @@ ID_TO_LABEL: dict[int, str] = {0: "normal", 1: "toxic"}
 # ID_TO_LABEL의 역방향(라벨 이름 → 번호).
 LABEL_TO_ID: dict[str, int] = {label: index for index, label in ID_TO_LABEL.items()}
 
-# 라벨 이름이 없을 때 transformers가 채우는 기본 이름. 이 이름뿐이면 매핑 검사를 건너뛴다.
-GENERIC_LABEL_NAMES: frozenset[str] = frozenset({"LABEL_0", "LABEL_1"})
+# 라벨 이름이 없을 때 transformers가 채우는 기본 매핑. 이와 정확히 같을 때만 매핑 검사를 건너뛴다.
+GENERIC_ID_TO_LABEL: dict[int, str] = {0: "LABEL_0", 1: "LABEL_1"}
 
 # softmax 출력에서 '유해' 칸의 번호. 1차 점수는 이 칸의 확률이다.
 TOXIC_CLASS_INDEX = 1
@@ -160,9 +160,10 @@ def ensure_label_mapping_matches(model: PreTrainedModel) -> None:
     ID_TO_LABEL·LABEL_TO_ID를 config에 저장하므로 기존 학습 결과는 모두 이 검사를 통과한다.
     """
     id_to_label = {int(index): label for index, label in (model.config.id2label or {}).items()}
-    if set(id_to_label.values()) == GENERIC_LABEL_NAMES:
+    label_to_id = {str(label): int(index) for label, index in (model.config.label2id or {}).items()}
+    if id_to_label == GENERIC_ID_TO_LABEL and label_to_id == {name: index for index, name in GENERIC_ID_TO_LABEL.items()}:
         return
-    if id_to_label != ID_TO_LABEL or {str(label): int(index) for label, index in (model.config.label2id or {}).items()} != LABEL_TO_ID:
+    if id_to_label != ID_TO_LABEL or label_to_id != LABEL_TO_ID:
         raise ModelFormatError(
             f"모델 config의 라벨 매핑 {id_to_label}이 기대값 {ID_TO_LABEL}과 다릅니다. 1번 칸이 toxic이 아니면 점수가 뒤집힙니다. "
             "이 패키지의 train으로 만든 디렉터리를 --model-dir로 주세요."

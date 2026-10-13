@@ -92,7 +92,7 @@ def test_label_mapping_accepts_after_save_and_reload(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "mapping",
-    [{0: "toxic", 1: "normal"}, {0: "normal", 1: "hate"}, {0: "LABEL_0", 1: "toxic"}],
+    [{0: "toxic", 1: "normal"}, {0: "normal", 1: "hate"}, {0: "LABEL_0", 1: "toxic"}, {0: "LABEL_1", 1: "LABEL_0"}],
 )
 def test_label_mapping_rejects_reversed_or_unknown_names(mapping: dict[int, str]) -> None:
     """0번이 toxic이거나 이름이 다르면 점수가 뒤집히므로 거부한다."""
