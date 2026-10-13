@@ -865,6 +865,14 @@ describe("푸시 구독 입력", () => {
     expect(response.json().message).toEqual(expect.any(String));
   });
 
+  it("전체 구독이 상한(100개)이면 새 기기 등록은 409와 이유를 준다(K10)", async () => {
+    const insert = harness.database.prepare("INSERT INTO push_subscription (manager_channel_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, 'p', 'a', 0)");
+    for (let index = 0; index < 100; index += 1) insert.run(`m${Math.floor(index / 5)}`, `https://fcm.googleapis.com/fcm/send/${index}`);
+    const response = await harness.app.inject({ method: "POST", url: "/api/push/subscriptions", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")), payload: { endpoint: "https://fcm.googleapis.com/fcm/send/new", keys: validKeys } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().message).toContain("100");
+  });
+
   it("너무 긴 주소는 400", async () => {
     const endpoint = `https://fcm.googleapis.com/${"a".repeat(2100)}`;
     const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));

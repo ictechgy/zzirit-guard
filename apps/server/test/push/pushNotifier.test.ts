@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
 import type { Logger } from "../../src/logger.js";
-import { createPushNotifier, isAllowedPushEndpoint, PUSH_TIMEOUT_MS, PushSubscriptionError, type PushSender } from "../../src/push/pushNotifier.js";
+import { createPushNotifier, isAllowedPushEndpoint, MAX_PUSH_SUBSCRIPTIONS_PER_MANAGER, MAX_PUSH_SUBSCRIPTIONS_TOTAL, PUSH_TIMEOUT_MS, PushSubscriptionError, PushSubscriptionLimitError, type PushSender } from "../../src/push/pushNotifier.js";
 import { TEST_VAPID } from "../helpers/vapid.js";
 
 /** VAPID 설정 예시(형식 검사를 통과하는 키 쌍). */
@@ -265,5 +265,86 @@ describe("구독 해제의 소유자 확인(S14, M13)", () => {
     send.mockClear();
     await notifier.notifyAll({ title: "찌리릿 가드", body: "장애" });
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("구독 수 상한(K10)", () => {
+  /** 시계가 호출마다 1ms씩 흐르는 알림기와 DB. 등록 순서가 곧 created_at 순서가 된다. */
+  function setup() {
+    const database = openDatabase(":memory:");
+    let now = 0;
+    const notifier = createPushNotifier({ database, clock: () => (now += 1), logger: silentTestLogger(), vapid, send: vi.fn<PushSender>(async () => ({})) });
+    /** 매니저별 구독 주소(등록 순서). */
+    const endpointsOf = (managerChannelId: string) =>
+      (database.prepare("SELECT endpoint FROM push_subscription WHERE manager_channel_id = ? ORDER BY id").all(managerChannelId) as Array<{ endpoint: string }>).map((row) => row.endpoint);
+    const total = () => (database.prepare("SELECT COUNT(*) AS count FROM push_subscription").get() as { count: number }).count;
+    return { database, notifier, endpointsOf, total };
+  }
+
+  /** 매니저·번호로 만든 FCM 주소. */
+  const endpoint = (managerChannelId: string, index: number) => `https://fcm.googleapis.com/fcm/send/${managerChannelId}-${index}`;
+
+  /** 매니저마다 상한(5개)만큼 등록해 전체를 상한(100개)까지 채운다. */
+  function fillToTotalLimit(notifier: ReturnType<typeof setup>["notifier"]) {
+    for (let manager = 0; manager < MAX_PUSH_SUBSCRIPTIONS_TOTAL / MAX_PUSH_SUBSCRIPTIONS_PER_MANAGER; manager += 1) {
+      for (let index = 0; index < MAX_PUSH_SUBSCRIPTIONS_PER_MANAGER; index += 1) notifier.subscribe(`m${manager}`, subscription(endpoint(`m${manager}`, index)));
+    }
+  }
+
+  it("매니저 한 명의 구독은 5개까지이고, 여섯째를 등록하면 가장 오래된 구독을 지운다", () => {
+    const { notifier, endpointsOf } = setup();
+    expect(MAX_PUSH_SUBSCRIPTIONS_PER_MANAGER).toBe(5);
+    for (let index = 0; index < 6; index += 1) notifier.subscribe("m1", subscription(endpoint("m1", index)));
+    notifier.subscribe("m2", subscription(endpoint("m2", 0)));
+    expect(endpointsOf("m1")).toEqual([1, 2, 3, 4, 5].map((index) => endpoint("m1", index)));
+    expect(endpointsOf("m2")).toEqual([endpoint("m2", 0)]);
+  });
+
+  it("같은 주소를 다시 등록하면 행을 늘리지 않고 키만 바꾼다", () => {
+    const { database, notifier, total } = setup();
+    notifier.subscribe("m1", subscription(endpoint("m1", 0)));
+    notifier.subscribe("m1", { endpoint: endpoint("m1", 0), keys: { p256dh: "new-p256dh", auth: "new-auth" } });
+    expect(total()).toBe(1);
+    expect(database.prepare("SELECT p256dh, auth FROM push_subscription").get()).toEqual({ p256dh: "new-p256dh", auth: "new-auth" });
+  });
+
+  it("전체 구독이 100개면 새 주소는 409 오류로 거절하고 아무것도 바꾸지 않지만, 이미 있는 주소의 다시 등록은 받는다", () => {
+    const { notifier, total, endpointsOf } = setup();
+    expect(MAX_PUSH_SUBSCRIPTIONS_TOTAL).toBe(100);
+    fillToTotalLimit(notifier);
+    const rejected = (() => {
+      try {
+        notifier.subscribe("newcomer", subscription(endpoint("newcomer", 0)));
+        return null;
+      } catch (error) {
+        return error;
+      }
+    })();
+    expect(rejected).toBeInstanceOf(PushSubscriptionLimitError);
+    expect(rejected).toMatchObject({ statusCode: 409, message: expect.stringContaining("100") });
+    expect([total(), endpointsOf("newcomer")]).toEqual([100, []]);
+    expect(() => notifier.subscribe("m0", subscription(endpoint("m0", 0)))).not.toThrow();
+  });
+
+  it("전체가 100개여도 이미 5개를 둔 매니저의 새 기기는 그 매니저의 가장 오래된 것과 바꿔 넣는다", () => {
+    const { notifier, total, endpointsOf } = setup();
+    fillToTotalLimit(notifier);
+    notifier.subscribe("m3", subscription(endpoint("m3", 9)));
+    expect(total()).toBe(100);
+    expect(endpointsOf("m3")).toEqual([1, 2, 3, 4, 9].map((index) => endpoint("m3", index)));
+  });
+
+  it("다른 매니저의 주소를 넘겨받아 6개가 되면, 방금 넘겨받은 주소가 아니라 가장 오래된 것을 지운다", () => {
+    const { notifier, endpointsOf } = setup();
+    notifier.subscribe("previous-owner", subscription(endpoint("shared", 0)));
+    for (let index = 0; index < 5; index += 1) notifier.subscribe("m1", subscription(endpoint("m1", index)));
+    notifier.subscribe("m1", subscription(endpoint("shared", 0)));
+    expect(endpointsOf("m1")).toEqual([endpoint("shared", 0), ...[1, 2, 3, 4].map((index) => endpoint("m1", index))]);
+    expect(endpointsOf("previous-owner")).toEqual([]);
+  });
+
+  it("허용 목록에 없는 주소는 상한보다 먼저 400으로 거절한다", () => {
+    const { notifier } = setup();
+    expect(() => notifier.subscribe("m1", subscription("https://evil.example/x"))).toThrow(PushSubscriptionError);
   });
 });
