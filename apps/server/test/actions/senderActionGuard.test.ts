@@ -44,4 +44,19 @@ describe("SenderActionGuard(K2)", () => {
     guard.settle("restrict", "b", null);
     expect([guard.tryAcquire("restrict", "a"), guard.tryAcquire("restrict", "b")]).toEqual([null, null]);
   });
+
+  it("clearSettled는 끝난 막기(방금 성공·결과 모름)를 지우고, 보내는 중인 표시와 다른 종류는 그대로 둔다(K2b)", () => {
+    const guard = createSenderActionGuard(() => 0);
+    guard.tryAcquire("restrict", "done");
+    guard.settle("restrict", "done", { ok: true, note: null });
+    guard.tryAcquire("restrict", "unknown");
+    guard.settle("restrict", "unknown", UNKNOWN_OUTCOME);
+    guard.tryAcquire("restrict", "sending");
+    guard.tryAcquire("temporary_restrict", "done");
+    guard.settle("temporary_restrict", "done", { ok: true, note: null });
+    for (const sender of ["done", "unknown", "sending"]) guard.clearSettled("restrict", sender);
+    expect([guard.tryAcquire("restrict", "done"), guard.tryAcquire("restrict", "unknown")]).toEqual([null, null]);
+    expect(guard.tryAcquire("restrict", "sending")).toBe("in_flight");
+    expect(guard.tryAcquire("temporary_restrict", "done")).toBe("recently_succeeded");
+  });
 });

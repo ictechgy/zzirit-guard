@@ -275,13 +275,20 @@ function registerSenderRoutes(app: FastifyInstance, services: RouteServices): vo
       return sendOutcome(reply, await submitSenderAction(services, channelId, { kind: "restrict", targetChannelId: senderChannelId, verdictId }, manager));
     }),
   );
-  app.delete(
-    "/api/senders/:senderChannelId/restrict",
-    guarded(services, "restrict", async ({ request, reply, manager, channelId }) => {
-      const { senderChannelId } = senderParamSchema.parse(request.params);
-      return sendOutcome(reply, await services.executor.submit(channelId, { kind: "unrestrict", targetChannelId: senderChannelId }, actorOf(manager)));
-    }),
-  );
+  app.delete("/api/senders/:senderChannelId/restrict", guarded(services, "restrict", (context) => unrestrictSender(services, context)));
+}
+
+/**
+ * 활동 제한을 해제한다. 성공하면 그 사람의 활동 제한 막기를 지워 바로 다시 제한할 수 있게 한다(K2b).
+ * 임시 제한 막기는 지우지 않는다. 왜: 해제 API가 임시 제한도 푸는지 문서로 확인하지 못했고, 막기를 남겨 두는 쪽이 겹친 제재를 막는 안전한 방향이다.
+ * @param services 실행기와 막기 표
+ * @param context 권한 확인을 통과한 요청
+ */
+async function unrestrictSender(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
+  const { senderChannelId } = senderParamSchema.parse(request.params);
+  const outcome = await services.executor.submit(channelId, { kind: "unrestrict", targetChannelId: senderChannelId }, actorOf(manager));
+  if (outcome.ok) services.senderActions.clearSettled("restrict", senderChannelId);
+  return sendOutcome(reply, outcome);
 }
 
 /**

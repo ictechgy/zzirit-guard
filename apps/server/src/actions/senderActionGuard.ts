@@ -43,6 +43,14 @@ export interface SenderActionGuard {
    * @param outcome 실행 결과. 실행기가 예외로 끝나 결과가 없으면 null
    */
   settle(kind: SenderActionKind, senderChannelId: string, outcome: ActionOutcome | null): void;
+  /**
+   * 끝난 제재의 막기(방금 성공·결과 모름)를 지운다. 보내는 중인 표시는 그대로 둔다(K2b).
+   * 왜: 활동 제한 해제가 성공하면 그 사람은 지금 제한되지 않은 것이 확실하므로, 매니저가 60초를 기다리지 않고 바로 다시 제한할 수 있어야 한다.
+   * 왜 보내는 중은 두나: 지우면 같은 사람에게 같은 제재가 동시에 두 번 나갈 수 있다. 보내는 중인 제재는 끝날 때 settle이 표시를 다시 정한다.
+   * @param kind 제재 종류
+   * @param senderChannelId 대상 사용자 채널 ID
+   */
+  clearSettled(kind: SenderActionKind, senderChannelId: string): void;
 }
 
 /** 표의 한 칸. 보내는 중이면 기한이 없고, 끝난 뒤의 막기는 until(ms)까지다. */
@@ -66,6 +74,10 @@ export function createSenderActionGuard(clock: Clock): SenderActionGuard {
       const next = settledEntry(outcome, clock());
       if (next) entries.set(guardKey(kind, senderChannelId), next);
       else entries.delete(guardKey(kind, senderChannelId));
+    },
+    clearSettled(kind, senderChannelId) {
+      const key = guardKey(kind, senderChannelId);
+      if (entries.get(key)?.state !== "in_flight") entries.delete(key);
     },
   };
 }

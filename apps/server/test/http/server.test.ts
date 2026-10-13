@@ -726,6 +726,34 @@ describe("사람 단위 제재 중복 막기(K2)", () => {
     expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(200);
     expect(harness.submit).toHaveBeenCalledTimes(2);
   });
+
+  /** 활동 제한 해제를 보낸다. */
+  function unrestrict() {
+    return harness.app.inject({ method: "DELETE", url: "/api/senders/bad/restrict", headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+  }
+
+  it("활동 제한 해제가 성공하면 그 사람의 활동 제한 막기를 지워 바로 다시 제한할 수 있다(K2b)", async () => {
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(200);
+    expect((await unrestrict()).statusCode).toBe(200);
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(200);
+    expect(harness.submit).toHaveBeenCalledTimes(3);
+  });
+
+  it("활동 제한 해제가 성공해도 임시 제한 막기는 그대로다(K2b)", async () => {
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[0], verdict.id)).statusCode).toBe(200);
+    expect((await unrestrict()).statusCode).toBe(200);
+    expect((await send(ROUTES[0], verdict.id)).json()).toMatchObject({ error: "already_handled" });
+  });
+
+  it("활동 제한 해제가 실패하면 활동 제한 막기를 지우지 않는다(K2b)", async () => {
+    const verdict = insertCandidate();
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(200);
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 서버 오류로 실패했습니다." });
+    expect((await unrestrict()).statusCode).toBe(502);
+    expect((await send(ROUTES[1], verdict.id)).statusCode).toBe(409);
+  });
 });
 
 describe("오류 가림과 정적 폴백", () => {
