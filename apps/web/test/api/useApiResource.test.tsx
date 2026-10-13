@@ -27,6 +27,16 @@ describe("useApiResource 이전 응답 지우기(W1, C04)", () => {
     expect(result.current).toMatchObject({ data: null, error: null, loading: false });
   });
 
+  it("경로가 null이 되면 상태에서도 지워, 같은 경로로 돌아와도 새 응답 전에는 옛 데이터를 보여 주지 않는다(K23)", async () => {
+    let calls = 0;
+    stubFetch({ "GET /api/audit": () => (++calls === 1 ? json(200, [{ id: 1 }]) : never()) });
+    const { result, rerender } = renderHook(({ path }: { path: string | null }) => useApiResource<unknown[]>(path), { initialProps: { path: "/api/audit" as string | null } });
+    await waitFor(() => expect(result.current.data).toEqual([{ id: 1 }]));
+    rerender({ path: null });
+    rerender({ path: "/api/audit" });
+    expect(result.current).toMatchObject({ data: null, loading: true });
+  });
+
   it.each([
     ["401", () => json(401, { error: "unauthorized", message: "로그인이 필요합니다." })],
     ["403", () => json(403, { error: "forbidden", message: "이 기능을 쓸 권한이 없습니다." })],

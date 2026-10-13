@@ -16,6 +16,8 @@ vi.mock("../../src/state/useServerState", () => ({
   useServerState: () => ({ state: hookState.current, reload: hookStable.reload, reconnect: hookStable.reconnect, applyAutoHide: hookStable.applyAutoHide }),
 }));
 
+/** 내 정보 다시 읽기 자리 채움. 다시 읽기 동작(K23)은 따로 확인한다. */
+const noRefresh = () => undefined;
 /** 채팅 운영자 내 정보. */
 const me = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER" as const, permissions: [] };
 /** 자동 숨김을 끌 수 있는 채팅 운영자. */
@@ -40,7 +42,7 @@ describe("MainScreen", () => {
     stubFetch({});
     hookState.current = { ...initialServerState, sessionEndedReason: "" };
     const onSignedOut = vi.fn();
-    render(<MainScreen me={me} onSignedOut={onSignedOut} />);
+    render(<MainScreen me={me} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     expect(onSignedOut).toHaveBeenCalledWith("");
   });
 
@@ -48,14 +50,14 @@ describe("MainScreen", () => {
     stubFetch({});
     hookState.current = { ...initialServerState };
     const onSignedOut = vi.fn();
-    render(<MainScreen me={me} onSignedOut={onSignedOut} />);
+    render(<MainScreen me={me} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     expect(onSignedOut).not.toHaveBeenCalled();
   });
 
   it("탭을 오가도 실시간 채팅의 '위험한 것만 보기' 필터가 유지된다", async () => {
     stubFetch({ "GET /api/status": () => json(500, { error: "x", message: "x" }) });
     hookState.current = { ...initialServerState };
-    render(<MainScreen me={me} onSignedOut={() => undefined} />);
+    render(<MainScreen me={me} onSignedOut={() => undefined} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: /실시간 채팅/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: "위험한 것만 보기" }));
     await userEvent.click(screen.getByRole("button", { name: /^후보/ }));
@@ -66,7 +68,7 @@ describe("MainScreen", () => {
   it("처음 열 때까지 설정 화면을 마운트하지 않아 설정 API를 부르지 않는다", () => {
     const fetchMock = stubFetch({});
     hookState.current = { ...initialServerState };
-    render(<MainScreen me={me} onSignedOut={() => undefined} />);
+    render(<MainScreen me={me} onSignedOut={() => undefined} onRefreshMe={noRefresh} />);
     const paths = fetchMock.mock.calls.map(([url]) => String(url));
     expect(paths.filter((path) => /chat-settings|audit|rules|settings|stats|false-positives/.test(path))).toEqual([]);
   });
@@ -75,7 +77,7 @@ describe("MainScreen", () => {
     const fetchMock = stubFetch({});
     hookState.current = { ...initialServerState };
     const manager = { ...me, role: "STREAMING_CHANNEL_MANAGER" as const, permissions: ["view_audit" as const] };
-    render(<MainScreen me={manager} onSignedOut={() => undefined} />);
+    render(<MainScreen me={manager} onSignedOut={() => undefined} onRefreshMe={noRefresh} />);
     const count = (path: string) => fetchMock.mock.calls.filter(([url]) => String(url) === path).length;
     const refreshed = ["/api/stats?sinceMinutes=60", "/api/false-positives?limit=20", "/api/audit?limit=50", "/api/settings"];
     await userEvent.click(screen.getByRole("button", { name: "기록·설정" }));
@@ -100,10 +102,10 @@ describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8·B19-3, 스모�
     stubFetch({});
     hookState.current = { ...initialServerState, status: enabledStatus };
     const onSignedOut = vi.fn();
-    const { rerender } = render(<MainScreen me={manager} onSignedOut={onSignedOut} />);
+    const { rerender } = render(<MainScreen me={manager} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     expect(screen.queryByRole("alert")).toBeNull();
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason } };
-    rerender(<MainScreen me={manager} onSignedOut={onSignedOut} />);
+    rerender(<MainScreen me={manager} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
   }
 
   it("1분 한도 초과로 꺼지면 그 이유를 밝힌 안내를 목록을 밀지 않는 층에 띄우고, 닫으면 사라진다", async () => {
@@ -136,18 +138,18 @@ describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8·B19-3, 스모�
     const fetchMock = stubFetch({ "POST /api/auto-hide": () => json(200, { enabled: false }) });
     hookState.current = { ...initialServerState, status: enabledStatus };
     const onSignedOut = vi.fn();
-    const { rerender } = render(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    const { rerender } = render(<MainScreen me={switchManager} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason: "manual" } };
-    rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} />);
+    rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("처음 받은 상태가 꺼짐이면 안내를 띄우지 않는다", () => {
     stubFetch({});
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason: "breaker" } };
-    render(<MainScreen me={auditManager} onSignedOut={vi.fn()} />);
+    render(<MainScreen me={auditManager} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
@@ -157,7 +159,7 @@ describe("MainScreen 기본 성공 안내(F9)", () => {
     const verdict = (id: number) => ({ id, chatChannelId: "c", senderChannelId: `s${id}`, senderNickname: `시청자${id}`, content: `메시지${id}`, messageTime: id, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() - id });
     stubFetch({ "POST /api/verdicts/1/hide": () => json(200, { ok: true, note: null }), "POST /api/verdicts/2/ignore": () => json(200, { ok: true }) });
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict(1), verdict(2)] };
-    render(<MainScreen me={{ ...me, permissions: ["hide_message"] }} onSignedOut={vi.fn()} />);
+    render(<MainScreen me={{ ...me, permissions: ["hide_message"] }} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: /^시청자1의 .+ 메시지 숨기기$/ }));
     await waitFor(() => expect(actionToast()?.textContent).toBe("숨겼습니다."));
     await userEvent.click(screen.getByRole("button", { name: /^시청자2의 .+ 메시지 무시$/ }));
@@ -170,7 +172,7 @@ describe("MainScreen 임시 제한 요청(S13)", () => {
     const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() };
     const fetchMock = stubFetch({ "POST /api/senders/bad/temporary-restrict": () => json(200, { ok: true, note: null }) });
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
-    render(<MainScreen me={{ ...me, permissions: ["temporary_restrict"] }} onSignedOut={vi.fn()} />);
+    render(<MainScreen me={{ ...me, permissions: ["temporary_restrict"] }} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ verdictId: 7 });
@@ -189,11 +191,11 @@ describe("MainScreen 자동 숨김 스위치 응답(K17)", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     const admin = { ...switchManager, permissions: ["enable_auto_hide" as const, "disable_auto_hide" as const] };
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
-    const { rerender } = render(<MainScreen me={admin} onSignedOut={vi.fn()} />);
+    const { rerender } = render(<MainScreen me={admin} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 꺼짐" }));
     // 켜기 응답보다 실시간 status가 먼저 와서 켜짐으로 보이고, 매니저가 바로 끈다.
     hookState.current = { ...initialServerState, status: enabledStatus };
-    rerender(<MainScreen me={admin} onSignedOut={vi.fn()} />);
+    rerender(<MainScreen me={admin} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
     await waitFor(() => expect(applied).toHaveBeenCalledWith(false));
     await act(async () => resolveEnable(json(200, { enabled: true })));
@@ -217,7 +219,7 @@ describe("MainScreen 네트워크 오류로 끝난 되돌릴 수 없는 조치(K
   ])("%s 요청이 네트워크 오류로 끝나면 결과를 알 수 없음으로 보아 잠금을 붙잡고 다시 보내지 않는다", async (_label, route, name) => {
     const fetchMock = stubFetch({ [route]: networkFailure });
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
-    render(<MainScreen me={actor} onSignedOut={vi.fn()} />);
+    render(<MainScreen me={actor} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/처리 결과를 알 수 없습니다.*다시 누르지 마세요/));
     const button = screen.getByRole("button", { name }) as HTMLButtonElement;
@@ -229,10 +231,55 @@ describe("MainScreen 네트워크 오류로 끝난 되돌릴 수 없는 조치(K
   it("무시는 네트워크 오류여도 붙잡지 않는다(되돌릴 수 있고, 다시 보내도 서버가 409로 막는다)", async () => {
     stubFetch({ "POST /api/verdicts/7/ignore": networkFailure });
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
-    render(<MainScreen me={actor} onSignedOut={vi.fn()} />);
+    render(<MainScreen me={actor} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/서버에 연결할 수 없습니다/));
     expect(screen.getByRole("alert").textContent).not.toMatch(/다시 누르지 마세요/);
     await waitFor(() => expect((screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }) as HTMLButtonElement).disabled).toBe(false));
+  });
+});
+
+describe("MainScreen 내 정보 다시 읽기(K23)", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, "visibilityState");
+  });
+
+  it("실시간 연결이 다시 열리면 내 정보를 다시 읽고, 처음 연결 때는 읽지 않는다(앱을 열 때 막 읽었다)", () => {
+    stubFetch({});
+    const onRefreshMe = vi.fn();
+    const onSignedOut = vi.fn();
+    const renderWith = (realtimeConnected: boolean) => {
+      hookState.current = { ...initialServerState, realtimeConnected };
+      return <MainScreen me={me} onSignedOut={onSignedOut} onRefreshMe={onRefreshMe} />;
+    };
+    const { rerender } = render(renderWith(true));
+    expect(onRefreshMe).not.toHaveBeenCalled();
+    rerender(renderWith(false));
+    rerender(renderWith(true));
+    expect(onRefreshMe).toHaveBeenCalledTimes(1);
+  });
+
+  it("화면이 다시 보이면 내 정보를 다시 읽는다", () => {
+    stubFetch({});
+    const onRefreshMe = vi.fn();
+    hookState.current = { ...initialServerState };
+    render(<MainScreen me={me} onSignedOut={vi.fn()} onRefreshMe={onRefreshMe} />);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(onRefreshMe).toHaveBeenCalledTimes(1);
+  });
+
+  it("감사 기록 권한을 잃으면 떠 있는 시스템 꺼짐 안내에서 감사 기록 안내를 바로 뺀다", () => {
+    stubFetch({});
+    hookState.current = { ...initialServerState, status: enabledStatus };
+    const onSignedOut = vi.fn();
+    const { rerender } = render(<MainScreen me={auditManager} onSignedOut={onSignedOut} onRefreshMe={vi.fn()} />);
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false, autoHideOffReason: "breaker" } };
+    rerender(<MainScreen me={auditManager} onSignedOut={onSignedOut} onRefreshMe={vi.fn()} />);
+    expect(screen.getByRole("alert").querySelector("p")?.textContent).toBe(`자동 숨김이 꺼졌습니다(1분 한도 초과). ${AUDIT_HINT}`);
+    rerender(<MainScreen me={switchManager} onSignedOut={onSignedOut} onRefreshMe={vi.fn()} />);
+    expect(screen.getByRole("alert").querySelector("p")?.textContent).toBe("자동 숨김이 꺼졌습니다(1분 한도 초과).");
   });
 });

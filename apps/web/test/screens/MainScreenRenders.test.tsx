@@ -22,6 +22,8 @@ vi.mock("../../src/components/StatusBanner", () => ({
   },
 }));
 
+/** 내 정보 다시 읽기 자리 채움. 다시 읽기 동작(K23)은 따로 확인한다. */
+const noRefresh = () => undefined;
 /** 채팅 운영자. */
 const me: MeDto = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER", permissions: ["disable_auto_hide", "hide_message"] };
 /** 정상 상태. */
@@ -37,11 +39,11 @@ describe("MainScreen 다시 그리기(F4)", () => {
     stubFetch({});
     hook.state = { ...initialServerState, status, realtimeConnected: true };
     const onSignedOut = vi.fn();
-    const { rerender } = render(<MainScreen me={me} onSignedOut={onSignedOut} />);
+    const { rerender } = render(<MainScreen me={me} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     const rendersBefore = renders.statusBanner;
     expect(rendersBefore).toBeGreaterThan(0);
     hook.state = { ...hook.state, chatLines: [{ senderNickname: "시청자", content: "안녕", messageTime: 1, decision: "pass", seq: 0 }], nextChatSeq: 1 };
-    rerender(<MainScreen me={me} onSignedOut={onSignedOut} />);
+    rerender(<MainScreen me={me} onSignedOut={onSignedOut} onRefreshMe={noRefresh} />);
     expect(renders.statusBanner).toBe(rendersBefore);
   });
 });

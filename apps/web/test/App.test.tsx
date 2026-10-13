@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
@@ -197,5 +197,54 @@ describe("App 자동 숨김 스위치 응답 반영(K17)", () => {
     const statusReads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/status").length;
     await waitFor(() => expect(statusReads()).toBe(2));
     expect(screen.getByRole("alert").textContent).toMatch(/서버 오류입니다/);
+  });
+});
+
+describe("App 역할 변경 반영(K23)", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, "visibilityState");
+    vi.restoreAllMocks();
+  });
+
+  it("화면이 다시 보일 때 역할이 내려갔으면 감사 기록을 화면에서 바로 지운다", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const channelManager = { ...me, role: "STREAMING_CHANNEL_MANAGER", permissions: [...me.permissions, "view_audit"] };
+    const meResponses = [channelManager, me];
+    const auditEntry = { id: 1, actorType: "manager", actorChannelId: "m1", action: "ignored", targetSenderChannelId: null, verdictId: null, result: "ok", error: null, createdAt: 0 };
+    const fetchMock = stubFetch({
+      "GET /api/me": () => json(200, meResponses.shift() ?? me),
+      "GET /api/status": () => json(200, status),
+      "GET /api/candidates": () => json(200, []),
+      "POST /api/ws-ticket": () => json(200, { ticket: "t1" }),
+      "GET /api/audit?limit=50": () => json(200, [auditEntry]),
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "기록·설정" }));
+    expect(await screen.findByText(/· 무시$/)).toBeTruthy();
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(await screen.findByText(/감사 기록은 채널 관리자 이상만/)).toBeTruthy();
+    expect(screen.queryByText(/· 무시$/)).toBeNull();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/me")).toHaveLength(2);
+  });
+
+  it("다시 읽기가 세션 종료(401)면 로그인 화면으로 보낸다", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    let meCalls = 0;
+    stubFetch({
+      "GET /api/me": () => (++meCalls === 1 ? json(200, me) : json(401, { error: "unauthorized", message: "로그인이 필요합니다." })),
+      "GET /api/status": () => json(200, status),
+      "GET /api/candidates": () => json(200, []),
+      "POST /api/ws-ticket": () => json(200, { ticket: "t1" }),
+    });
+    render(<App />);
+    await screen.findByText("정상 동작 중");
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(await screen.findByRole("link", { name: "매니저 로그인" })).toBeTruthy();
   });
 });

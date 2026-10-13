@@ -100,6 +100,8 @@ export interface MainScreenProps {
   me: MeDto;
   /** 세션이 끝났을 때 로그인 화면으로 돌아간다(message는 안내 문구). 렌더마다 바뀌지 않는 함수여야 한다. */
   onSignedOut(message: string | null): void;
+  /** 내 정보(역할·권한)를 다시 읽는다(K23). 화면이 다시 보이거나 실시간이 다시 열릴 때 부른다. 렌더마다 바뀌지 않는 함수여야 한다. */
+  onRefreshMe(): void;
 }
 
 /**
@@ -142,6 +144,36 @@ function describeSystemDisable(reason: Exclude<AutoHideOffReason, "manual"> | nu
   return canViewAudit ? `${headline} ${AUDIT_HINT}` : headline;
 }
 
+/**
+ * 실시간 연결이 다시 열리면 내 정보를 다시 읽게 한다(K23). 처음 연결은 앱을 열 때 막 읽었으므로 건너뛴다.
+ * 왜: 서버는 역할을 주기적으로, 그리고 티켓을 줄 때 다시 확인해 세션 권한을 바꾸지만 화면에 알리지 않는다.
+ * 처음 읽은 권한에 머물면 권한을 잃은 매니저에게 감사 기록 같은 화면이 그대로 남는다.
+ * @param isRealtimeConnected 실시간 연결이 열려 있는지
+ * @param onRefreshMe 내 정보를 다시 읽는다(렌더마다 같은 함수)
+ */
+function useRefreshMeOnReconnect(isRealtimeConnected: boolean, onRefreshMe: () => void): void {
+  const hasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (!isRealtimeConnected) return;
+    if (hasConnectedRef.current) onRefreshMe();
+    hasConnectedRef.current = true;
+  }, [isRealtimeConnected, onRefreshMe]);
+}
+
+/**
+ * 화면이 다시 보이면 내 정보를 다시 읽게 한다(K23). 휴대폰은 앱을 오래 두었다 다시 여는 일이 잦고, 그사이 역할이 바뀌었을 수 있다.
+ * @param onRefreshMe 내 정보를 다시 읽는다(렌더마다 같은 함수)
+ */
+function useRefreshMeOnVisible(onRefreshMe: () => void): void {
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") onRefreshMe();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [onRefreshMe]);
+}
+
 /** useSystemDisableNotice 결과. */
 interface SystemDisableNotice {
   /** 보여 줄 안내 문구. 없으면 null. */
@@ -155,11 +187,13 @@ interface SystemDisableNotice {
  * 왜: 서버가 스위치를 끄면 이유는 푸시와 감사 기록에만 남아, 화면을 보던 매니저는 왜 꺼졌는지 모른다.
  * 이유를 서버 상태(autoHideOffReason)로 받으므로, 이 기기든 다른 매니저든 손으로 끈 것에는 안내하지 않는다.
  * 처음 받은 상태(모름→값)는 바뀐 것으로 보지 않는다. 다시 켜지면 낡은 안내를 지운다.
+ * 문구는 그릴 때 만든다: 떠 있는 동안 감사 기록 권한을 잃으면 감사 기록 안내를 바로 뺀다(K23).
  * @param status 서버 상태(모르면 null)
  * @param canViewAudit 감사 기록 안내를 붙일지(view_audit)
  */
 function useSystemDisableNotice(status: ServerStatus | null, canViewAudit: boolean): SystemDisableNotice {
-  const [message, setMessage] = useState<string | null>(null);
+  // 안내할 꺼짐(이유 포함). 안내가 없으면 null.
+  const [notice, setNotice] = useState<{ reason: Exclude<AutoHideOffReason, "manual"> | null } | null>(null);
   const previousRef = useRef<boolean | null>(null);
   const enabled = status?.autoHideEnabled ?? null;
   const reason = status?.autoHideOffReason ?? null;
@@ -167,14 +201,14 @@ function useSystemDisableNotice(status: ServerStatus | null, canViewAudit: boole
     const previous = previousRef.current;
     previousRef.current = enabled;
     if (enabled === null || previous === null || previous === enabled) return;
-    setMessage(enabled || reason === "manual" ? null : describeSystemDisable(reason, canViewAudit));
-  }, [enabled, reason, canViewAudit]);
-  const dismiss = useCallback(() => setMessage(null), []);
-  return { message, dismiss };
+    setNotice(enabled || reason === "manual" ? null : { reason });
+  }, [enabled, reason]);
+  const dismiss = useCallback(() => setNotice(null), []);
+  return { message: notice ? describeSystemDisable(notice.reason, canViewAudit) : null, dismiss };
 }
 
 /** 로그인 뒤 본 화면: 탭 3개(스펙 6장). 세션이 끝나면 로그인 화면으로 돌아간다. */
-export function MainScreen({ me, onSignedOut }: MainScreenProps) {
+export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
   const [tab, setTab] = useState<Tab>("candidates");
   // 왜 처음 방문 때 마운트하나: 설정 화면은 마운트되자마자 감사 기록·규칙·통계와 치지직 API를 직접 부르는 /api/chat-settings를 읽고 15초 상태 갱신을 시작한다. 설정을 열지 않는 매니저에게는 필요 없는 호출이다.
   const [hasVisitedSettings, setHasVisitedSettings] = useState(false);
@@ -197,6 +231,8 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
     [onSignedOut, applyAutoHide, reload],
   );
   const systemDisableNotice = useSystemDisableNotice(state.status, me.permissions.includes("view_audit"));
+  useRefreshMeOnReconnect(state.realtimeConnected, onRefreshMe);
+  useRefreshMeOnVisible(onRefreshMe);
   useEffect(() => {
     if (state.sessionEndedReason !== null) onSignedOut(state.sessionEndedReason);
   }, [state.sessionEndedReason, onSignedOut]);
