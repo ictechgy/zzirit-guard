@@ -88,6 +88,18 @@ describe("serverReducer", () => {
     expect(state.replayLog).toBeNull();
   });
 
+  it("스위치 응답 값을 상태에 넣고, 조회 중이면 조회 결과 위에 다시 적용한다(K17)", () => {
+    const loaded = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [] }]);
+    expect(serverReducer(loaded, { type: "auto_hide_applied", enabled: true }).status).toEqual({ ...status, autoHideEnabled: true, autoHideOffReason: null });
+    const turnedOff = reduce([{ type: "snapshot_started" }, { type: "auto_hide_applied", enabled: false }, { type: "snapshot_loaded", status: { ...status, autoHideEnabled: true }, verdicts: [] }], loaded);
+    expect(turnedOff.status).toMatchObject({ autoHideEnabled: false, autoHideOffReason: "manual" });
+    expect(turnedOff.replayLog).toBeNull();
+  });
+
+  it("상태를 아직 모르면 스위치 응답을 넣지 않는다(K17)", () => {
+    expect(serverReducer(initialServerState, { type: "auto_hide_applied", enabled: true })).toBe(initialServerState);
+  });
+
   it("다시 조회하면 기존 판정과 id로 합친다(재연결, R-3)", () => {
     const before = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [verdict(1), verdict(2)] }]);
     const after = reduce([{ type: "snapshot_started" }, { type: "snapshot_loaded", status, verdicts: [verdict(1, { status: "ignored" }), verdict(3)] }], before);

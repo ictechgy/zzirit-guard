@@ -26,6 +26,55 @@ const REALTIME_REJECTED_MESSAGE = "실시간 연결이 계속 거절됩니다. �
 interface ActionResponse {
   /** 매니저에게 보여 줄 안내(예: "이미 사라진 메시지입니다"). */
   note?: string | null;
+  /** 자동 숨김 스위치의 지금 값(스위치 응답에만 있다). */
+  enabled?: boolean;
+}
+
+/** 조치 요청 함수. 로그인이 필요한 오류면 로그인 화면으로 보내고 오류를 다시 던진다. */
+type SendAction = (path: string, body?: unknown) => Promise<ActionResponse>;
+
+/** 스위치 응답을 화면의 서버 상태와 맞추는 도구. */
+interface AutoHideSync {
+  /** 응답의 스위치 값을 바로 상태에 넣는다(useServerState.applyAutoHide). */
+  apply(enabled: boolean): void;
+  /** 서버 상태를 다시 읽는다(useServerState.reload). */
+  reload(): void;
+  /**
+   * 마지막으로 보낸 스위치 요청의 순번. MainScreen이 ref로 들고 있다.
+   * 왜 ref인가: 동작 묶음(createCandidateActions)이 다시 만들어져도 순번이 이어져야, 앞 묶음이 보낸 요청의 늦은 응답을 가려낼 수 있다.
+   */
+  sequence: { latest: number };
+}
+
+/**
+ * 자동 숨김 스위치 요청 함수를 만든다(K17). 성공하면 응답의 enabled를 바로 상태에 넣고, 실패하면 서버 상태를 다시 읽는다.
+ * 왜: 실시간 연결이 끊긴 동안에는 status 방송이 오지 않는다. 응답 값을 버리면 스위치가 옛 값(꺼짐)에 머물러,
+ * 다음 누름이 끄기 대신 켜기를 다시 보내 이 기기로는 자동 숨김을 끌 수 없다.
+ * 마지막으로 보낸 요청의 응답만 넣는다: 늦게 온 앞 요청의 응답이 뒤에 보낸 요청의 결과를 덮지 않게 한다.
+ * @param send 요청 함수
+ * @param sync 상태 반영·다시 읽기
+ */
+function createAutoHideSender(send: SendAction, sync: AutoHideSync): (enabled: boolean) => Promise<string | null> {
+  return async (enabled) => {
+    const request = ++sync.sequence.latest;
+    const response = await send("/api/auto-hide", { enabled }).catch((error: unknown) => {
+      // 로그인 화면으로 가는 중이면 다시 읽지 않는다(어차피 버려지는 요청이다).
+      if (!requiresSignIn(error)) sync.reload();
+      throw error;
+    });
+    if (request === sync.sequence.latest) applyToggleResponse(response, sync);
+    return response.note ?? null;
+  };
+}
+
+/**
+ * 스위치 응답 값을 넣는다. 응답에 값이 없으면(모르는 응답 모양) 추측하지 않고 서버 상태를 다시 읽는다.
+ * @param response 스위치 응답
+ * @param sync 상태 반영·다시 읽기
+ */
+function applyToggleResponse(response: ActionResponse, sync: AutoHideSync): void {
+  if (typeof response.enabled === "boolean") sync.apply(response.enabled);
+  else sync.reload();
 }
 
 /** MainScreen 속성. */
@@ -40,9 +89,10 @@ export interface MainScreenProps {
  * 후보 화면 동작을 API로 채운다. 결과 상태는 서버가 WebSocket으로 다시 알려 화면이 바뀐다.
  * 로그인이 필요한 오류(401·409 no_channel)면 로그인 화면으로 보내고, 오류는 다시 던져 화면에 남긴다.
  * @param onSignedOut 로그인 화면으로 보낸다
+ * @param autoHideSync 스위치 응답을 서버 상태에 넣거나 다시 읽는다(K17)
  */
-function createCandidateActions(onSignedOut: (message: string | null) => void): CandidateActions {
-  const send = (path: string, body?: unknown) =>
+function createCandidateActions(onSignedOut: (message: string | null) => void, autoHideSync: AutoHideSync): CandidateActions {
+  const send: SendAction = (path, body) =>
     apiSend<ActionResponse>("POST", path, body).catch((error: unknown) => {
       if (requiresSignIn(error)) onSignedOut(error.message);
       throw error;
@@ -54,7 +104,7 @@ function createCandidateActions(onSignedOut: (message: string | null) => void): 
       (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { verdictId: group.verdicts[0]?.id })).note ?? TEMPORARY_RESTRICT_DONE,
     ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? IGNORE_DONE,
     reportFalsePositive: async (verdict) => (await send(`/api/verdicts/${verdict.id}/false-positive`)).note ?? FALSE_POSITIVE_DONE,
-    setAutoHide: async (enabled) => (await send("/api/auto-hide", { enabled })).note ?? null,
+    setAutoHide: createAutoHideSender(send, autoHideSync),
   };
 }
 
@@ -119,9 +169,14 @@ export function MainScreen({ me, onSignedOut }: MainScreenProps) {
     }
     setTab(next);
   };
-  const { state, reload, reconnect } = useServerState();
+  const { state, reload, reconnect, applyAutoHide } = useServerState();
   const now = useNow(NOW_REFRESH_MS);
-  const actions = useMemo(() => createCandidateActions(onSignedOut), [onSignedOut]);
+  // 스위치 요청 순번(K17). 동작 묶음이 다시 만들어져도 이어져야 늦게 온 앞 요청의 응답을 가려내므로 ref에 둔다.
+  const autoHideSequence = useRef({ latest: 0 });
+  const actions = useMemo(
+    () => createCandidateActions(onSignedOut, { apply: applyAutoHide, reload, sequence: autoHideSequence.current }),
+    [onSignedOut, applyAutoHide, reload],
+  );
   const systemDisableNotice = useSystemDisableNotice(state.status, me.permissions.includes("view_audit"));
   useEffect(() => {
     if (state.sessionEndedReason !== null) onSignedOut(state.sessionEndedReason);

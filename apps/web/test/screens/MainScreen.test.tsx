@@ -1,5 +1,5 @@
 import type { MeDto, ServerStatus } from "@zzirit-guard/shared";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MainScreen } from "../../src/screens/MainScreen";
@@ -8,10 +8,12 @@ import { json, stubFetch } from "../helpers/stubFetch";
 
 /** 훅이 돌려줄 서버 상태. 테스트마다 바꾼다. */
 const hookState = vi.hoisted(() => ({ current: null as ServerState | null }));
+/** 훅이 돌려줄 함수들. 실제 훅의 useCallback처럼 렌더마다 같은 함수다. */
+const hookStable = vi.hoisted(() => ({ reload: () => undefined, reconnect: () => undefined, applyAutoHide: (_enabled: boolean) => undefined }));
 
 vi.mock("../../src/state/useServerState", () => ({
   /** 고정 상태를 돌려주는 가짜 훅(연결·조회는 useServerState 테스트가 다룬다). */
-  useServerState: () => ({ state: hookState.current, reload: () => undefined, reconnect: () => undefined }),
+  useServerState: () => ({ state: hookState.current, reload: hookStable.reload, reconnect: hookStable.reconnect, applyAutoHide: hookStable.applyAutoHide }),
 }));
 
 /** 채팅 운영자 내 정보. */
@@ -172,5 +174,29 @@ describe("MainScreen 임시 제한 요청(S13)", () => {
     await userEvent.click(screen.getByRole("button", { name: "악플러 임시 제한" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ verdictId: 7 });
+  });
+});
+
+describe("MainScreen 자동 숨김 스위치 응답(K17)", () => {
+  it("늦게 온 앞 요청(켜기)의 응답은 뒤에 보낸 요청(끄기)의 결과를 덮지 않는다", async () => {
+    const applied = vi.spyOn(hookStable, "applyAutoHide");
+    let resolveEnable: (response: Response) => void = () => undefined;
+    const enableResponse = new Promise<Response>((resolve) => {
+      resolveEnable = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled ? enableResponse : Promise.resolve(json(200, { enabled: false }))));
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const admin = { ...switchManager, permissions: ["enable_auto_hide" as const, "disable_auto_hide" as const] };
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false } };
+    const { rerender } = render(<MainScreen me={admin} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 꺼짐" }));
+    // 켜기 응답보다 실시간 status가 먼저 와서 켜짐으로 보이고, 매니저가 바로 끈다.
+    hookState.current = { ...initialServerState, status: enabledStatus };
+    rerender(<MainScreen me={admin} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
+    await waitFor(() => expect(applied).toHaveBeenCalledWith(false));
+    await act(async () => resolveEnable(json(200, { enabled: true })));
+    expect(applied.mock.calls).toEqual([[false]]);
   });
 });

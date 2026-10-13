@@ -12,6 +12,12 @@ export interface ServerConnection {
   reload(): void;
   /** 거절로 멈춘 실시간 연결을 다시 시작한다(R-6). */
   reconnect(): void;
+  /**
+   * 자동 숨김 스위치 요청의 응답 값을 바로 상태에 넣는다(K17). 렌더마다 같은 함수다.
+   * 왜: 실시간 연결이 끊긴 동안에는 status 방송이 오지 않아, 이것이 없으면 스위치가 옛 값에 머문다.
+   * @param enabled 서버가 응답한 스위치 값
+   */
+  applyAutoHide(enabled: boolean): void;
 }
 
 /** 상태·후보 조회기. 한 번에 하나만 돌고, 도는 중에 다시 요청되면 끝난 뒤 한 번 더 읽는다. */
@@ -86,7 +92,8 @@ export function useServerState(): ServerConnection {
   }, []);
   const reload = useCallback(() => controls.current?.loader.request(), []);
   const reconnect = useCallback(() => controls.current?.connection.start(), []);
-  return { state, reload, reconnect };
+  const applyAutoHide = useCallback((enabled: boolean) => dispatch({ type: "auto_hide_applied", enabled }), []);
+  return { state, reload, reconnect, applyAutoHide };
 }
 
 /**

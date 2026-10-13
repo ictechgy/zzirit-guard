@@ -153,3 +153,49 @@ describe("App 세션 종료(W1 확인)", () => {
     expect(screen.queryByText("닉네임1")).toBeNull();
   });
 });
+
+describe("App 자동 숨김 스위치 응답 반영(K17)", () => {
+  /** 티켓은 받지만 아무 메시지도 보내지 않는 가짜 WebSocket: 실시간이 끊긴 것처럼 status 방송이 오지 않는다. */
+  class SilentWebSocket {
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event: { code: number }) => void) | null = null;
+    /** @param url 열려는 주소(쓰지 않지만 WebSocket 생성자 모양을 맞춘다) */
+    constructor(readonly url: string) {}
+    /** 닫기는 아무것도 하지 않는다(메시지를 보낸 적이 없다). */
+    close(): void {
+      this.onmessage = null;
+    }
+  }
+  /** 스위치를 켜고 끌 수 있는 채널 관리자. */
+  const admin = { ...me, role: "STREAMING_CHANNEL_MANAGER", permissions: ["enable_auto_hide", "disable_auto_hide"] };
+  /** 스위치 외의 공통 응답. */
+  const baseRoutes = {
+    "GET /api/me": () => json(200, admin),
+    "GET /api/status": () => json(200, status),
+    "GET /api/candidates": () => json(200, []),
+    "POST /api/ws-ticket": () => json(200, { ticket: "t1" }),
+  };
+
+  it("실시간이 끊긴 동안 켜기가 성공하면 응답 값을 바로 반영해, 다음 누름은 끄기를 보낸다", async () => {
+    vi.stubGlobal("WebSocket", SilentWebSocket);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const fetchMock = stubFetch({ ...baseRoutes, "POST /api/auto-hide": (init) => json(200, { enabled: (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled }) });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "자동 숨김: 꺼짐" }));
+    await userEvent.click(await screen.findByRole("button", { name: "자동 숨김: 켜짐" }));
+    const toggleBodies = () => fetchMock.mock.calls.filter(([url]) => url === "/api/auto-hide").map(([, init]) => JSON.parse(String(init?.body)) as unknown);
+    await waitFor(() => expect(toggleBodies()).toEqual([{ enabled: true }, { enabled: false }]));
+    expect(await screen.findByRole("button", { name: "자동 숨김: 꺼짐" })).toBeTruthy();
+  });
+
+  it("스위치 요청이 실패하면 서버 상태를 다시 읽는다", async () => {
+    vi.stubGlobal("WebSocket", SilentWebSocket);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const fetchMock = stubFetch({ ...baseRoutes, "POST /api/auto-hide": () => json(500, { error: "internal", message: "서버 오류입니다." }) });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "자동 숨김: 꺼짐" }));
+    const statusReads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/status").length;
+    await waitFor(() => expect(statusReads()).toBe(2));
+    expect(screen.getByRole("alert").textContent).toMatch(/서버 오류입니다/);
+  });
+});

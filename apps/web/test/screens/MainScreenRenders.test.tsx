@@ -6,13 +6,13 @@ import { initialServerState, type ServerState } from "../../src/state/serverRedu
 import { stubFetch } from "../helpers/stubFetch";
 
 /** 훅이 돌려줄 서버 상태와, 렌더마다 같은 함수(실제 훅의 useCallback처럼). 테스트마다 상태를 바꾼다. */
-const hook = vi.hoisted(() => ({ state: null as ServerState | null, reload: () => undefined, reconnect: () => undefined }));
+const hook = vi.hoisted(() => ({ state: null as ServerState | null, reload: () => undefined, reconnect: () => undefined, applyAutoHide: (_enabled: boolean) => undefined }));
 /** 상태 배너가 그려진 횟수. 후보 화면이 다시 그려졌는지 재는 데 쓴다(배너는 후보 화면 안에만 있다). */
 const renders = vi.hoisted(() => ({ statusBanner: 0 }));
 
 vi.mock("../../src/state/useServerState", () => ({
-  /** 고정 상태를 돌려주는 가짜 훅. reload·reconnect는 렌더마다 같은 함수다. */
-  useServerState: () => ({ state: hook.state, reload: hook.reload, reconnect: hook.reconnect }),
+  /** 고정 상태를 돌려주는 가짜 훅. reload·reconnect·applyAutoHide는 렌더마다 같은 함수다. */
+  useServerState: () => ({ state: hook.state, reload: hook.reload, reconnect: hook.reconnect, applyAutoHide: hook.applyAutoHide }),
 }));
 vi.mock("../../src/components/StatusBanner", () => ({
   /** 그려진 횟수만 세는 가짜 배너. */

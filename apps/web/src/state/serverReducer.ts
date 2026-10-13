@@ -11,6 +11,22 @@ export const MAX_CHAT_LINES = 300;
  */
 export type ChatLineEntry = ChatLine & { seq: number };
 
+/**
+ * 자동 숨김 스위치 요청의 응답 값을 상태에 넣는 동작(K17).
+ * 왜: 실시간 연결이 끊긴 동안에는 서버 status 방송이 오지 않아, 응답 값을 넣지 않으면 스위치가 옛 값에 머문다.
+ */
+export interface AutoHideApplied {
+  type: "auto_hide_applied";
+  /** 서버가 응답한 스위치 값. */
+  enabled: boolean;
+}
+
+/**
+ * 조회 중에 기록해 두었다가 조회 결과 위에 다시 적용할 변화: 판정·상태 이벤트와 스위치 응답.
+ * 왜 스위치 응답도 넣나: 스위치를 누르기 전에 보낸 조회가 늦게 도착하면 옛 스위치 값으로 되돌린다.
+ */
+export type ReplayedChange = RealtimeEvent | AutoHideApplied;
+
 /** 화면이 쓰는 서버 상태. */
 export interface ServerState {
   /** 서버 상태(상태 배너·스위치). 아직 모르면 null. */
@@ -33,7 +49,7 @@ export interface ServerState {
    * 조회(snapshot)가 진행 중일 때 받은 판정·상태 이벤트. 조회 결과를 넣은 뒤 그 위에 다시 적용한다. 조회 중이 아니면 null.
    * 왜: 조회 결과는 요청 시점의 사진이라, 응답을 기다리는 동안 온 이벤트보다 오래됐을 수 있다(X1).
    */
-  replayLog: RealtimeEvent[] | null;
+  replayLog: ReplayedChange[] | null;
 }
 
 /** 상태를 바꾸는 동작. 조회는 snapshot_started → snapshot_loaded·snapshot_failed 순서로 하나씩만 진행한다(useServerState가 보장). */
@@ -43,15 +59,16 @@ export type ServerAction =
   | { type: "snapshot_failed"; message: string }
   | { type: "event"; event: RealtimeEvent }
   | { type: "connection"; connected: boolean }
-  | { type: "realtime_rejected" };
+  | { type: "realtime_rejected" }
+  | AutoHideApplied;
 
 /** 처음 상태. */
 export const initialServerState: ServerState = {
   status: null, verdicts: [], chatLines: [], nextChatSeq: 0, realtimeConnected: false, realtimeRejected: false, sessionEndedReason: null, loadError: null, replayLog: null,
 };
 
-/** 조회 중에 기록해 두었다가 다시 적용할 이벤트 종류. 채팅 줄·세션 종료는 다시 적용할 필요가 없다. */
-const REPLAYED_EVENT_TYPES: ReadonlySet<RealtimeEvent["type"]> = new Set(["verdict", "verdict_status", "status"]);
+/** 조회 중에 기록해 두었다가 다시 적용할 변화 종류. 채팅 줄·세션 종료는 다시 적용할 필요가 없다. */
+const REPLAYED_CHANGE_TYPES: ReadonlySet<ReplayedChange["type"]> = new Set(["verdict", "verdict_status", "status", "auto_hide_applied"]);
 
 /** 순수 리듀서. 화면 로직을 테스트할 수 있게 부수 효과 없이 둔다. */
 export function serverReducer(state: ServerState, action: ServerAction): ServerState {
@@ -68,19 +85,37 @@ export function serverReducer(state: ServerState, action: ServerAction): ServerS
       return { ...state, realtimeConnected: false, realtimeRejected: true };
     case "event":
       return recordForReplay(applyEvent(state, action.event), action.event);
+    case "auto_hide_applied":
+      return recordForReplay(applyChange(state, action), action);
   }
 }
 
 /** 조회 결과를 합치고, 조회 중에 받은 이벤트를 그 위에 다시 적용한다. */
 function applySnapshot(state: ServerState, status: ServerStatus, verdicts: readonly VerdictDto[]): ServerState {
   const base: ServerState = { ...state, status, verdicts: pruneVerdicts(mergeVerdicts(state.verdicts, verdicts)), loadError: null, replayLog: null };
-  return (state.replayLog ?? []).reduce(applyEvent, base);
+  return (state.replayLog ?? []).reduce(applyChange, base);
 }
 
-/** 조회 중이면 판정·상태 이벤트를 기록해 둔다. */
-function recordForReplay(state: ServerState, event: RealtimeEvent): ServerState {
-  if (!state.replayLog || !REPLAYED_EVENT_TYPES.has(event.type)) return state;
-  return { ...state, replayLog: [...state.replayLog, event] };
+/** 조회 중이면 판정·상태 이벤트와 스위치 응답을 기록해 둔다. */
+function recordForReplay(state: ServerState, change: ReplayedChange): ServerState {
+  if (!state.replayLog || !REPLAYED_CHANGE_TYPES.has(change.type)) return state;
+  return { ...state, replayLog: [...state.replayLog, change] };
+}
+
+/** 기록된 변화 하나를 반영한다: 스위치 응답이면 스위치 값만, 그 밖에는 실시간 이벤트로. */
+function applyChange(state: ServerState, change: ReplayedChange): ServerState {
+  return change.type === "auto_hide_applied" ? applyAutoHideResult(state, change.enabled) : applyEvent(state, change);
+}
+
+/**
+ * 스위치 응답 값을 서버 상태에 넣는다(K17). 상태를 아직 모르면 그대로 둔다(그동안 스위치는 누를 수 없다).
+ * 꺼짐 이유는 서버와 같게 맞춘다: 켜면 null, 매니저가 끄면 manual(app.ts). 그래야 시스템 꺼짐 안내가 잘못 뜨지 않는다.
+ * @param state 지금 상태
+ * @param enabled 서버가 응답한 스위치 값
+ */
+function applyAutoHideResult(state: ServerState, enabled: boolean): ServerState {
+  if (!state.status) return state;
+  return { ...state, status: { ...state.status, autoHideEnabled: enabled, autoHideOffReason: enabled ? null : "manual" } };
 }
 
 /** 실시간 이벤트 반영. */
