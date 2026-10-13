@@ -106,7 +106,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     api, tokenManager, auditLog, verdicts, clock, logger,
     onVerdictStatus: (verdictId, status) => hub.broadcast({ type: "verdict_status", verdictId, status }),
   });
-  const autoHide = createAutoHideSwitch({ settings, auditLog, clock, logger });
+  const autoHide = createAutoHideSwitch({ database, settings, auditLog, clock, logger });
   /** 숨김을 보내는 중인 판정 모음. 매니저 숨기기(routes)와 자동 숨김이 함께 써서 같은 판정에 숨김이 두 번 나가지 않게 한다(S12). */
   const claims = createVerdictClaims();
   /** 사람 단위 제재가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). 제재는 매니저 라우트에서만 보낸다. */

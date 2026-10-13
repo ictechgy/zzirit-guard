@@ -30,7 +30,7 @@ beforeEach(() => {
   database.prepare("INSERT INTO setting (channel_id) VALUES ('c1')").run();
   verdicts = createVerdictRepository(database, () => 0);
   stats = createMinuteStats(database, () => 0);
-  autoHide = createAutoHideSwitch({ settings: createSettingsRepository(database), auditLog: createAuditLog(database, () => 0), clock: () => 0 });
+  autoHide = createAutoHideSwitch({ database, settings: createSettingsRepository(database), auditLog: createAuditLog(database, () => 0), clock: () => 0 });
   submit = vi.fn(async () => ({ ok: true, note: null }));
   events = [];
   chatLines = [];
