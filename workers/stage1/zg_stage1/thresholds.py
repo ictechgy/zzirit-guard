@@ -30,9 +30,6 @@ SPEC_STAGE1_THRESHOLD = 0.05
 # 보고하는 임계값의 소수 자릿수. 이 자릿수로 '내림'해서, 보고한 값을 그대로 써도 재현율 목표를 지키게 한다.
 THRESHOLD_DECIMALS = 6
 
-# 부동소수 곱셈 오차로 필요한 건수가 1 늘어나는 것을 막는 여유값(예: 0.97 × 100 = 97.00000000000001).
-CEILING_TOLERANCE = 1e-9
-
 
 @dataclass(frozen=True)
 class ThresholdSelection:
@@ -79,6 +76,16 @@ def collect_toxic_scores_descending(scores: Sequence[float], labels: Sequence[in
     return toxic_scores
 
 
+def compute_required_toxic_count(target_recall: float, toxic_count: int) -> int:
+    """재현율 목표를 채우는 데 필요한 유해 건수 ceil(목표 × 유해 수)를 정확한 십진 계산으로 구한다. 최소 1이다.
+
+    왜 Decimal인가: float 곱(0.97 × 100 = 97.00000000000001)은 필요 건수를 1 늘리고, 여유값을 빼 보정하면 반대로
+    목표를 못 채우는 값(0.970000000001 → 97건)이 나온다. 사용자가 입력한 십진 표기 그대로 계산하면 둘 다 없다.
+    최소 1로 묶는 이유는 아주 작은 목표에서 인덱스 -1(가장 낮은 점수)을 고르지 않기 위해서다.
+    """
+    return max(1, math.ceil(Decimal(str(target_recall)) * toxic_count))
+
+
 def select_threshold_for_recall(scores: Sequence[float], labels: Sequence[int], target_recall: float = DEFAULT_TARGET_RECALL) -> ThresholdSelection:
     """유해 재현율이 target_recall 이상인 임계값 중 가장 큰 값을 고른다(순수 함수).
 
@@ -90,7 +97,7 @@ def select_threshold_for_recall(scores: Sequence[float], labels: Sequence[int], 
     """
     validate_target_recall(target_recall)
     toxic_scores = collect_toxic_scores_descending(scores, labels)
-    required_count = math.ceil(target_recall * len(toxic_scores) - CEILING_TOLERANCE)
+    required_count = compute_required_toxic_count(target_recall, len(toxic_scores))
     threshold = round_down_threshold(toxic_scores[required_count - 1])
     selected = summarize_at_threshold(scores, labels, threshold)
     spec_default = summarize_at_threshold(scores, labels, SPEC_STAGE1_THRESHOLD)
