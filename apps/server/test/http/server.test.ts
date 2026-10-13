@@ -288,6 +288,15 @@ describe("규칙·감사 기록", () => {
     expect(response.json().message).toMatch(/규칙이 비었습니다/);
   });
 
+  it("한 단어·공용 접미사 허용 도메인은 400과 이유를 준다(K14)", async () => {
+    const headers = mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER"));
+    for (const pattern of ["com", "co.kr", "https://com/"]) {
+      const response = await harness.app.inject({ method: "POST", url: "/api/rules", headers, payload: { kind: "allow_domain", pattern } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toContain("허용 도메인");
+    }
+  });
+
   it("감사 기록은 채팅 운영자에게 보이지 않는다", async () => {
     const response = await harness.app.inject({ method: "GET", url: "/api/audit", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
     expect(response.statusCode).toBe(403);
