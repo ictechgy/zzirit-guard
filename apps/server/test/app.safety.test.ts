@@ -1,4 +1,6 @@
+import { chmodSync, statSync } from "node:fs";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp, type App } from "../src/app.js";
 import type { Logger } from "../src/logger.js";
@@ -75,5 +77,18 @@ describe("시작 안전장치: 저장된 채널이 설정과 다를 때", () => 
     expect(issuedTokens.length).toBeGreaterThan(0);
     const loggedText = JSON.stringify(recording.lines);
     issuedTokens.forEach((token) => expect(loggedText).not.toContain(token));
+  });
+});
+
+describe("데이터 파일 권한(K13)", () => {
+  it("시작할 때 데이터 폴더를 0700, DB와 -wal·-shm을 0600으로 맞춘다", async () => {
+    fake = await startFakeChzzk();
+    const dataDirectory = createDataDirectory();
+    chmodSync(dataDirectory, 0o755);
+    const app = await createApp(buildTestConfig(fake, dataDirectory), { encryptionKey: newEncryptionKey(), logger: createRecordingLogger().logger, pushSender: async () => ({}) });
+    apps.push(app);
+    const modeOf = (name: string) => statSync(join(dataDirectory, name)).mode & 0o777;
+    expect(modeOf(".")).toBe(0o700);
+    expect(["zzirit-guard.sqlite", "zzirit-guard.sqlite-wal", "zzirit-guard.sqlite-shm"].map(modeOf)).toEqual([0o600, 0o600, 0o600]);
   });
 });

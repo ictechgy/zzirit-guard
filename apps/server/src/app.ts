@@ -13,6 +13,7 @@ import type { AppConfig } from "./config.js";
 import { createCredentialStore } from "./connection/credentialStore.js";
 import { createTokenManager } from "./connection/tokenManager.js";
 import { openDatabase } from "./db/database.js";
+import { restrictDatabaseFiles, restrictDataDirectory } from "./db/filePermissions.js";
 import { createGroupFloodDetector, createPersonalFloodDetector } from "./detection/floodDetectors.js";
 import { createDuplicateTracker } from "./detection/messageTraits.js";
 import { createDetectionPipeline } from "./detection/pipeline.js";
@@ -76,8 +77,11 @@ const STUCK_TASK_SKIP_THRESHOLD = 3;
 export async function createApp(config: AppConfig, options: AppOptions): Promise<App> {
   const clock = options.clock ?? systemClock;
   const logger = options.logger ?? createConsoleLogger();
+  // 데이터 폴더와 DB 파일은 소유자만 읽게 한다(K13). 예전 설치에서 넓게 만들어진 권한도 시작할 때마다 바로잡는다.
+  restrictDataDirectory(config.dataDirectory);
   mkdirSync(config.backupDirectory, { recursive: true });
   const database = openDatabase(config.databasePath);
+  restrictDatabaseFiles(config.databasePath);
   const api = createChzzkApi({
     apiBase: config.chzzkApiBase,
     clientId: config.chzzkClientId,
