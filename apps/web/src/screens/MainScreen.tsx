@@ -56,6 +56,8 @@ interface AutoHideSync {
   apply(enabled: boolean): void;
   /** 서버 상태를 다시 읽는다(useServerState.reload). */
   reload(): void;
+  /** 지금까지 받은 실시간 status 이벤트 수(useServerState.statusEventCount). */
+  statusEventCount(): number;
   /**
    * 마지막으로 보낸 스위치 요청의 순번. MainScreen이 ref로 들고 있다.
    * 왜 ref인가: 동작 묶음(createCandidateActions)이 다시 만들어져도 순번이 이어져야, 앞 묶음이 보낸 요청의 늦은 응답을 가려낼 수 있다.
@@ -68,18 +70,22 @@ interface AutoHideSync {
  * 왜: 실시간 연결이 끊긴 동안에는 status 방송이 오지 않는다. 응답 값을 버리면 스위치가 옛 값(꺼짐)에 머물러,
  * 다음 누름이 끄기 대신 켜기를 다시 보내 이 기기로는 자동 숨김을 끌 수 없다.
  * 마지막으로 보낸 요청의 응답만 넣는다: 늦게 온 앞 요청의 응답이 뒤에 보낸 요청의 결과를 덮지 않게 한다.
+ * 요청을 보낸 뒤 실시간 status가 왔으면 응답을 넣지 않는다: 그 status가 더 새 서버 값이다(예: 그사이 다른 매니저가 다시 켰다).
+ * 실시간이 끊겨 있으면 status가 오지 않으므로 응답을 넣는다(위 이유).
  * @param send 요청 함수
- * @param sync 상태 반영·다시 읽기
+ * @param sync 상태 반영·다시 읽기·status 이벤트 수
  */
 function createAutoHideSender(send: SendAction, sync: AutoHideSync): (enabled: boolean) => Promise<string | null> {
   return async (enabled) => {
     const request = ++sync.sequence.latest;
+    const statusEventsAtSend = sync.statusEventCount();
     const response = await send("/api/auto-hide", { enabled }).catch((error: unknown) => {
       // 로그인 화면으로 가는 중이면 다시 읽지 않는다(어차피 버려지는 요청이다).
       if (!requiresSignIn(error)) sync.reload();
       throw error;
     });
-    if (request === sync.sequence.latest) applyToggleResponse(response, sync);
+    const isNewest = request === sync.sequence.latest && sync.statusEventCount() === statusEventsAtSend;
+    if (isNewest) applyToggleResponse(response, sync);
     return response.note ?? null;
   };
 }
@@ -220,13 +226,13 @@ export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
     }
     setTab(next);
   };
-  const { state, reload, reconnect, applyAutoHide } = useServerState();
+  const { state, reload, reconnect, applyAutoHide, statusEventCount } = useServerState();
   const now = useNow(NOW_REFRESH_MS);
   // 스위치 요청 순번(K17). 동작 묶음이 다시 만들어져도 이어져야 늦게 온 앞 요청의 응답을 가려내므로 ref에 둔다.
   const autoHideSequence = useRef({ latest: 0 });
   const actions = useMemo(
-    () => createCandidateActions(onSignedOut, { apply: applyAutoHide, reload, sequence: autoHideSequence.current }),
-    [onSignedOut, applyAutoHide, reload],
+    () => createCandidateActions(onSignedOut, { apply: applyAutoHide, reload, statusEventCount, sequence: autoHideSequence.current }),
+    [onSignedOut, applyAutoHide, reload, statusEventCount],
   );
   const systemDisableNotice = useSystemDisableNotice(state.status, me.permissions.includes("view_audit"));
   useRefreshMeOnConnect(state.realtimeConnected, onRefreshMe);

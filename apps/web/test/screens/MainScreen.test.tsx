@@ -8,12 +8,17 @@ import { json, stubFetch } from "../helpers/stubFetch";
 
 /** 훅이 돌려줄 서버 상태. 테스트마다 바꾼다. */
 const hookState = vi.hoisted(() => ({ current: null as ServerState | null }));
-/** 훅이 돌려줄 함수들. 실제 훅의 useCallback처럼 렌더마다 같은 함수다. */
-const hookStable = vi.hoisted(() => ({ reload: () => undefined, reconnect: () => undefined, applyAutoHide: (_enabled: boolean) => undefined }));
+/** 훅이 돌려줄 함수들. 실제 훅의 useCallback처럼 렌더마다 같은 함수다. statusEvents는 받은 실시간 status 수로, 테스트가 올린다. */
+const hookStable = vi.hoisted(() => {
+  const stable = { statusEvents: 0, reload: () => undefined, reconnect: () => undefined, applyAutoHide: (_enabled: boolean) => undefined, statusEventCount: (): number => stable.statusEvents };
+  return stable;
+});
 
 vi.mock("../../src/state/useServerState", () => ({
   /** 고정 상태를 돌려주는 가짜 훅(연결·조회는 useServerState 테스트가 다룬다). */
-  useServerState: () => ({ state: hookState.current, reload: hookStable.reload, reconnect: hookStable.reconnect, applyAutoHide: hookStable.applyAutoHide }),
+  useServerState: () => ({
+    state: hookState.current, reload: hookStable.reload, reconnect: hookStable.reconnect, applyAutoHide: hookStable.applyAutoHide, statusEventCount: hookStable.statusEventCount,
+  }),
 }));
 
 /** 내 정보 다시 읽기 자리 채움. 다시 읽기 동작(K23)은 따로 확인한다. */
@@ -35,6 +40,8 @@ const AUDIT_HINT = "기록·설정 → 감사 기록에서 확인하세요.";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  hookStable.statusEvents = 0;
 });
 
 describe("MainScreen", () => {
@@ -194,12 +201,38 @@ describe("MainScreen 자동 숨김 스위치 응답(K17)", () => {
     const { rerender } = render(<MainScreen me={admin} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 꺼짐" }));
     // 켜기 응답보다 실시간 status가 먼저 와서 켜짐으로 보이고, 매니저가 바로 끈다.
+    hookStable.statusEvents += 1;
     hookState.current = { ...initialServerState, status: enabledStatus };
     rerender(<MainScreen me={admin} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
     await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
     await waitFor(() => expect(applied).toHaveBeenCalledWith(false));
     await act(async () => resolveEnable(json(200, { enabled: true })));
     expect(applied.mock.calls).toEqual([[false]]);
+  });
+
+  it("요청을 보낸 뒤 실시간 status가 오면 늦게 온 응답을 넣지 않는다(그사이 다른 매니저가 바꿨을 수 있다)", async () => {
+    const applied = vi.spyOn(hookStable, "applyAutoHide");
+    let resolveDisable: (response: Response) => void = () => undefined;
+    const disableResponse = new Promise<Response>((resolve) => {
+      resolveDisable = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn(() => disableResponse));
+    hookState.current = { ...initialServerState, status: enabledStatus };
+    render(<MainScreen me={switchManager} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
+    await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
+    // 끄기 응답이 늦는 동안 다른 매니저가 다시 켜서, 실시간 status(켜짐)가 먼저 온다.
+    hookStable.statusEvents += 1;
+    await act(async () => resolveDisable(json(200, { enabled: false })));
+    expect(applied).not.toHaveBeenCalled();
+  });
+
+  it("요청을 보낸 뒤 실시간 status가 없으면(실시간이 끊긴 경우) 응답을 넣는다", async () => {
+    const applied = vi.spyOn(hookStable, "applyAutoHide");
+    stubFetch({ "POST /api/auto-hide": () => json(200, { enabled: false }) });
+    hookState.current = { ...initialServerState, status: enabledStatus };
+    render(<MainScreen me={switchManager} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
+    await userEvent.click(screen.getByRole("button", { name: "자동 숨김: 켜짐" }));
+    await waitFor(() => expect(applied).toHaveBeenCalledWith(false));
   });
 });
 

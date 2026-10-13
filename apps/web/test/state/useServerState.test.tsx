@@ -73,6 +73,17 @@ describe("useServerState", () => {
     expect(fetcher.count("/api/status")).toBe(2);
   });
 
+  it("받은 실시간 status 이벤트 수를 센다(다른 이벤트는 세지 않는다)", async () => {
+    vi.stubGlobal("WebSocket", ControlledSocket);
+    installHeldFetch();
+    const { result } = renderHook(() => useServerState());
+    await waitFor(() => expect(ControlledSocket.sockets).toHaveLength(1));
+    expect(result.current.statusEventCount()).toBe(0);
+    act(() => ControlledSocket.sockets[0]?.deliverStatus());
+    act(() => ControlledSocket.sockets[0]?.onmessage?.({ data: JSON.stringify({ type: "chat_batch", lines: [] }) }));
+    expect(result.current.statusEventCount()).toBe(1);
+  });
+
   it("조회 중 reload를 여러 번 눌러도 한 번 더만 읽는다", async () => {
     vi.stubGlobal("WebSocket", ControlledSocket);
     const fetcher = installHeldFetch();
