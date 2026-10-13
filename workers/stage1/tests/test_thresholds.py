@@ -148,3 +148,34 @@ def test_markdown_uses_forwarding_rate_wording() -> None:
     markdown = format_selection_markdown(selection) + format_threshold_table_markdown([summarize_at_threshold(EXAMPLE_SCORES, EXAMPLE_LABELS, 0.5)])
     assert "2차 전달율" in markdown
     assert "통과율" not in markdown
+
+
+def hundred_toxic_scores() -> tuple[list[float], list[int]]:
+    """유해 100건(점수 0.01~1.00, 0.01 간격)만 있는 입력."""
+    return [index / 100 for index in range(1, 101)], [1] * 100
+
+
+@pytest.mark.parametrize(("target", "expected_count"), [(0.97, 97), (0.970000000001, 98), (1.0, 100), (0.5, 50)])
+def test_required_count_uses_exact_decimal_ceiling(target: float, expected_count: int) -> None:
+    """0.97×100은 97건(부동소수 오차로 98이 되지 않음), 0.970000000001은 98건이다."""
+    from zg_stage1.thresholds import compute_required_toxic_count
+
+    assert compute_required_toxic_count(target, 100) == expected_count
+
+
+def test_tiny_target_requires_at_least_one_toxic() -> None:
+    """목표가 아주 작아도 필요한 건수는 1 이상이라, 가장 낮은 점수(인덱스 -1)를 고르지 않는다."""
+    from zg_stage1.thresholds import compute_required_toxic_count
+
+    assert compute_required_toxic_count(1e-12, 100) == 1
+    scores, labels = hundred_toxic_scores()
+    assert select_threshold_for_recall(scores, labels, target_recall=1e-12).threshold == pytest.approx(1.0)
+
+
+def test_target_just_above_97_percent_is_not_missed() -> None:
+    """리뷰에서 재현된 사례: 목표 0.970000000001이면 달성 재현율이 목표 이상이어야 한다."""
+    scores, labels = hundred_toxic_scores()
+    selection = select_threshold_for_recall(scores, labels, target_recall=0.970000000001)
+    assert selection.threshold == pytest.approx(0.03)
+    assert selection.achieved_recall >= 0.97
+    assert selection.achieved_recall == pytest.approx(0.98)

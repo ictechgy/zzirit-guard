@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from zg_stage1 import modeling, train
-from zg_stage1.errors import UnsafeWeightsError
+from zg_stage1.errors import ModelFormatError, UnsafeWeightsError
 
 
 def test_collate_pads_right_and_masks() -> None:
@@ -62,3 +62,40 @@ def test_load_classifier_refuses_bin_before_loading(tmp_path: Path) -> None:
     (tmp_path / "pytorch_model.bin").write_bytes(b"")
     with pytest.raises(UnsafeWeightsError):
         modeling.load_trained_classifier(tmp_path)
+
+
+def build_tiny_classifier(**config_overrides: object):
+    """네트워크 없이 만드는 아주 작은 ELECTRA 분류 모델."""
+    from transformers import ElectraConfig, ElectraForSequenceClassification
+
+    config = ElectraConfig(
+        vocab_size=16, embedding_size=8, hidden_size=8, num_hidden_layers=1, num_attention_heads=1, intermediate_size=16, **config_overrides
+    )
+    return ElectraForSequenceClassification(config)
+
+
+def test_label_mapping_accepts_saved_and_generic_names() -> None:
+    """train이 저장하는 매핑과 이름 없는(LABEL_0·LABEL_1) 기본값은 통과한다."""
+    modeling.ensure_binary_classifier(build_tiny_classifier(num_labels=2, id2label=modeling.ID_TO_LABEL, label2id=modeling.LABEL_TO_ID))
+    modeling.ensure_binary_classifier(build_tiny_classifier(num_labels=2))
+
+
+def test_label_mapping_accepts_after_save_and_reload(tmp_path: Path) -> None:
+    """JSON 저장 뒤 다시 읽어 키가 문자열이 되어도 통과한다."""
+    from transformers import ElectraConfig
+
+    build_tiny_classifier(num_labels=2, id2label=modeling.ID_TO_LABEL, label2id=modeling.LABEL_TO_ID).config.save_pretrained(str(tmp_path))
+    reloaded = build_tiny_classifier()
+    reloaded.config = ElectraConfig.from_pretrained(str(tmp_path))
+    modeling.ensure_binary_classifier(reloaded)
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [{0: "toxic", 1: "normal"}, {0: "normal", 1: "hate"}, {0: "LABEL_0", 1: "toxic"}, {0: "LABEL_1", 1: "LABEL_0"}],
+)
+def test_label_mapping_rejects_reversed_or_unknown_names(mapping: dict[int, str]) -> None:
+    """0번이 toxic이거나 이름이 다르면 점수가 뒤집히므로 거부한다."""
+    model = build_tiny_classifier(num_labels=2, id2label=mapping, label2id={name: index for index, name in mapping.items()})
+    with pytest.raises(ModelFormatError):
+        modeling.ensure_binary_classifier(model)

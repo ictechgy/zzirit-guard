@@ -26,9 +26,14 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase, get_linear_sc
 from zg_stage1 import modeling
 from zg_stage1.arguments import fraction_below_one, non_negative_float, non_negative_integer, positive_float, positive_integer
 from zg_stage1.batching import BUCKET_MULTIPLIER, build_length_bucketed_batches
-from zg_stage1.data import LabeledText, describe_file_provenance, load_labeled_texts
-from zg_stage1.inference_contract import build_inference_contract, write_inference_contract_file
-from zg_stage1.errors import describe_failure, run_command_line
+from zg_stage1.data import LabeledText, count_exact_text_overlap, describe_file_provenance, load_labeled_texts
+from zg_stage1.inference_contract import (
+    MAXIMUM_SUPPORTED_LENGTH,
+    MINIMUM_SUPPORTED_LENGTH,
+    build_inference_contract,
+    write_inference_contract_file,
+)
+from zg_stage1.errors import PathResolutionError, describe_failure, run_command_line
 from zg_stage1.metrics import METRIC_DECIMALS, STANDARD_THRESHOLD, compute_roc_auc, summarize_at_threshold
 from zg_stage1.model_card import (
     MODEL_CARD_FILE_NAME,
@@ -70,12 +75,6 @@ DEFAULT_WARMUP_RATIO = 0.06
 
 # 문장당 최대 토큰 수([CLS]·[SEP] 포함). 워커 처리량 측정도 같은 값을 쓴다. 채팅은 대부분 이보다 훨씬 짧다.
 DEFAULT_MAX_LENGTH = 128
-
-# 위치 임베딩 한계(config.max_position_embeddings) 때문에 max_length는 이 값을 넘을 수 없다.
-MAXIMUM_SUPPORTED_LENGTH = 512
-
-# max_length 하한. [CLS]·[SEP]을 빼고 내용 토큰이 최소 하나는 들어가야 한다.
-MINIMUM_SUPPORTED_LENGTH = 3
 
 # 기본 시드(스파이크·회귀 표본과 같은 값).
 DEFAULT_SEED = 20261011
@@ -119,6 +118,8 @@ class EncodedSplit:
     token_lists: list[list[int]]
     labels: list[int]
     label_counts: dict[str, int]
+    # 검증 묶음에서만 채운다: 학습 묶음과 완전히 같은 문장의 수(원문은 남기지 않는다).
+    train_overlap_count: int = 0
 
     @property
     def lengths(self) -> list[int]:
@@ -244,8 +245,20 @@ def validate_training_paths(paths: TrainingPaths) -> None:
     ensure_safetensors_only(paths.base_model_directory)
     ensure_existing_file(paths.train_file, "학습 데이터")
     ensure_existing_file(paths.validation_file, "검증 데이터")
+    ensure_distinct_train_and_validation_files(paths)
     ensure_outside_repository(paths.output_directory)
     ensure_output_is_new(paths.output_directory)
+
+
+def ensure_distinct_train_and_validation_files(paths: TrainingPaths) -> None:
+    """학습·검증 경로가 같은 파일(심볼릭 링크·하드 링크 포함)이면 거부한다.
+
+    왜 samefile인가: resolve()는 하드 링크의 서로 다른 이름을 같은 파일로 보지 못한다. samefile은 inode로 비교한다.
+
+    왜: 같은 파일을 양쪽에 주면 검증 AUC·조기 종료·최고 epoch 선택이 학습 데이터 위에서 돌아 일반화 성능이 부풀려진다.
+    """
+    if paths.train_file.samefile(paths.validation_file):
+        raise PathResolutionError("학습 파일과 검증 파일이 같은 파일입니다. --train-file과 --val-file에 서로 다른 파일을 주세요.")
 
 
 def compute_total_steps(example_count: int, batch_size: int, epochs: int, max_steps: int) -> int:
@@ -463,13 +476,17 @@ class TrainingSession:
 
 def load_and_encode_splits(tokenizer: PreTrainedTokenizerBase, paths: TrainingPaths, max_length: int) -> tuple[EncodedSplit, EncodedSplit]:
     """학습·검증 데이터를 읽어 토큰화한다. 원문은 이 함수 밖으로 나가지 않는다."""
-    train_split = encode_split(tokenizer, load_labeled_texts(paths.train_file), max_length)
-    validation_split = encode_split(tokenizer, load_labeled_texts(paths.validation_file), max_length)
+    train_records = load_labeled_texts(paths.train_file)
+    validation_records = load_labeled_texts(paths.validation_file)
+    train_split = encode_split(tokenizer, train_records, max_length)
+    validation_split = encode_split(tokenizer, validation_records, max_length)
+    validation_split.train_overlap_count = count_exact_text_overlap(train_records, validation_records)
     toxic_ratio = sum(train_split.labels) / len(train_split.labels)
     print(
         f"[준비] 학습 {len(train_split.labels)}건(유해 비율 {toxic_ratio:.3f}) 검증 {len(validation_split.labels)}건 max_length={max_length}",
         flush=True,
     )
+    print(f"[준비] 학습·검증 완전 일치 문장 {validation_split.train_overlap_count}건(공식 분할에도 있을 수 있어 오류는 아님)", flush=True)
     return train_split, validation_split
 
 
@@ -484,6 +501,7 @@ def describe_inputs(paths: TrainingPaths, train_split: EncodedSplit, validation_
         "validation": {
             **annotate_reference_match(describe_file_provenance(paths.validation_file)),
             "label_counts": validation_split.label_counts,
+            "exact_text_overlap_with_train": validation_split.train_overlap_count,
         },
     }
     return base_model, training_data
