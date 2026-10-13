@@ -205,12 +205,25 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     }
   };
   /**
-   * 스트리머 요청으로 채널 연결을 해제한다: 수신 중지, 토큰·연결 삭제, 모든 세션 삭제와 소켓 종료.
+   * 채널 연결을 풀 때 모든 장애 알림 구독을 지운다(K11). 실패해도 연결 해제는 끝까지 하고 오류만 남긴다.
+   * 왜: 연결이 풀린 채널의 매니저가 그 채널의 장애 알림을 계속 받으면 안 된다. 토큰을 지운 뒤에 불러,
+   * 해제 중에 장애 알림이 잘못 나가는지(F10) 확인할 수 있는 순서를 지킨다.
+   */
+  const removeAllPushSubscriptions = (): void => {
+    try {
+      push.unsubscribeAll();
+    } catch (error) {
+      logger.error("연결을 해제했지만 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
+    }
+  };
+  /**
+   * 스트리머 요청으로 채널 연결을 해제한다: 수신 중지, 토큰·연결 삭제, 장애 알림 구독 삭제, 모든 세션 삭제와 소켓 종료.
    * 왜 세션도 지우나: 연결이 없는 채널의 화면을 열어 둘 이유가 없고, 다시 연결하면 새로 로그인해야 안전하다.
    */
   const disconnectChannel = (): void => {
     receiver.stop();
     disconnectTokensOnPurpose();
+    removeAllPushSubscriptions();
     const ids = sessions.listActive().map((session) => session.id);
     ids.forEach((id) => sessions.deleteById(id));
     hub.closeSessions(ids, "채널 연결이 해제되었습니다");
@@ -293,24 +306,35 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     }
   };
   /**
+   * 해임된 매니저들의 장애 알림 구독(모든 기기)을 지운다.
+   * 왜: 해임된 매니저가 채널 장애 알림을 계속 받으면 안 된다(F10, K11). 지우기가 실패해도 다른 정리는 이어지게 기록만 남긴다.
+   * @param managerChannelIds 해임된 매니저 채널 ID들
+   */
+  const removeRevokedManagerPush = (managerChannelIds: Iterable<string>): void => {
+    try {
+      for (const managerChannelId of managerChannelIds) push.unsubscribeManager(managerChannelId);
+    } catch (error) {
+      logger.error("해임된 매니저의 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
+    }
+  };
+  /**
    * 해임된 매니저의 소켓을 닫고 장애 알림 구독(모든 기기)을 지운다.
-   * 왜 구독도 지우나: 해임된 매니저가 채널 장애 알림을 계속 받으면 안 된다(F10). 지우기가 실패해도 다른 정리는 이어지게 기록만 남긴다.
    * @param revoked 해임으로 지운 세션과 그 매니저
    */
   const handleRevokedSessions = (revoked: RevokedSession[]): void => {
     hub.closeSessions(revoked.map(({ sessionId }) => sessionId), "치지직에서 매니저 권한이 해제되었습니다");
-    try {
-      new Set(revoked.map(({ managerChannelId }) => managerChannelId)).forEach((managerChannelId) => push.unsubscribeManager(managerChannelId));
-    } catch (error) {
-      logger.error("해임된 매니저의 장애 알림 구독을 지우지 못했습니다. DB 상태를 확인하세요.", { error: describeError(error) });
-    }
+    removeRevokedManagerPush(new Set(revoked.map(({ managerChannelId }) => managerChannelId)));
   };
   /**
    * 활성 세션의 역할을 다시 확인한 뒤, 활성 목록에 없는 세션(12시간 만료 등)의 소켓을 닫는다.
    * 왜: 세션 만료는 DB에서만 일어나 허브가 모르므로, 재확인 주기마다 맞추지 않으면 만료된 화면이 판정·채팅을 계속 받는다(스펙 7장, F2).
    */
   const recheckRolesAndCloseExpired = async (): Promise<void> => {
-    await recheckSessionRoles({ sessions, roleVerifier, logger, onRevoked: handleRevokedSessions });
+    await recheckSessionRoles({
+      sessions, roleVerifier, logger, onRevoked: handleRevokedSessions,
+      subscriberIds: () => push.subscriberIds(),
+      onRevokedSubscribers: removeRevokedManagerPush,
+    });
     hub.closeSessionsExcept(new Set(sessions.listActive().map((session) => session.id)), SESSION_EXPIRED_REASON);
   };
   /**
@@ -356,6 +380,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
     const stored = credentialStore.loadChannel();
     if (!stored || stored.channelId === config.channelId) return false;
     disconnectTokensOnPurpose();
+    removeAllPushSubscriptions();
     const ids = sessions.listActive().map((session) => session.id);
     ids.forEach((id) => sessions.deleteById(id));
     logger.error("저장된 채널이 ZG_CHANNEL_ID와 다릅니다. 연결을 해제했습니다. 설정한 스트리머 계정으로 다시 연결하세요.", { storedChannelId: stored.channelId, configuredChannelId: config.channelId });

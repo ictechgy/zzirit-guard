@@ -101,7 +101,7 @@ describe("AuthFlow", () => {
     fake.streamingRoles.splice(0);
     roleVerifier.invalidate();
     const onRevoked = vi.fn();
-    await recheckSessionRoles({ sessions, roleVerifier, logger: silentLogger, onRevoked });
+    await recheckSessionRoles({ sessions, roleVerifier, logger: silentLogger, onRevoked, subscriberIds: () => [], onRevokedSubscribers: vi.fn() });
     expect(onRevoked).toHaveBeenCalledWith([{ sessionId: session.id, managerChannelId: "manager-1" }]);
     expect(sessions.getById(session.id)).toBeNull();
   });

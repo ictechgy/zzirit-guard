@@ -34,6 +34,15 @@ export interface PushNotifier {
    * @param managerChannelId 매니저 채널 ID
    */
   unsubscribeManager(managerChannelId: string): void;
+  /**
+   * 구독을 가진 매니저 채널 ID들(중복 없음). 세션이 없는 매니저의 해임도 확인하려고 역할 재확인이 쓴다(K11).
+   */
+  subscriberIds(): string[];
+  /**
+   * 모든 구독을 지운다. 채널 연결을 해제하거나 저장 채널이 설정과 달라 풀 때 쓴다(K11).
+   * 왜: 연결이 풀린 채널의 매니저가 그 채널의 장애 알림을 계속 받을 이유가 없고, 다시 연결하면 매니저가 새로 켜면 된다.
+   */
+  unsubscribeAll(): void;
   notifyAll(message: PushMessage): Promise<void>;
 }
 
@@ -182,6 +191,8 @@ export function createPushNotifier(deps: PushNotifierDeps): PushNotifier {
     unsubscribe: (managerChannelId, endpoint) =>
       void deps.database.prepare("DELETE FROM push_subscription WHERE endpoint = ? AND manager_channel_id = ?").run(endpoint, managerChannelId),
     unsubscribeManager: (managerChannelId) => void deps.database.prepare("DELETE FROM push_subscription WHERE manager_channel_id = ?").run(managerChannelId),
+    subscriberIds: () => (deps.database.prepare("SELECT DISTINCT manager_channel_id AS id FROM push_subscription").all() as Array<{ id: string }>).map((row) => row.id),
+    unsubscribeAll: () => void deps.database.prepare("DELETE FROM push_subscription").run(),
     notifyAll: (message) => notifyAll(deps, send, message),
   };
 }

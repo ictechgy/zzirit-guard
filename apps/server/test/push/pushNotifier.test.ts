@@ -252,6 +252,22 @@ describe("해임된 매니저의 구독 삭제(F10)", () => {
   });
 });
 
+describe("구독 주인 목록과 전체 삭제(K11)", () => {
+  it("subscriberIds는 구독을 가진 매니저를 한 번씩 돌려주고, unsubscribeAll은 모든 구독을 지운다", async () => {
+    const database = openDatabase(":memory:");
+    const send = vi.fn<PushSender>(async () => ({}));
+    const notifier = createPushNotifier({ database, clock: () => 0, logger: silentTestLogger(), vapid, send });
+    notifier.subscribe("m1", subscription("https://fcm.googleapis.com/fcm/send/phone"));
+    notifier.subscribe("m1", subscription("https://fcm.googleapis.com/fcm/send/tablet"));
+    notifier.subscribe("m2", subscription("https://fcm.googleapis.com/fcm/send/m2"));
+    expect([...notifier.subscriberIds()].sort()).toEqual(["m1", "m2"]);
+    notifier.unsubscribeAll();
+    expect(notifier.subscriberIds()).toEqual([]);
+    await notifier.notifyAll({ title: "찌리릿 가드", body: "장애" });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe("구독 해제의 소유자 확인(S14, M13)", () => {
   it("unsubscribe는 요청한 매니저의 구독만 지우고, 다른 매니저가 같은 주소를 보내도 지우지 않는다", async () => {
     const database = openDatabase(":memory:");
