@@ -104,6 +104,23 @@ describe("종단 간: 연결 → 섀도 → 자동 숨김 → 매니저 권한",
   });
 });
 
+describe("같은 채팅의 중복 전달(K4)", () => {
+  it("같은 CHAT이 두 번 오면 판정·숨김 요청은 한 번이고, 같은 사람의 보낸 시각이 다른 메시지는 따로 처리한다", async () => {
+    const owner = await signIn("/auth/connect", fake.owner);
+    await waitFor(() => fake.subscribedSessionCount() === 1);
+    const headers = { cookie: `zg_session=${owner}`, origin: ORIGIN, "x-zzirit-request": "1" };
+    expect((await app.http.inject({ method: "POST", url: "/api/auto-hide", headers, payload: { enabled: true } })).statusCode).toBe(200);
+    const first = { ...chatPayload("viewer-r", "느금마 하나"), messageTime: 1_000 };
+    fake.emitChat(first);
+    fake.emitChat({ ...first });
+    fake.emitChat({ ...first, messageTime: 2_000 });
+    // 실행기는 순서대로 하나씩 보내므로, 마지막 메시지가 숨겨졌으면 앞선 숨김 요청도 모두 끝났다.
+    await waitForAsync(async () => (await candidates(owner)).some((verdict) => verdict.messageTime === 2_000 && verdict.status === "hidden"));
+    expect((await candidates(owner)).filter((verdict) => verdict.senderChannelId === "viewer-r").map((verdict) => verdict.messageTime).sort()).toEqual([1_000, 2_000]);
+    expect(fake.calls.filter((call) => call.path === "/open/v1/chats/blind-message").map((call) => (call.body as { messageTime: number }).messageTime)).toEqual([1_000, 2_000]);
+  });
+});
+
 describe("자동 숨김을 끈 이유(B19-3)", () => {
   it("1분 한도를 넘어 꺼지면 상태에 breaker를 싣고, 다시 켜면 지우며, 손으로 끄면 manual을 싣는다", async () => {
     const owner = await signIn("/auth/connect", fake.owner);
