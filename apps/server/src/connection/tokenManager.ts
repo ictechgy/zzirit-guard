@@ -132,11 +132,21 @@ class RefreshingTokenManager implements TokenManager {
     this.setLocked(false);
   }
 
-  /** 연결을 해제한다. 저장된 토큰을 지우고 잠근다. 치지직 revoke는 부르지 않는다(Global Constraints). 진행 중이던 갱신의 결과는 버린다. */
+  /**
+   * 연결을 해제한다. 쓰기를 먼저 잠근 뒤 저장된 토큰을 지운다. 치지직 revoke는 부르지 않는다(Global Constraints). 진행 중이던 갱신의 결과는 버린다.
+   * 왜 잠금이 먼저인가(K6): 지우기(DB 쓰기)가 실패하면 옛 토큰이 남아, 잠그지 않았다면 대기 중이던 조치가 비상 해제 뒤에도 치지직에 나간다.
+   * 지우기가 실패해도 잠금은 풀지 않고 오류를 호출자에게 그대로 넘긴다. 잠금 알림은 지우기를 시도한 뒤에 보내,
+   * 상태 방송이 연결이 사라진 상태를 보여 주게 한다.
+   */
   disconnect(): void {
     this.startNewGeneration();
-    this.options.store.clearConnection();
-    this.setLocked(true);
+    const wasLocked = this.locked;
+    this.locked = true;
+    try {
+      this.options.store.clearConnection();
+    } finally {
+      if (!wasLocked) this.notifyLockChange(true);
+    }
   }
 
   /** 잠금 상태 변화 리스너를 등록한다. 등록 순서대로 호출된다. */
@@ -258,14 +268,20 @@ class RefreshingTokenManager implements TokenManager {
     }
   }
 
-  /**
-   * 잠금 상태를 바꾸고, 바뀌었을 때만 알린다.
-   * 리스너 하나가 던져도 나머지 리스너와 원래 던질 WriteLockedError가 살아남도록 각각 격리한다.
-   * 삼킨 리스너 오류는 reportError로 기록해 조용히 사라지지 않게 한다.
-   */
+  /** 잠금 상태를 바꾸고, 바뀌었을 때만 알린다. */
   private setLocked(locked: boolean): void {
     if (this.locked === locked) return;
     this.locked = locked;
+    this.notifyLockChange(locked);
+  }
+
+  /**
+   * 잠금 상태 변화를 리스너에게 알린다. 연결 해제는 잠금과 알림 사이에 저장소 지우기가 있어 따로 부른다(K6).
+   * 리스너 하나가 던져도 나머지 리스너와 원래 던질 WriteLockedError가 살아남도록 각각 격리한다.
+   * 삼킨 리스너 오류는 reportError로 기록해 조용히 사라지지 않게 한다.
+   * @param locked 바뀐 잠금 상태
+   */
+  private notifyLockChange(locked: boolean): void {
     for (const listener of this.listeners) {
       try {
         listener(locked);

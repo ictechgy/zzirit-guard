@@ -117,6 +117,36 @@ describe("TokenManager", () => {
     await expect(manager.getAccessToken()).rejects.toBeInstanceOf(WriteLockedError);
   });
 
+  it("연결 해제는 저장된 연결을 지우기 전에 쓰기를 잠그고, 잠금 알림은 지운 뒤에 보낸다(K6)", () => {
+    const store = connectedStore(TWO_HOURS * 3);
+    const manager = createTokenManager({ store, api: createFakeApi({}), clock: () => NOW });
+    const clearConnection = store.clearConnection;
+    let wasLockedDuringClear: boolean | null = null;
+    store.clearConnection = () => {
+      wasLockedDuringClear = manager.isWriteLocked();
+      clearConnection();
+    };
+    const credentialsAtNotify: unknown[] = [];
+    manager.onLockChange(() => credentialsAtNotify.push(store.loadCredential()));
+    manager.disconnect();
+    expect(wasLockedDuringClear).toBe(true);
+    expect(credentialsAtNotify).toEqual([null]);
+  });
+
+  it("저장된 연결을 지우다 실패해도 쓰기는 잠긴 채로 남고, 오류는 호출자에게 전해진다(K6)", async () => {
+    const store = connectedStore(TWO_HOURS * 3);
+    store.clearConnection = () => { throw new Error("SQLITE_BUSY: database is locked"); };
+    const listener = vi.fn();
+    const manager = createTokenManager({ store, api: createFakeApi({}), clock: () => NOW });
+    manager.onLockChange(listener);
+    expect(() => manager.disconnect()).toThrow(/SQLITE_BUSY/);
+    expect(manager.isWriteLocked()).toBe(true);
+    expect(listener).toHaveBeenCalledWith(true);
+    await expect(manager.getAccessToken()).rejects.toBeInstanceOf(WriteLockedError);
+    // forceRefresh는 잠겼을 때 동기로 던지므로 Promise로 감싸 같은 방식으로 확인한다.
+    await expect(Promise.resolve().then(() => manager.forceRefresh())).rejects.toBeInstanceOf(WriteLockedError);
+  });
+
   it("잠긴 뒤에는 갱신을 다시 부르지 않고 WriteLockedError를 던진다", async () => {
     const refreshToken = vi.fn(async (): Promise<TokenSet> => { throw new ChzzkApiError(401, "INVALID_TOKEN", "/auth/v1/token"); });
     const manager = createTokenManager({ store: connectedStore(0), api: createFakeApi({ refreshToken }), clock: () => NOW });
