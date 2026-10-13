@@ -558,6 +558,30 @@ describe("WebSocket", () => {
     expect(logger.error).toHaveBeenCalledWith(expect.any(String), { error: "Error: database is locked" });
   });
 
+  it("티켓은 세션마다 1분에 10번까지 주고, 넘으면 429 rate_limited로 거절한다(K8)", async () => {
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) statuses.push((await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers })).statusCode);
+    expect(statuses).toEqual([...Array(10).fill(200), 429]);
+    const limited = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers });
+    expect(limited.json()).toEqual({ error: "rate_limited", message: expect.stringContaining("잠시 뒤") });
+    const other = await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+    expect(other.statusCode).toBe(200);
+  });
+
+  it("허브가 붙이지 않은 연결(상한 초과 등)에는 상태(status)를 보내지 않는다(K8)", async () => {
+    // 허브가 거절만 하고 닫지는 않게 바꿔, 서버가 attach의 결과를 보고 상태 전송을 건너뛰는지 확인한다.
+    vi.spyOn(harness.hub, "attach").mockReturnValue(false);
+    const ticket = (await harness.app.inject({ method: "POST", url: "/api/ws-ticket", headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) })).json().ticket as string;
+    const messages: string[] = [];
+    // 서버는 붙인 직후 상태를 보내므로, 열리기 전에 듣기 시작해야 놓치지 않는다.
+    const onInit = (client: WebSocket) => void client.on("message", (data) => messages.push(String(data)));
+    const socket = await harness.app.injectWS(`/ws?ticket=${ticket}`, { headers: { origin: ORIGIN } }, { onInit });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(messages).toEqual([]);
+    socket.terminate();
+  });
+
   it("잘못된 티켓은 4003으로 닫는다", async () => {
     // injectWS는 핸드셰이크 직후 서버가 닫으면 열림 이벤트를 놓쳐 멈추므로, 실제 로컬 포트에서 ws 클라이언트로 확인한다.
     const address = await harness.app.listen({ host: "127.0.0.1", port: 0 });

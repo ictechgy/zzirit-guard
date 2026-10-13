@@ -13,7 +13,12 @@ export interface SocketSink {
 
 /** 매니저 화면으로 실시간 이벤트를 보낸다. */
 export interface RealtimeHub extends Broadcaster {
-  attach(socket: SocketSink, session: ManagerSession): void;
+  /**
+   * 인증된 소켓을 방송 목록에 붙인다. 같은 세션이 이미 MAX_SOCKETS_PER_SESSION개를 열었으면 그 세션의 가장 오래된 소켓을 닫고,
+   * 그래도 전체가 MAX_SOCKETS_TOTAL개면 새 소켓을 닫는다(K8).
+   * @returns 붙였으면 true. 붙이지 않은 소켓은 허브가 이미 닫았으므로 호출자는 아무것도 보내지 않는다
+   */
+  attach(socket: SocketSink, session: ManagerSession): boolean;
   closeSessions(sessionIds: readonly string[], reason: string): void;
   /**
    * 활성 목록에 없는 세션의 소켓을 closeSessions와 같은 방식(session_ended 전송 후 4001)으로 닫는다.
@@ -35,6 +40,21 @@ const SESSION_ENDED_CLOSE_CODE = 4001;
 const SEND_FAILED_CLOSE_CODE = 1011;
 /** 서버가 멈출 때와 멈춘 뒤 들어온 연결을 닫을 때 쓰는 코드(1001: going away). */
 const SERVER_STOPPING_CLOSE_CODE = 1001;
+/** 같은 세션의 새 연결에 밀려 닫을 때의 코드(K8). 1011·4001·4003과 가려, 연결 쪽에서 밀려난 것임을 알 수 있게 한다. */
+const REPLACED_CLOSE_CODE = 4002;
+/** 전체 연결 상한에 걸린 새 연결을 닫을 때의 코드(1013: 잠시 뒤 다시 시도). 화면은 기다렸다 다시 연결한다. */
+const TRY_AGAIN_LATER_CLOSE_CODE = 1013;
+/**
+ * 한 세션이 동시에 열 수 있는 WebSocket 수(3, K8).
+ * 왜: 세션 하나가 소켓을 끝없이 열면 방송마다 모든 소켓에 보내느라 서버가 멈출 수 있다.
+ * 왜 새 연결이 아니라 가장 오래된 것을 닫나: 휴대폰이 네트워크를 바꾸면 옛 소켓은 'close' 없이 반쯤 끊긴 채 남는다. 새 연결을 막으면 진짜 화면이 못 붙는다.
+ */
+export const MAX_SOCKETS_PER_SESSION = 3;
+/**
+ * 서버 전체의 WebSocket 수 상한(50, K8). 채널 하나의 매니저 수보다 넉넉하다.
+ * 넘으면 이미 붙은 화면을 지키려고 새 연결을 닫는다.
+ */
+export const MAX_SOCKETS_TOTAL = 50;
 /**
  * 보내지 못하고 쌓인 데이터의 상한(1MB).
  * 왜: 반쯤 끊긴 휴대폰 연결은 'close'가 오지 않아 묶음이 계속 쌓이므로, 넘으면 끊어서 서버 메모리를 지킨다.
@@ -88,12 +108,13 @@ export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): Realt
     attach(socket, session) {
       if (isStopped) {
         closeSocketSafely(socket, SERVER_STOPPING_CLOSE_CODE, "server stopping");
-        return;
+        return false;
       }
       // 왜: 이미 닫힌 소켓은 'close' 이벤트가 다시 오지 않아 목록에 남으면 영원히 새므로 아예 넣지 않는다.
-      if (socket.readyState !== OPEN) return;
-      connections.set(socket, session.id);
+      if (socket.readyState !== OPEN) return false;
+      if (!admitSocket(connections, socket, session.id)) return false;
       socket.on("close", () => connections.delete(socket));
+      return true;
     },
     closeSessions: (sessionIds, reason) => {
       const targets = new Set(sessionIds);
@@ -112,6 +133,36 @@ export function createRealtimeHub(options: Partial<typeof DEFAULTS> = {}): Realt
       for (const socket of sockets) closeSocketSafely(socket, SERVER_STOPPING_CLOSE_CODE, "server stopping");
     },
   };
+}
+
+/**
+ * 연결 상한을 지키며 소켓을 목록에 넣는다(K8). 같은 세션의 소켓이 꽉 찼으면 가장 오래된 것부터 밀어내고,
+ * 그래도 전체 상한이면 새 소켓을 1013으로 닫는다.
+ * 왜 같은 세션부터 밀어내나: 그 세션의 새 연결은 밀어낸 자리를 쓰므로 전체 수가 늘지 않는다. 휴대폰이 다시 연결할 때 막히지 않게 한다.
+ * @returns 넣었으면 true
+ */
+function admitSocket(connections: Map<SocketSink, string>, socket: SocketSink, sessionId: string): boolean {
+  evictOldestOfSession(connections, sessionId);
+  if (connections.size >= MAX_SOCKETS_TOTAL) {
+    closeSocketSafely(socket, TRY_AGAIN_LATER_CLOSE_CODE, "too many connections");
+    return false;
+  }
+  connections.set(socket, sessionId);
+  return true;
+}
+
+/**
+ * 같은 세션의 소켓이 새 연결 하나를 더 받을 자리가 없으면 가장 오래된 것부터 목록에서 빼고 4002로 닫는다.
+ * Map은 넣은 순서를 지키므로 앞에 있는 것이 가장 오래 붙은 소켓이다.
+ * @param connections 소켓 → 세션 ID
+ * @param sessionId 새로 붙는 세션 ID
+ */
+function evictOldestOfSession(connections: Map<SocketSink, string>, sessionId: string): void {
+  const sameSession = [...connections].filter(([, owner]) => owner === sessionId).map(([socket]) => socket);
+  for (const socket of sameSession.slice(0, Math.max(0, sameSession.length - (MAX_SOCKETS_PER_SESSION - 1)))) {
+    connections.delete(socket);
+    closeSocketSafely(socket, REPLACED_CLOSE_CODE, "replaced by newer connection");
+  }
 }
 
 /**

@@ -106,6 +106,12 @@ const RESTRICT_RECENTLY_SUCCEEDED_MESSAGE = `방금 제한했습니다. 같은 �
  */
 const RESTRICT_RESULT_UNKNOWN_MESSAGE = "제한 결과를 알 수 없습니다. 치지직 채팅에서 제한됐는지 확인하고, 제한되지 않았다면 치지직 기본 도구로 제한하세요.";
 
+/**
+ * 실시간 연결 티켓을 1분 한도(세션당 10개, K8)보다 많이 요청했을 때의 안내 문구.
+ * 화면은 이 오류에서 기다렸다가 스스로 다시 연결하므로, 사람이 할 일은 기다리는 것뿐이다.
+ */
+const WS_TICKET_RATE_LIMITED_MESSAGE = "실시간 연결 요청이 너무 잦습니다. 잠시 뒤 다시 연결합니다.";
+
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
 /** 경로의 보낸 사람 채널 ID. 길이를 제한해 과대 입력을 막는다. */
@@ -382,7 +388,9 @@ async function issueTicketAfterRoleCheck(services: RouteServices, sessions: Sess
     throw new RouteError(401, "unauthorized", "치지직에서 매니저 권한이 해제되었습니다. 다시 로그인하세요.");
   }
   if (role !== manager.role) sessions.updateRole(manager.id, role);
-  return { ticket: sessions.issueTicket(manager.id) };
+  const ticket = sessions.issueTicket(manager.id);
+  if (!ticket) throw new RouteError(429, "rate_limited", WS_TICKET_RATE_LIMITED_MESSAGE);
+  return { ticket };
 }
 
 /**

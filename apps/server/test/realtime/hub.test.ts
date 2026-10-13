@@ -1,7 +1,7 @@
 import type { RealtimeEvent } from "@zzirit-guard/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ManagerSession } from "../../src/managers/sessionStore.js";
-import { createRealtimeHub, type RealtimeHub, type SocketSink } from "../../src/realtime/hub.js";
+import { createRealtimeHub, MAX_SOCKETS_PER_SESSION, MAX_SOCKETS_TOTAL, type RealtimeHub, type SocketSink } from "../../src/realtime/hub.js";
 
 let hub: RealtimeHub;
 afterEach(() => hub.stop());
@@ -190,5 +190,40 @@ describe("RealtimeHub", () => {
     expect(slow.closedWith).toBe(1011);
     expect(healthy.sent).toHaveLength(1);
     expect(hub.connectionCount()).toBe(1);
+  });
+
+  it("한 세션의 소켓은 3개까지이고, 넷째가 붙으면 그 세션의 가장 오래된 소켓을 4002로 닫는다(K8)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    const sockets = Array.from({ length: MAX_SOCKETS_PER_SESSION + 1 }, () => fakeSocket());
+    const otherSession = fakeSocket();
+    hub.attach(otherSession, session("s2"));
+    expect(sockets.map((socket) => hub.attach(socket, session("s1")))).toEqual([true, true, true, true]);
+    expect(MAX_SOCKETS_PER_SESSION).toBe(3);
+    expect(sockets.map((socket) => socket.closedWith)).toEqual([4002, null, null, null]);
+    expect(otherSession.closedWith).toBeNull();
+    hub.broadcast({ type: "verdict_status", verdictId: 1, status: "hidden" });
+    expect(sockets.map((socket) => socket.sent.length)).toEqual([0, 1, 1, 1]);
+    expect(hub.connectionCount()).toBe(4);
+  });
+
+  it("전체 소켓이 50개면 새 세션의 연결은 1013으로 닫고 붙이지 않는다(K8)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    expect(MAX_SOCKETS_TOTAL).toBe(50);
+    for (let index = 0; index < MAX_SOCKETS_TOTAL; index += 1) hub.attach(fakeSocket(), session(`s${index}`));
+    const late = fakeSocket();
+    expect(hub.attach(late, session("late"))).toBe(false);
+    expect(late.closedWith).toBe(1013);
+    expect(hub.connectionCount()).toBe(MAX_SOCKETS_TOTAL);
+  });
+
+  it("전체 상한에서도 이미 3개를 연 세션의 새 연결은 가장 오래된 것을 밀어내고 붙는다(K8)", () => {
+    hub = createRealtimeHub({ flushIntervalMs: 60_000 });
+    const own = Array.from({ length: MAX_SOCKETS_PER_SESSION }, () => fakeSocket());
+    own.forEach((socket) => hub.attach(socket, session("mine")));
+    for (let index = MAX_SOCKETS_PER_SESSION; index < MAX_SOCKETS_TOTAL; index += 1) hub.attach(fakeSocket(), session(`s${index}`));
+    const newest = fakeSocket();
+    expect(hub.attach(newest, session("mine"))).toBe(true);
+    expect([own[0]?.closedWith, newest.closedWith]).toEqual([4002, null]);
+    expect(hub.connectionCount()).toBe(MAX_SOCKETS_TOTAL);
   });
 });

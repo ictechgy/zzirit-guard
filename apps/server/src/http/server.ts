@@ -290,7 +290,8 @@ function registerWebSocket(app: FastifyInstance, deps: HttpDeps): void {
       socket.close(UNAUTHORIZED_CLOSE_CODE, "unauthorized");
       return;
     }
-    deps.hub.attach(toSocketSink(socket), session);
+    // 허브가 붙이지 않았으면(상한 초과·서버 종료 중) 허브가 이미 닫았으므로 상태를 보내지 않는다(K8).
+    if (!deps.hub.attach(toSocketSink(socket), session)) return;
     socket.send(JSON.stringify({ type: "status", status: deps.services.status() } satisfies RealtimeEvent));
   });
 }

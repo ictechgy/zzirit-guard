@@ -23,7 +23,12 @@ export interface SessionStore {
   updateRole(id: string, role: ManagerRole): void;
   listActive(): ManagerSession[];
   deleteExpired(): number;
-  issueTicket(sessionId: string): string;
+  /**
+   * WebSocket 일회용 티켓을 준다. 같은 세션이 아직 쓰지 않은 앞 티켓은 무효가 된다(세션당 하나, K8).
+   * @param sessionId 세션 ID
+   * @returns 티켓. 이 세션이 1분에 WS_TICKETS_PER_MINUTE개를 이미 받았으면 null(앞 티켓도 그대로 둔다)
+   */
+  issueTicket(sessionId: string): string | null;
   redeemTicket(ticket: string): ManagerSession | null;
 }
 
@@ -31,6 +36,20 @@ export interface SessionStore {
 export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 /** WebSocket 티켓 유효 기간(30초). */
 const TICKET_TTL_MS = 30_000;
+/**
+ * 세션 하나가 1분에 받을 수 있는 WebSocket 티켓 수(10, K8).
+ * 왜: 티켓마다 소켓을 하나 열 수 있어, 한도가 없으면 세션 하나가 티켓을 쏟아 내 연결·메모리를 바닥낼 수 있다.
+ * 화면은 끊기면 1초부터 두 배씩 늘려 다시 연결하므로(30초 상한) 정상 사용은 1분에 몇 번을 넘지 않는다.
+ */
+export const WS_TICKETS_PER_MINUTE = 10;
+/** 티켓 발급 한도를 세는 기간(1분). */
+const TICKET_RATE_WINDOW_MS = 60_000;
+
+/** 메모리에만 두는 티켓 상태: 티켓 → 세션·만료 시각, 세션 → 최근 1분의 발급 시각들. */
+interface TicketState {
+  tickets: Map<string, { sessionId: string; expiresAt: number }>;
+  issuedAtBySession: Map<string, number[]>;
+}
 
 /** manager_session 행. */
 interface SessionRow {
@@ -49,7 +68,8 @@ function hashSessionId(rawId: string): string {
 
 /** 세션 저장소를 만든다. 티켓은 수명이 짧아 메모리에만 둔다. */
 export function createSessionStore(database: Database, clock: Clock): SessionStore {
-  const tickets = new Map<string, { sessionId: string; expiresAt: number }>();
+  const ticketState: TicketState = { tickets: new Map(), issuedAtBySession: new Map() };
+  const { tickets } = ticketState;
   const getById = (id: string) => readSession(database, id, clock());
   return {
     create: (manager) => insertSession(database, manager, clock()),
@@ -60,7 +80,7 @@ export function createSessionStore(database: Database, clock: Clock): SessionSto
     updateRole: (id, role) => void database.prepare("UPDATE manager_session SET role = ?, last_role_check_at = ? WHERE id = ?").run(role, clock(), id),
     listActive: () => (database.prepare("SELECT * FROM manager_session WHERE expires_at > ?").all(clock()) as SessionRow[]).map(toSession),
     deleteExpired: () => database.prepare("DELETE FROM manager_session WHERE expires_at <= ?").run(clock()).changes,
-    issueTicket: (sessionId) => issueTicket(tickets, sessionId, clock()),
+    issueTicket: (sessionId) => issueTicket(ticketState, sessionId, clock()),
     redeemTicket: (ticket) => {
       const entry = tickets.get(ticket);
       tickets.delete(ticket);
@@ -93,12 +113,32 @@ function readSession(database: Database, id: string, now: number): ManagerSessio
   return toSession(row);
 }
 
-/** 일회용 티켓을 발급한다. 오래된 티켓도 함께 치운다. */
-function issueTicket(tickets: Map<string, { sessionId: string; expiresAt: number }>, sessionId: string, now: number): string {
-  for (const [key, entry] of tickets) if (entry.expiresAt <= now) tickets.delete(key);
+/**
+ * 일회용 티켓을 발급한다. 1분 한도를 넘었으면 티켓은 건드리지 않고 null을 돌려준다.
+ * 발급하면 만료된 티켓과 같은 세션의 쓰지 않은 앞 티켓을 함께 치운다(세션당 하나, K8).
+ * 왜 앞 티켓을 지우나: 쓰지 않은 티켓을 모아 두었다가 한꺼번에 소켓을 여는 일을 막는다.
+ */
+function issueTicket(state: TicketState, sessionId: string, now: number): string | null {
+  if (!recordIssuance(state.issuedAtBySession, sessionId, now)) return null;
+  for (const [key, entry] of state.tickets) if (entry.expiresAt <= now || entry.sessionId === sessionId) state.tickets.delete(key);
   const ticket = randomBytes(24).toString("base64url");
-  tickets.set(ticket, { sessionId, expiresAt: now + TICKET_TTL_MS });
+  state.tickets.set(ticket, { sessionId, expiresAt: now + TICKET_TTL_MS });
   return ticket;
+}
+
+/**
+ * 이 세션의 최근 1분 발급 횟수가 한도 안이면 이번 발급을 기록하고 true, 넘었으면 기록하지 않고 false.
+ * 다른 세션의 기록 중 1분이 다 지난 것은 함께 지워, 오래전에 끝난 세션의 기록이 쌓이지 않게 한다.
+ * @param issuedAtBySession 세션 → 최근 발급 시각들
+ * @param sessionId 세션 ID
+ * @param now 지금 시각(ms)
+ */
+function recordIssuance(issuedAtBySession: Map<string, number[]>, sessionId: string, now: number): boolean {
+  for (const [key, times] of issuedAtBySession) if (times.every((time) => now - time >= TICKET_RATE_WINDOW_MS)) issuedAtBySession.delete(key);
+  const recent = (issuedAtBySession.get(sessionId) ?? []).filter((time) => now - time < TICKET_RATE_WINDOW_MS);
+  if (recent.length >= WS_TICKETS_PER_MINUTE) return false;
+  issuedAtBySession.set(sessionId, [...recent, now]);
+  return true;
 }
 
 /** 행을 세션으로 바꾼다. */
