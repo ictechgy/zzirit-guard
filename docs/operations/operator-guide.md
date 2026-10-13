@@ -44,6 +44,7 @@ cp ops/env.example ~/Library/Application\ Support/zzirit-guard/.env
 chmod 600 ~/Library/Application\ Support/zzirit-guard/.env
 ```
 `.env`를 채운다(**`ZG_DATA_DIR`·`ZG_WEB_DIST`는 `~` 없는 절대 경로**여야 한다. `--env-file`은 `~`를 풀지 않는다): `ZG_PUBLIC_ORIGIN`(Funnel 주소), `ZG_CHANNEL_ID`(스트리머 채널 ID: 채널 주소 `chzzk.naver.com/<채널ID>`의 끝부분), Client ID·Secret, `ZG_DATA_DIR`, `ZG_WEB_DIST`(`<설치 경로>/apps/web/dist`), VAPID 키 3개.
+- 서버는 시작할 때마다 `ZG_DATA_DIR` 폴더를 700, DB 파일(`-wal`·`-shm` 포함)을 600으로 맞춘다. 같은 기기의 다른 계정이 채팅 원문을 읽지 못하게 하려는 것이다. 그래서 `ZG_DATA_DIR`은 이 서버만 쓰는 폴더로 둔다.
 
 ## 7. 서버 시작·잠자기·재부팅
 ```bash
