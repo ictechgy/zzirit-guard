@@ -127,8 +127,9 @@ interface TimeoutHoldRequest {
 }
 
 /**
- * 처리 결과를 알 수 없는 오류인지 본다: 요청 시간 초과(timeout)이거나, 서버가 치지직 처리 결과를 알 수 없다고 알린 것(502 result_unknown, N4).
- * 둘 다 조치가 이미 처리됐을 수 있어 곧바로 다시 보내면 두 번 간다.
+ * 처리 결과를 알 수 없는 오류인지 본다: 요청 시간 초과(timeout)이거나, 코드가 result_unknown인 것.
+ * result_unknown은 서버가 치지직 처리 결과를 알 수 없다고 알린 것(502·409, N4)과, 숨기기·임시 제한의 네트워크 오류를 MainScreen이 바꾼 것(K18)이다.
+ * 모두 조치가 이미 처리됐을 수 있어 곧바로 다시 보내면 두 번 간다.
  * @param error 동작이 던진 오류
  */
 function isOutcomeUnknown(error: unknown): boolean {

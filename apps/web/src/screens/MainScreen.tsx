@@ -1,6 +1,6 @@
 import type { AutoHideOffReason, MeDto, ServerStatus } from "@zzirit-guard/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiSend, requiresSignIn } from "../api/client";
+import { ApiError, apiGet, apiSend, requiresSignIn } from "../api/client";
 import { TabBar, type Tab } from "../components/TabBar";
 import { buildSections, countActionable } from "../domain/candidates";
 import { useNow } from "../state/useNow";
@@ -19,6 +19,11 @@ const IGNORE_DONE = "무시했습니다.";
 const TEMPORARY_RESTRICT_DONE = "임시 제한했습니다. 같은 사람의 남은 메시지는 숨기기나 무시로 정리하세요.";
 /** 오판 신고 성공 안내. 신고한 판정은 후보 화면에서 빠지고 오판 검토 목록에 오른다. */
 const FALSE_POSITIVE_DONE = "오판으로 신고했습니다. 기록·설정 → 오판 검토에서 볼 수 있습니다.";
+/**
+ * 되돌릴 수 없는 조치(숨기기·임시 제한)가 네트워크 오류로 끝났을 때의 안내(K18). 요청이 서버에 닿았을 수 있어 실패라 단정하지 않는다.
+ * 후보 화면이 뒤에 "다시 누르지 마세요."를 붙인다.
+ */
+const NETWORK_RESULT_UNKNOWN_MESSAGE = "응답을 받지 못해 처리 결과를 알 수 없습니다. 네트워크를 확인하고 잠시 뒤 목록에서 결과를 보세요.";
 /** 실시간 연결이 거듭 거절됐을 때의 안내(R-6). 출처 불일치(다른 주소로 연 경우)가 가장 흔한 원인이다. */
 const REALTIME_REJECTED_MESSAGE = "실시간 연결이 계속 거절됩니다. 운영자가 알려 준 주소(https://…ts.net)로 열었는지 확인한 뒤 '다시 연결'을 누르세요.";
 
@@ -32,6 +37,18 @@ interface ActionResponse {
 
 /** 조치 요청 함수. 로그인이 필요한 오류면 로그인 화면으로 보내고 오류를 다시 던진다. */
 type SendAction = (path: string, body?: unknown) => Promise<ActionResponse>;
+
+/**
+ * 서버에 닿았는지 모르는 실패(네트워크 오류)를 "결과를 알 수 없음"(result_unknown)으로 바꿔 던진다(K18). 숨기기·임시 제한에만 쓴다.
+ * 왜: 네트워크 오류는 요청이 서버 실행기에 들어간 뒤 응답만 잃은 것일 수 있다. 그대로 두면 후보 화면이 잠금을 바로 풀어,
+ * 다시 누른 매니저가 되돌릴 수 없는 조치를 두 번 보낸다. result_unknown이면 후보 화면이 잠금을 붙잡는다.
+ * @param error 요청이 던진 오류
+ * @throws ApiError network면 result_unknown으로 바꾼 오류(원래 오류는 cause), 그 밖에는 받은 오류 그대로
+ */
+function treatNetworkFailureAsUnknown(error: unknown): never {
+  if (error instanceof ApiError && error.code === "network") throw new ApiError(0, "result_unknown", NETWORK_RESULT_UNKNOWN_MESSAGE, { cause: error });
+  throw error;
+}
 
 /** 스위치 응답을 화면의 서버 상태와 맞추는 도구. */
 interface AutoHideSync {
@@ -97,11 +114,13 @@ function createCandidateActions(onSignedOut: (message: string | null) => void, a
       if (requiresSignIn(error)) onSignedOut(error.message);
       throw error;
     });
+  // 되돌릴 수 없는 조치는 네트워크 오류를 결과를 알 수 없음으로 본다(K18).
+  const sendIrreversible: SendAction = (path, body) => send(path, body).catch(treatNetworkFailureAsUnknown);
   return {
-    hide: async (verdict) => (await send(`/api/verdicts/${verdict.id}/hide`)).note ?? HIDE_DONE,
+    hide: async (verdict) => (await sendIrreversible(`/api/verdicts/${verdict.id}/hide`)).note ?? HIDE_DONE,
     // 판정 번호만 보낸다. 채팅 채널은 서버가 저장된 판정에서 읽는다(S13). 묶음에는 판정이 늘 하나 이상 있다(groupBySender).
     temporaryRestrict: async (group) =>
-      (await send(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { verdictId: group.verdicts[0]?.id })).note ?? TEMPORARY_RESTRICT_DONE,
+      (await sendIrreversible(`/api/senders/${encodeURIComponent(group.senderChannelId)}/temporary-restrict`, { verdictId: group.verdicts[0]?.id })).note ?? TEMPORARY_RESTRICT_DONE,
     ignore: async (verdict) => (await send(`/api/verdicts/${verdict.id}/ignore`)).note ?? IGNORE_DONE,
     reportFalsePositive: async (verdict) => (await send(`/api/verdicts/${verdict.id}/false-positive`)).note ?? FALSE_POSITIVE_DONE,
     setAutoHide: createAutoHideSender(send, autoHideSync),

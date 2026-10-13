@@ -200,3 +200,39 @@ describe("MainScreen 자동 숨김 스위치 응답(K17)", () => {
     expect(applied.mock.calls).toEqual([[false]]);
   });
 });
+
+describe("MainScreen 네트워크 오류로 끝난 되돌릴 수 없는 조치(K18)", () => {
+  /** 숨기기·임시 제한·무시를 할 수 있는 채팅 운영자. */
+  const actor = { ...me, permissions: ["hide_message" as const, "temporary_restrict" as const] };
+  /** 판정 예시. */
+  const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() };
+  /** 서버에 닿지 못한 fetch 거절(브라우저는 TypeError로 거절한다). */
+  const networkFailure = (): Response => {
+    throw new TypeError("Failed to fetch");
+  };
+
+  it.each([
+    ["숨기기", "POST /api/verdicts/7/hide", /^악플러의 .+ 메시지 숨기기$/],
+    ["임시 제한", "POST /api/senders/bad/temporary-restrict", /^악플러 임시 제한$/],
+  ])("%s 요청이 네트워크 오류로 끝나면 결과를 알 수 없음으로 보아 잠금을 붙잡고 다시 보내지 않는다", async (_label, route, name) => {
+    const fetchMock = stubFetch({ [route]: networkFailure });
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
+    render(<MainScreen me={actor} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/처리 결과를 알 수 없습니다.*다시 누르지 마세요/));
+    const button = screen.getByRole("button", { name }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    await userEvent.click(button);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("무시는 네트워크 오류여도 붙잡지 않는다(되돌릴 수 있고, 다시 보내도 서버가 409로 막는다)", async () => {
+    stubFetch({ "POST /api/verdicts/7/ignore": networkFailure });
+    hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
+    render(<MainScreen me={actor} onSignedOut={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/서버에 연결할 수 없습니다/));
+    expect(screen.getByRole("alert").textContent).not.toMatch(/다시 누르지 마세요/);
+    await waitFor(() => expect((screen.getByRole("button", { name: /^악플러의 .+ 메시지 무시$/ }) as HTMLButtonElement).disabled).toBe(false));
+  });
+});
