@@ -7,6 +7,7 @@ train·evaluate·thresholds CLI가 같은 규칙을 쓴다.
 from __future__ import annotations
 
 import argparse
+import math
 
 
 def parse_integer(raw_value: str) -> int:
@@ -42,10 +43,10 @@ def non_negative_integer(raw_value: str) -> int:
 
 
 def positive_float(raw_value: str) -> float:
-    """0보다 큰 실수만 받는다(예: --learning-rate)."""
+    """0보다 큰 유한한 실수만 받는다(예: --learning-rate). inf는 학습을 발산시키므로 거부한다."""
     value = parse_float(raw_value)
-    if not value > 0:
-        raise argparse.ArgumentTypeError(f"{value}는 0보다 커야 합니다.")
+    if not (math.isfinite(value) and value > 0):
+        raise argparse.ArgumentTypeError(f"{value}는 0보다 큰 유한한 값이어야 합니다.")
     return value
 
 
@@ -66,8 +67,8 @@ def fraction_below_one(raw_value: str) -> float:
 
 
 def non_negative_float(raw_value: str) -> float:
-    """0 이상 실수만 받는다(예: --weight-decay)."""
+    """0 이상의 유한한 실수만 받는다(예: --weight-decay). nan은 비교가 모두 False라 따로 거부한다."""
     value = parse_float(raw_value)
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"{value}는 0 이상이어야 합니다.")
+    if not (math.isfinite(value) and value >= 0):
+        raise argparse.ArgumentTypeError(f"{value}는 0 이상의 유한한 값이어야 합니다.")
     return value

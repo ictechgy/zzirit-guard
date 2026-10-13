@@ -73,3 +73,27 @@ def test_threshold_table_keeps_order_and_is_monotonic() -> None:
     forward_rates = [row["forward_rate"] for row in table]
     assert recalls == sorted(recalls, reverse=True)
     assert forward_rates == sorted(forward_rates, reverse=True)
+
+
+@pytest.mark.parametrize("bad_score", [float("nan"), float("inf"), -0.1, 1.5])
+def test_metrics_reject_invalid_scores(bad_score: float) -> None:
+    """NaN·무한대·범위 밖 점수는 AUC·임계값 지표 모두 오류로 거부한다(NaN이 AUC 1.0으로 보이는 문제 방지)."""
+    scores = [bad_score, bad_score, 0.5, 0.6]
+    labels = [0, 0, 1, 1]
+    with pytest.raises(MetricError):
+        compute_roc_auc(scores, labels)
+    with pytest.raises(MetricError):
+        summarize_at_threshold(scores, labels, 0.5)
+
+
+def test_all_nan_scores_no_longer_look_perfect() -> None:
+    """리뷰에서 재현된 사례: 전부 NaN인 점수는 AUC 1.0이 아니라 오류다."""
+    with pytest.raises(MetricError):
+        compute_roc_auc([float("nan")] * 4, [0, 0, 1, 1])
+
+
+@pytest.mark.parametrize("bad_label", [2, -1])
+def test_metrics_reject_non_binary_labels(bad_label: int) -> None:
+    """0·1이 아닌 라벨은 오류로 거부한다."""
+    with pytest.raises(MetricError):
+        compute_roc_auc([0.1, 0.2, 0.8, 0.9], [0, 0, 1, bad_label])
