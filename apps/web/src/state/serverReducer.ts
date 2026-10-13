@@ -41,6 +41,8 @@ export interface ServerState {
   realtimeConnected: boolean;
   /** 실시간 연결이 거듭 거절돼(4003) 다시 연결을 멈췄는지(R-6). */
   realtimeRejected: boolean;
+  /** 같은 세션의 다른 창에 실시간 연결이 밀려(4002) 다시 연결을 멈췄는지. 다시 연결되면 지운다. */
+  realtimeReplaced: boolean;
   /** 세션이 끝난 이유. 값이 생기면 로그인 화면으로 돌아간다. */
   sessionEndedReason: string | null;
   /** 마지막 조회 실패 문구. 성공하면 지운다. */
@@ -60,11 +62,12 @@ export type ServerAction =
   | { type: "event"; event: RealtimeEvent }
   | { type: "connection"; connected: boolean }
   | { type: "realtime_rejected" }
+  | { type: "realtime_replaced" }
   | AutoHideApplied;
 
 /** 처음 상태. */
 export const initialServerState: ServerState = {
-  status: null, verdicts: [], chatLines: [], nextChatSeq: 0, realtimeConnected: false, realtimeRejected: false, sessionEndedReason: null, loadError: null, replayLog: null,
+  status: null, verdicts: [], chatLines: [], nextChatSeq: 0, realtimeConnected: false, realtimeRejected: false, realtimeReplaced: false, sessionEndedReason: null, loadError: null, replayLog: null,
 };
 
 /** 조회 중에 기록해 두었다가 다시 적용할 변화 종류. 채팅 줄·세션 종료는 다시 적용할 필요가 없다. */
@@ -80,9 +83,11 @@ export function serverReducer(state: ServerState, action: ServerAction): ServerS
     case "snapshot_failed":
       return { ...state, loadError: action.message, replayLog: null };
     case "connection":
-      return { ...state, realtimeConnected: action.connected, realtimeRejected: action.connected ? false : state.realtimeRejected };
+      return action.connected ? { ...state, realtimeConnected: true, realtimeRejected: false, realtimeReplaced: false } : { ...state, realtimeConnected: false };
     case "realtime_rejected":
       return { ...state, realtimeConnected: false, realtimeRejected: true };
+    case "realtime_replaced":
+      return { ...state, realtimeConnected: false, realtimeReplaced: true };
     case "event":
       return recordForReplay(applyEvent(state, action.event), action.event);
     case "auto_hide_applied":

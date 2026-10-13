@@ -295,3 +295,34 @@ describe("App 역할 변경 반영(K23)", () => {
     expect(await screen.findByRole("link", { name: "매니저 로그인" })).toBeTruthy();
   });
 });
+
+describe("App 실시간 연결이 다른 창에 밀렸을 때(4002)", () => {
+  /** 상태를 보낸 뒤 같은 세션의 새 연결에 밀려 4002로 닫히는 가짜 WebSocket. 두 번째부터는 보통 연결이다. */
+  class ReplacedOnceWebSocket extends FakeWebSocket {
+    /** 만들어진 수. */
+    static created = 0;
+    constructor(url: string) {
+      super(url);
+      ReplacedOnceWebSocket.created += 1;
+      if (ReplacedOnceWebSocket.created === 1) setTimeout(() => this.onclose?.({ code: 4002 }), 30);
+    }
+  }
+
+  it("자동으로 다시 연결하지 않고, '다시 연결'을 누르면 새 티켓으로 다시 연결한다", async () => {
+    vi.stubGlobal("WebSocket", ReplacedOnceWebSocket);
+    const fetchMock = stubFetch({
+      "GET /api/me": () => json(200, me),
+      "GET /api/status": () => json(200, status),
+      "GET /api/candidates": () => json(200, []),
+      "POST /api/ws-ticket": () => json(200, { ticket: "t1" }),
+    });
+    render(<App />);
+    expect(await screen.findByText(/다른 창에서 실시간 연결을 열어 이 창은 멈췄어요/)).toBeTruthy();
+    const tickets = () => fetchMock.mock.calls.filter(([url]) => url === "/api/ws-ticket").length;
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    expect(tickets()).toBe(1);
+    await userEvent.click(screen.getByRole("button", { name: "다시 연결" }));
+    await waitFor(() => expect(tickets()).toBe(2));
+    await waitFor(() => expect(screen.queryByText(/다른 창에서 실시간 연결을 열어/)).toBeNull());
+  });
+});

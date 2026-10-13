@@ -24,6 +24,8 @@ const FALSE_POSITIVE_DONE = "오판으로 신고했습니다. 기록·설정 →
  * 후보 화면이 뒤에 "다시 누르지 마세요."를 붙인다.
  */
 const NETWORK_RESULT_UNKNOWN_MESSAGE = "응답을 받지 못해 처리 결과를 알 수 없습니다. 네트워크를 확인하고 잠시 뒤 목록에서 결과를 보세요.";
+/** 같은 세션의 다른 창에 실시간 연결이 밀렸을 때(4002)의 안내. 이 창은 스스로 다시 연결하지 않는다. */
+const REALTIME_REPLACED_MESSAGE = "다른 창에서 실시간 연결을 열어 이 창은 멈췄어요. 이 창에서 보려면 '다시 연결'을 누르세요.";
 /** 실시간 연결이 거듭 거절됐을 때의 안내(R-6). 출처 불일치(다른 주소로 연 경우)가 가장 흔한 원인이다. */
 const REALTIME_REJECTED_MESSAGE = "실시간 연결이 계속 거절됩니다. 운영자가 알려 준 주소(https://…ts.net)로 열었는지 확인한 뒤 '다시 연결'을 누르세요.";
 
@@ -246,9 +248,11 @@ export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
     <div className="app">
       {state.loadError && <p className="error" role="alert">{state.loadError}</p>}
       {state.realtimeRejected && <RealtimeRejectedNotice onRetry={reconnect} onSignedOut={onSignedOut} />}
+      {state.realtimeReplaced && <RealtimeReplacedNotice onRetry={reconnect} />}
       {/* 후보·채팅은 처음부터, 설정은 처음 열 때 마운트하고 이후에는 숨기기만 한다: 탭을 오가도 진행 중인 요청 결과·처리 중 잠금·채팅 필터가 사라지지 않는다. */}
       <div hidden={tab !== "candidates"}>
-        <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected} actions={actions} onReload={reload}
+        <CandidatesScreen me={me} status={state.status} sections={sections} realtimeConnected={state.realtimeConnected}
+          realtimePaused={state.realtimeRejected || state.realtimeReplaced} actions={actions} onReload={reload}
           systemDisableNotice={systemDisableNotice.message} onDismissSystemDisableNotice={systemDisableNotice.dismiss} />
       </div>
       <div hidden={tab !== "chat"}>
@@ -260,6 +264,20 @@ export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
         </div>
       )}
       <TabBar active={tab} onChange={changeTab} pendingCount={countActionable(sections)} />
+    </div>
+  );
+}
+
+/**
+ * 같은 세션의 다른 창에 실시간 연결이 밀렸을 때(4002)의 안내와 '다시 연결'.
+ * 오류가 아니라 알림이라 status로 읽어 준다. '다시 연결'을 누르면 이 창이 다시 연결하고, 서버는 그 세션의 가장 오래된 연결을 닫는다.
+ * @param onRetry '다시 연결'을 누르면 부른다
+ */
+function RealtimeReplacedNotice({ onRetry }: { onRetry(): void }) {
+  return (
+    <div className="notice" role="status">
+      <p>{REALTIME_REPLACED_MESSAGE}</p>
+      <button type="button" onClick={onRetry}>다시 연결</button>
     </div>
   );
 }

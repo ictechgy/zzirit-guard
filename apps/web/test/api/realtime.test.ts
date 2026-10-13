@@ -22,7 +22,7 @@ function setup(issueTicket: () => Promise<string> = async () => "ticket-1", rand
   const urls: string[] = [];
   const scheduled: number[] = [];
   const events: RealtimeEvent[] = [];
-  const connection: { states: boolean[]; ended: string[]; rejected: number } = { states: [], ended: [], rejected: 0 };
+  const connection: { states: boolean[]; ended: string[]; rejected: number; replaced: number } = { states: [], ended: [], rejected: 0, replaced: 0 };
   let pending: (() => void) | null = null;
   let cancelCount = 0;
   const realtime = new RealtimeConnection({
@@ -47,6 +47,9 @@ function setup(issueTicket: () => Promise<string> = async () => "ticket-1", rand
     onSessionEnded: (reason) => connection.ended.push(reason),
     onRejected: () => {
       connection.rejected += 1;
+    },
+    onReplaced: () => {
+      connection.replaced += 1;
     },
   });
   /** 예약된 재연결을 실행하고 티켓 발급을 기다린다. */
@@ -156,6 +159,48 @@ describe("RealtimeConnection", () => {
     realtime.start();
     await flushPromises();
     expect(issueTicket).toHaveBeenCalledTimes(4);
+  });
+
+  it("같은 세션의 새 연결에 밀려 4002로 닫히면 자동으로 다시 연결하지 않고 알리며, start()로 다시 연결할 수 있다", async () => {
+    const issueTicket = vi.fn(async () => "ticket");
+    const { realtime, sockets, scheduled, connection } = setup(issueTicket);
+    realtime.start();
+    await flushPromises();
+    sockets[0]?.onmessage?.({ data: STATUS_MESSAGE });
+    sockets[0]?.onclose?.({ code: 4002 });
+    expect(scheduled).toEqual([]);
+    expect(connection).toMatchObject({ states: [true, false], replaced: 1, rejected: 0, ended: [] });
+    realtime.start();
+    await flushPromises();
+    expect(issueTicket).toHaveBeenCalledTimes(2);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("서버가 붐벼 1013으로 닫히면 보통 끊김처럼 백오프 뒤 다시 연결한다", async () => {
+    const { realtime, sockets, scheduled, connection, runPending, closeWithoutMessage } = setup();
+    realtime.start();
+    await flushPromises();
+    closeWithoutMessage(1013);
+    expect(scheduled).toEqual([1000]);
+    await runPending();
+    expect(sockets).toHaveLength(2);
+    expect(connection).toMatchObject({ rejected: 0, replaced: 0, ended: [] });
+  });
+
+  it("티켓 발급이 429(rate_limited)면 로그아웃하지 않고 10초 이상 기다려 다시 받으며, 4003 거절로 세지 않는다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const issueTicket = vi.fn(async (): Promise<string> => {
+      throw new ApiError(429, "rate_limited", "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.");
+    });
+    const { realtime, scheduled, connection, runPending } = setup(issueTicket);
+    realtime.start();
+    await flushPromises();
+    await runPending();
+    await runPending();
+    expect(scheduled).toEqual([10_000, 10_000, 10_000]);
+    expect(issueTicket).toHaveBeenCalledTimes(3);
+    expect(connection).toMatchObject({ ended: [], rejected: 0, replaced: 0 });
+    warn.mockRestore();
   });
 
   it("메시지를 받으면 백오프와 거절 횟수를 처음부터 센다", async () => {

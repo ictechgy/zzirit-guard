@@ -14,8 +14,8 @@ const chatManager: MeDto = { channelId: "m1", channelName: "매니저1", role: "
 const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
 /** 기준 시각. */
 const NOW = 1_000_000;
-/** 시스템 꺼짐 안내를 띄우지 않는 속성(F8 안내는 MainScreen 테스트가 다룬다). */
-const noNotice = { systemDisableNotice: null, onDismissSystemDisableNotice: () => undefined };
+/** 시스템 꺼짐 안내를 띄우지 않고 실시간도 멈추지 않은 속성(F8 안내·실시간 멈춤은 MainScreen 테스트가 다룬다). */
+const noNotice = { systemDisableNotice: null, onDismissSystemDisableNotice: () => undefined, realtimePaused: false };
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {

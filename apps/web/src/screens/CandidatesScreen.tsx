@@ -47,6 +47,8 @@ export interface CandidatesScreenProps {
   sections: CandidateSections;
   /** 실시간 연결이 살아 있는지. */
   realtimeConnected: boolean;
+  /** 실시간 연결이 스스로 다시 연결하지 않고 멈춰 있는지(거듭 거절·다른 창에 밀림). 배너 문구를 고른다. */
+  realtimePaused: boolean;
   /** 후보 화면 동작. */
   actions: CandidateActions;
   /** 서버에서 상태·후보를 다시 읽는다(iOS 홈 화면 앱에는 새로고침이 없다). */
@@ -201,7 +203,7 @@ function startTask(task: () => Promise<string | null>): Promise<string | null> {
  * 감싸지 않으면 판정 수천 건의 목록을 초당 4번 다시 그려 휴대폰이 멈춘다(F4). 속성은 MainScreen이 useMemo·useCallback으로 고정한다.
  * 목록을 만지는 동안에는 구역을 고정해 줄이 손가락 밑에서 움직이지 않게 한다(useStableSections, 스모크 S1).
  */
-export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, actions, onReload, systemDisableNotice, onDismissSystemDisableNotice }: CandidatesScreenProps) {
+export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sections, realtimeConnected, realtimePaused, actions, onReload, systemDisableNotice, onDismissSystemDisableNotice }: CandidatesScreenProps) {
   const [feedback, setFeedback] = useState<ActionFeedback>(null);
   // 알림 닫기. ActionToast가 4초 타이머의 의존성으로 쓰므로 렌더마다 같은 함수여야 한다(아니면 타이머가 다시 시작된다).
   const dismissFeedback = useCallback(() => setFeedback(null), []);
@@ -222,7 +224,7 @@ export const CandidatesScreen = memo(function CandidatesScreen({ me, status, sec
   const rowProps = { canHide, run, lockedKeys, handledIds: stable.handledIds, actions, messageLabels };
   return (
     <section className="screen">
-      <StatusBanner status={status} realtimeConnected={realtimeConnected} canReconnectChannel={me.permissions.includes("connect_channel")} />
+      <StatusBanner status={status} realtimeConnected={realtimeConnected} isRealtimePaused={realtimePaused} canReconnectChannel={me.permissions.includes("connect_channel")} />
       <div className="toolbar">
         <AutoHideToggle enabled={autoHideEnabled} canEnable={me.permissions.includes("enable_auto_hide")}
           canDisable={me.permissions.includes("disable_auto_hide")} isBusy={autoHideEnabled !== null && lockedKeys.has(autoHideLockKey(!autoHideEnabled))}

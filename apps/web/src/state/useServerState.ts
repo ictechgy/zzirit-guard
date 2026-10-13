@@ -10,7 +10,7 @@ export interface ServerConnection {
   state: ServerState;
   /** 상태·후보를 서버에서 다시 읽는다('다시 불러오기', 409 already_handled). */
   reload(): void;
-  /** 거절로 멈춘 실시간 연결을 다시 시작한다(R-6). */
+  /** 거절(R-6)이나 다른 창에 밀려(4002) 멈춘 실시간 연결을 다시 시작한다. */
   reconnect(): void;
   /**
    * 자동 숨김 스위치 요청의 응답 값을 바로 상태에 넣는다(K17). 렌더마다 같은 함수다.
@@ -140,6 +140,7 @@ function createControls(dispatch: Dispatch<ServerAction>, statusEvents: { count:
     },
     onSessionEnded: endSession,
     onRejected: () => guarded({ type: "realtime_rejected" }),
+    onReplaced: () => guarded({ type: "realtime_replaced" }),
   });
   // 연결 중이 아니면(재연결 대기·거절로 멈춤·세션 종료) 건드리지 않는다: 그때는 RealtimeConnection이 스스로 다시 연결하거나 멈춰 있어야 한다.
   const restartIfStale = () => {

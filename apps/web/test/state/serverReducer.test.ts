@@ -120,6 +120,12 @@ describe("serverReducer", () => {
     expect(after).toBe(before);
   });
 
+  it("같은 세션의 다른 창에 실시간 연결이 밀리면(4002) 표시하고, 다시 연결되면 지운다", () => {
+    const replaced = reduce([{ type: "connection", connected: true }, { type: "realtime_replaced" }]);
+    expect(replaced).toMatchObject({ realtimeReplaced: true, realtimeConnected: false });
+    expect(serverReducer(replaced, { type: "connection", connected: true }).realtimeReplaced).toBe(false);
+  });
+
   it("실시간 연결이 거듭 거절되면 표시하고, 다시 연결되면 지운다(R-6)", () => {
     const rejected = reduce([{ type: "connection", connected: true }, { type: "realtime_rejected" }]);
     expect(rejected).toMatchObject({ realtimeRejected: true, realtimeConnected: false });

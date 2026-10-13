@@ -103,6 +103,21 @@ describe("MainScreen", () => {
   });
 });
 
+describe("MainScreen 다른 창에 실시간 연결이 밀렸을 때(4002)", () => {
+  it("이 창이 멈췄다는 안내와 '다시 연결'을 보여 주고, 배너는 다시 연결하는 중이라고 하지 않는다", async () => {
+    stubFetch({});
+    const reconnect = vi.spyOn(hookStable, "reconnect");
+    hookState.current = { ...initialServerState, status: enabledStatus, realtimeConnected: false, realtimeReplaced: true };
+    render(<MainScreen me={me} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
+    expect(screen.getByText("다른 창에서 실시간 연결을 열어 이 창은 멈췄어요. 이 창에서 보려면 '다시 연결'을 누르세요.")).toBeTruthy();
+    const banner = screen.getByRole("status", { name: "서버 상태" });
+    expect(banner.textContent).toMatch(/실시간 연결이 멈췄습니다/);
+    expect(banner.textContent).not.toMatch(/다시 연결하는 중입니다/);
+    await userEvent.click(screen.getByRole("button", { name: "다시 연결" }));
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8·B19-3, 스모크 S2)", () => {
   /** 켜짐 상태로 그린 뒤, 꺼짐 상태(이유 포함)로 바꿔 다시 그린다. */
   function renderThenDisable(manager: MeDto, autoHideOffReason: ServerStatus["autoHideOffReason"]) {
