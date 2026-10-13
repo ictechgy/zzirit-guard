@@ -60,16 +60,20 @@ sudo pmset -a autorestart 1           # 정전 뒤 전기가 들어오면 켜지
 - 재시작: `launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server`
 
 ## 8. 로그
-- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`. 채팅 원문은 남지 않는다(식별자만). 다만 **로그에는 매니저 채널 ID가 남으므로 소유자만 읽을 수 있게(폴더 700, 파일 600) 둔다.**
+- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`.
+- 남지 않는 것: 채팅 원문, 토큰, 채팅 세션 키(sessionKey). 치지직 오류는 주소의 쿼리(`?` 뒤)를 떼고 경로만 남긴다.
+- 남는 식별자: 매니저 채널 ID(역할 재확인 실패 등). 저장된 채널이 `ZG_CHANNEL_ID`와 다를 때는 스트리머 채널 ID도 함께 남는다. **그래서 소유자만 읽을 수 있게(폴더 700, 파일 600) 둔다.**
 - **newsyslog 같은 자동 회전은 쓰지 않는다.** launchd는 로그 파일을 서버를 띄울 때 한 번만 열고 서버도 파일을 다시 열지 않는다. 그래서 회전 도구가 파일을 옮기면 서버는 옮겨진 옛 파일에 계속 쓰고, 압축 회전이 옛 파일을 지우면 그 뒤 로그가 사라진다.
-- 가끔 `ls -lh ~/Library/Logs/zzirit-guard`로 크기를 보고, 커졌으면 서버를 멈추고 옮긴 뒤 다시 띄운다.
+- **한 달에 한 번은 크기와 상관없이 지금 쓰는 로그도 옮긴다.** 지금 쓰는 `server.log`·`server.err.log`는 이름에 날짜가 없어 아래 30일 삭제에 걸리지 않는다. 옮기지 않으면 옛 매니저 채널 ID가 몇 달씩 남는다. 그 사이에 커졌으면(`ls -lh ~/Library/Logs/zzirit-guard`) 더 일찍 옮긴다.
+- 옮기는 방법: 서버를 멈추고, 이름에 날짜와 시각을 붙여 옮긴 뒤, 다시 띄운다. `mv -n`은 같은 이름의 파일이 있으면 덮어쓰지 않는다. 그래서 같은 날 두 번 옮겨도 앞의 파일이 남는다.
 ```bash
 launchctl bootout gui/$(id -u)/com.zzirit-guard.server
-cd ~/Library/Logs/zzirit-guard && for name in server server.err; do [[ -f $name.log ]] && mv $name.log $name-$(date +%Y%m%d).log; done
+cd ~/Library/Logs/zzirit-guard && stamp=$(date +%Y%m%d-%H%M%S) && for name in server server.err; do [[ -f $name.log ]] && mv -n $name.log $name-$stamp.log; done
 chmod 600 server*.log   # 옮긴 파일도 소유자만 읽게(새 파일은 install-launchd.sh가 600으로 만든다)
 <설치 경로>/ops/scripts/install-launchd.sh
 ```
-- **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 한 달에 한 번, 그리고 로그를 옮길 때마다 아래 한 줄을 실행한다. 지금 쓰는 `server.log`·`server.err.log`는 이름에 날짜가 없어 지워지지 않는다.
+- **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 로그를 옮길 때마다(한 달에 한 번 이상) 아래 한 줄도 실행한다.
+- 30일은 파일을 마지막으로 쓴 날부터 센다. 그래서 로그 한 줄이 남는 기간은 길어야 약 두 달이다(옮기기 전 한 달, 옮긴 뒤 30일).
 ```bash
 find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
 ```
