@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import { createDecisionHandler } from "../../src/actions/decisionHandler.js";
 import { toSocketSink } from "../../src/http/server.js";
+import { silentLogger } from "../../src/logger.js";
 import { AuthError } from "../../src/managers/authFlow.js";
 import { createHttpHarness, mutatingHeaders, ORIGIN } from "../helpers/httpHarness.js";
 
@@ -155,6 +157,48 @@ describe("판정 조치", () => {
     const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
     expect(response.statusCode).toBe(502);
     expect(response.json()).toEqual({ error: "result_unknown", message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다." });
+  });
+
+  it("숨김 결과를 알 수 없으면 같은 판정의 다음 숨기기는 실행기로 보내지 않고 409 result_unknown과 확인 안내를 준다(K1)", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const verdict = insertCandidate();
+    const url = `/api/verdicts/${verdict.id}/hide`;
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    expect((await harness.app.inject({ method: "POST", url, headers })).statusCode).toBe(502);
+    const second = await harness.app.inject({ method: "POST", url, headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")) });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({
+      error: "result_unknown",
+      message: "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요.",
+    });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("자동 숨김 결과를 알 수 없으면 매니저 숨기기도 409 result_unknown이다(K1)", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const { services } = harness;
+    const handler = createDecisionHandler({ verdicts: harness.verdicts, executor: services.executor, autoHide: services.autoHide, claims: services.claims, stats: services.stats, broadcaster: harness.hub, logger: silentLogger });
+    services.autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    const ref = { chatChannelId: "chat-1", messageTime: 5, senderChannelId: "bad", nickname: "악플러", content: "느금마", privileged: false, isRoleUnknown: false };
+    const event = { channelId: "c1", senderChannelId: "bad", chatChannelId: "chat-1", nickname: "악플러", userRoleCode: "common_user", content: "느금마", messageTime: 5, receivedAt: 5 };
+    handler.handle(event, { decision: "auto_hide", reason: "rule:strong:1", ref, earlierFloodRefs: [], trivial: false, duplicate: false });
+    await vi.waitFor(() => expect(services.claims.holderOf(harness.verdicts.listRecent("c1", 0)[0]?.id as number)).toBe("unknown"));
+    const verdictId = harness.verdicts.listRecent("c1", 0)[0]?.id as number;
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdictId}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "result_unknown" });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["ignore", "false-positive"] as const)("숨김 결과를 알 수 없는 판정도 %s로 정리할 수 있다(K1)", async (action) => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
+    const verdict = insertCandidate();
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers });
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/${action}`, headers });
+    expect(response.statusCode).toBe(200);
+    expect(harness.verdicts.get(verdict.id)?.status).toBe(action === "ignore" ? "ignored" : "false_positive");
+    expect(harness.submit).toHaveBeenCalledTimes(1);
   });
 
   it("숨김이 실패하면 붙잡은 판정을 놓아 다시 숨길 수 있다(S12)", async () => {

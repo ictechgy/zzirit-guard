@@ -136,6 +136,16 @@ describe("DecisionHandler", () => {
     expect(claims.isClaimed(verdictId)).toBe(false);
   });
 
+  it("자동 숨김 결과를 알 수 없으면 판정을 놓지 않고 unknown으로 붙잡아 둔다(K1)", async () => {
+    submit.mockImplementation(async () => ({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true }));
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const verdictId = verdicts.listRecent("c1", 0)[0]?.id as number;
+    expect(claims.holderOf(verdictId)).toBe("unknown");
+    expect(claims.tryClaim(verdictId, "manager")).toBe(false);
+  });
+
   it("폭주 한도에 걸려 섀도로 저장되는 메시지는 실시간 채팅 줄도 shadow로 보인다(S5, M02)", () => {
     settingsBreaker(1);
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");

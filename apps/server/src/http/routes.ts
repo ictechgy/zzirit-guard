@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
 import type { Broadcaster } from "../actions/decisionHandler.js";
 import type { ActionOutcome, Actor, Executor } from "../actions/executor.js";
-import type { VerdictClaims } from "../actions/verdictClaims.js";
+import { settleHideClaim, type VerdictClaims } from "../actions/verdictClaims.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
 import type { RuleRepository } from "../detection/ruleRepository.js";
 import { describeError, type Logger } from "../logger.js";
@@ -88,6 +88,11 @@ const ACTION_IN_PROGRESS_MESSAGE = "다른 요청이 이 판정을 숨기는 중
  * 왜 already_handled와 가르나: 자동 숨김은 아직 끝나지 않아 다시 불러와도 대기 중으로 보이므로 "이미 처리됨"은 틀린 안내다.
  */
 const AUTO_HIDE_IN_PROGRESS_MESSAGE = "자동 숨김이 진행 중입니다. 잠시 뒤 결과가 반영됩니다.";
+/**
+ * 앞선 숨김의 결과를 알 수 없는 판정을 다시 숨기려 할 때의 안내 문구(K1). 코드는 result_unknown이다.
+ * 왜 다시 보내지 않나: 치지직이 이미 숨겼을 수 있어, 서버가 다시 보내면 되돌릴 수 없는 숨김이 겹친다. 확인은 매니저가 치지직에서 한다.
+ */
+const HIDE_RESULT_UNKNOWN_MESSAGE = "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요.";
 
 /** 경로의 숫자 ID(판정·규칙). 왜: 문자열이 DB 조회로 흘러가지 않게 양의 정수만 받는다. */
 const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -199,28 +204,34 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
 
 /**
  * 판정 하나를 숨긴다. 대기 중인 판정만 받고, 보내기 전에 판정을 붙잡아 동시에 누른 요청 중 하나만 실행기로 보낸다(S12, M10).
- * 확인(findVerdict·상태)과 붙잡기 사이에 await가 없어 다른 요청이 끼어들 수 없다. 결과와 관계없이 끝나면 놓는다.
+ * 확인(findVerdict·상태)과 붙잡기 사이에 await가 없어 다른 요청이 끼어들 수 없다.
+ * 끝나면 놓되, 결과를 알 수 없으면 놓지 않고 unknown으로 붙잡아 둔다(K1, settleHideClaim).
  * 성공했을 때의 hidden 전이는 실행기가 pending에서만 한다(그사이 오판·제한으로 바뀌었으면 덮지 않는다).
  */
 async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
   const verdict = findVerdict(services, request.params, channelId);
   if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
   if (!services.claims.tryClaim(verdict.id, "manager")) throw claimConflict(services, verdict.id);
+  let outcome: ActionOutcome | null = null;
   try {
     const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
-    return sendOutcome(reply, await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager)));
+    outcome = await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager));
+    return sendOutcome(reply, outcome);
   } finally {
-    services.claims.release(verdict.id);
+    settleHideClaim(services.claims, verdict.id, outcome);
   }
 }
 
 /**
- * 이미 붙잡힌 판정에 대한 409 오류를 만든다. 자동 숨김이 붙잡았으면 in_progress와 "곧 반영" 안내, 다른 매니저면 already_handled(N4).
+ * 이미 붙잡힌 판정에 대한 409 오류를 만든다. 자동 숨김이 붙잡았으면 in_progress와 "곧 반영" 안내, 다른 매니저면 already_handled(N4),
+ * 앞선 숨김의 결과를 알 수 없으면 result_unknown과 치지직에서 확인하라는 안내(K1).
  * @param services 붙잡기 모음
  * @param verdictId 판정 번호
  */
 function claimConflict(services: RouteServices, verdictId: number): RouteError {
-  if (services.claims.holderOf(verdictId) === "auto_hide") return new RouteError(409, "in_progress", AUTO_HIDE_IN_PROGRESS_MESSAGE);
+  const holder = services.claims.holderOf(verdictId);
+  if (holder === "unknown") return new RouteError(409, "result_unknown", HIDE_RESULT_UNKNOWN_MESSAGE);
+  if (holder === "auto_hide") return new RouteError(409, "in_progress", AUTO_HIDE_IN_PROGRESS_MESSAGE);
   return new RouteError(409, "already_handled", ACTION_IN_PROGRESS_MESSAGE);
 }
 
@@ -408,17 +419,39 @@ function findSenderVerdict(services: RouteServices, verdictId: number, senderCha
  * 바꿀 수 있는 이전 상태는 MARK_ALLOWED_FROM이고, 확인과 쓰기를 조건부 UPDATE 한 번으로 해 동시 요청이 서로 덮어쓰지 못한다(S12).
  * 숨기는 중인 판정은 무시로 바꾸지 않는다: 숨김이 성공하면 무시 표시와 실제 조치가 어긋난다.
  * 오판은 숨기는 중에도 받는다: 그 뒤 숨김이 성공해도 실행기가 오판을 hidden으로 덮지 않는다.
+ * 숨김 결과를 알 수 없는 판정(unknown)은 무시·오판 모두 받는다(K1): 매니저가 치지직에서 확인한 뒤 카드를 정리할 수 있어야 한다.
  */
 function markVerdict(services: RouteServices, { request, manager, channelId }: GuardedContext, status: Extract<VerdictStatus, "ignored" | "false_positive">) {
   const verdict = findVerdict(services, request.params, channelId);
-  if (status === "ignored" && services.claims.isClaimed(verdict.id)) throw claimConflict(services, verdict.id);
+  if (status === "ignored" && isHideInFlight(services.claims, verdict.id)) throw claimConflict(services, verdict.id);
   if (!services.verdicts.transitionStatus(verdict.id, channelId, status, MARK_ALLOWED_FROM[status])) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
+  releaseUnknownClaim(services.claims, verdict.id);
   services.auditLog.record({
     channelId, actorType: "manager", actorChannelId: manager.managerChannelId, action: status,
     targetSenderChannelId: verdict.senderChannelId, verdictId: verdict.id, result: "ok", error: null,
   });
   services.broadcaster.broadcast({ type: "verdict_status", verdictId: verdict.id, status });
   return { ok: true };
+}
+
+/**
+ * 지금 숨김을 보내는 중인지(매니저·자동 숨김이 붙잡음) 본다. 결과를 알 수 없는 붙잡기(unknown)는 보내는 중이 아니다(K1).
+ * @param claims 붙잡기 모음
+ * @param verdictId 판정 번호
+ */
+function isHideInFlight(claims: VerdictClaims, verdictId: number): boolean {
+  const holder = claims.holderOf(verdictId);
+  return holder === "manager" || holder === "auto_hide";
+}
+
+/**
+ * 무시·오판으로 정리된 판정의 결과 모름 붙잡기를 놓는다(K1).
+ * 왜 놓아도 되나: 판정이 더는 대기 중이 아니어서 숨기기는 상태 확인(HIDE_ALLOWED_FROM)에서 막히고, 놓지 않으면 메모리에 계속 남는다.
+ * @param claims 붙잡기 모음
+ * @param verdictId 판정 번호
+ */
+function releaseUnknownClaim(claims: VerdictClaims, verdictId: number): void {
+  if (claims.holderOf(verdictId) === "unknown") claims.release(verdictId);
 }
 
 /**
