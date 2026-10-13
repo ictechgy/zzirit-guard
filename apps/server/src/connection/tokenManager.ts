@@ -63,6 +63,14 @@ const DEFAULT_REFRESH_MARGIN_MS = 2 * 60 * 60 * 1000;
  */
 const STALE_REFRESH_MESSAGE = "토큰을 갱신하는 동안 치지직 연결이 바뀌었거나 해제되어 요청을 멈췄습니다. 다시 시도하세요.";
 
+/** 치지직이 갱신을 거부했을 때(401: refresh token 만료·철회)의 매니저용 문구. */
+const REFRESH_REJECTED_MESSAGE = "치지직이 토큰 갱신을 거부했습니다(만료·철회). 스트리머가 다시 연결해야 합니다.";
+/**
+ * 갱신 응답이 2xx였는데 본문을 해석하지 못했을 때(wasDelivered)의 매니저용 문구(K7).
+ * 왜 잠그나: 치지직이 일회용 refresh token을 이미 썼을 수 있어, 옛 토큰으로 계속 쓰다 다음 갱신의 401로 뒤늦게 잠기기보다 지금 다시 연결을 요청한다.
+ */
+const REFRESH_RESULT_UNKNOWN_MESSAGE = "치지직 토큰 갱신 응답을 해석하지 못했습니다. 일회용 갱신 토큰이 이미 쓰였을 수 있어 쓰기를 멈췄습니다. 스트리머가 다시 연결해야 합니다.";
+
 /** reportError를 생략했을 때 쓰는 기본 기록기. 아직 로거가 없어 콘솔 경고로 남긴다. */
 const consoleReportError = (context: string, error: unknown): void => {
   console.warn(context, error);
@@ -236,7 +244,8 @@ class RefreshingTokenManager implements TokenManager {
   }
 
   /**
-   * 치지직에 갱신을 요청한다. 401이면 refresh token이 무효이므로 잠근다. 그 밖의 오류는 호출자에게 넘긴다.
+   * 치지직에 갱신을 요청한다. 401(refresh token 무효)이거나 2xx인데 해석하지 못한 응답(wasDelivered, K7)이면 잠그고
+   * 원인 오류를 기록한 뒤 WriteLockedError를 던진다. 그 밖의 오류는 호출자에게 넘긴다.
    * 기다리는 사이 연결이 바뀌었으면 옛 연결의 실패로 새 연결을 잠그지 않도록 먼저 세대를 확인한다.
    * @param refreshToken 쓸 refresh token
    * @param generation 갱신을 시작할 때의 세대
@@ -246,11 +255,11 @@ class RefreshingTokenManager implements TokenManager {
       return await this.options.api.refreshToken(refreshToken);
     } catch (error) {
       this.assertSameGeneration(generation);
-      if (error instanceof ChzzkApiError && error.status === 401) {
-        this.setLocked(true);
-        throw new WriteLockedError("치지직이 토큰 갱신을 거부했습니다(만료·철회). 스트리머가 다시 연결해야 합니다.");
-      }
-      throw error;
+      const lockMessage = refreshLockMessage(error);
+      if (lockMessage === null) throw error;
+      this.reportError("토큰 갱신이 실패해 쓰기를 잠급니다", error);
+      this.setLocked(true);
+      throw new WriteLockedError(lockMessage);
     }
   }
 
@@ -290,4 +299,16 @@ class RefreshingTokenManager implements TokenManager {
       }
     }
   }
+}
+
+/**
+ * 갱신 실패 중 쓰기를 잠가야 하는 경우의 매니저용 문구를 돌려준다. 잠그지 않을 오류(일시 오류)면 null.
+ * 401은 refresh token이 무효이고, wasDelivered는 치지직이 일회용 refresh token을 이미 썼을 수 있다(K7).
+ * 진짜 5xx·네트워크 오류는 요청이 처리되지 않았을 수 있어 잠그지 않는다(아직 유효한 토큰을 계속 쓴다).
+ * @param error 갱신 요청이 던진 오류
+ */
+function refreshLockMessage(error: unknown): string | null {
+  if (!(error instanceof ChzzkApiError)) return null;
+  if (error.status === 401) return REFRESH_REJECTED_MESSAGE;
+  return error.wasDelivered ? REFRESH_RESULT_UNKNOWN_MESSAGE : null;
 }
