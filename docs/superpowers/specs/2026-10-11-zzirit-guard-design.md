@@ -128,6 +128,7 @@ PWA를 React로 하는 이유는, 채팅 텍스트를 기본으로 이스케이�
 | 포트가 붙은 주소 | 목록에 없는 최상위 도메인 모양(영문자로 시작하는 두 글자 이상)에 경로 없는 두 자리 이상 포트만 붙은 주소(예: evil.zzz:8080). 알려진 최상위 도메인이거나(evil.com:8080) 포트 뒤에 경로가 오면(evil.zzz:8080/x) 광고 링크다. 도박 키워드와 함께면 광고 링크로 본다 | `candidate`(`rule:link_port`) |
 | 전화번호 | 휴대전화 번호 패턴(010·011 등 + 7~8자리) | `auto_hide` |
 | 금칙어 약 | 채널 목록과 일치 | `candidate` |
+| 광고 낱말 | 채널 목록과 일치. 링크·연락처 없이 낱말만으로 하는 광고(예: 꽁머니, 리딩방, 팔로워 늘려드림, 본인인증 피싱 문구). 낱말만으로는 대화일 수 있어 자동 숨김하지 않는다. 2차 AI가 광고를 잘 못 잡아(스파이크 4건 중 3건 놓침) 규칙이 맡는다 | `candidate` |
 | 예외 단어 | 금칙어를 품은 정상 단어(예: 시발점). 금칙어 강·약·협박을 비교하기 전에 지운다 | (판정 없음) |
 | 개인 도배 | 한 사람이 10초 안에 5건 이상 | `candidate` |
 | 협박 표현 | 협박 표현 목록(예: 찾아간다, 집 앞, 칼 들고, 알아냈다) | `candidate` |
@@ -149,7 +150,9 @@ PWA를 React로 하는 이유는, 채팅 텍스트를 기본으로 이스케이�
 
 **④ 1차 분류기**(KcELECTRA, CPU, 최대 16건씩 묶음)
 - 점수가 **0.05 이상**이거나 **키워드 경로**에 걸리면 2차로 보낸다. 그 밖에는 `pass`다.
-- 키워드 경로는 1차 분류기가 못 잡는 범주(성희롱·자해·미성년 대상)의 단어를 넓게 모은 목록이다. 넓게 잡아도 최종 판정은 2차가 한다.
+- 키워드 경로는 1차 분류기가 못 잡는 범주(성희롱·자해·협박·신상·미성년 대상)의 단어를 넓게 모은 목록이다. 넓게 잡아도 최종 판정은 2차가 한다.
+  - 기본 목록에는 자해·협박·신상·성희롱 낱말만 넣는다. 미성년 대상 목록은 공개 저장소에 두지 않고 운영자가 채널에서 넣는다.
+  - 목록은 채팅 개발셋으로 다듬고 보류셋으로 확인한다(docs/ml/2026-10-14-model-strengthening-plan.md).
 
 **⑤ 2차 분류기**(kanana-safeguard-8b 4비트, GPU, 직렬, 접두 KV 캐시)
 - 유해 확률(UNSAFE 토큰 확률 합)이 0.5 이상이면 `candidate`, 0.99 이상이면 '확실' 배지를 붙인다.
@@ -263,7 +266,7 @@ POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
 | `channel` | channel_id, channel_name, connected_at | 연결 해제 시 삭제 |
 | `credential` | channel_id, access_token_enc, refresh_token_enc, access_expires_at, refreshed_at | 연결 해제 시 삭제 |
 | `setting` | channel_id, auto_hide_enabled, stage1_threshold(0.05), candidate_threshold(0.5), sure_threshold(0.99), breaker_per_minute(60), retention_days_content(30), retention_days_audit(180) | 상시 |
-| `rule_entry` | id, channel_id, kind(strong·weak·exception·allow·allow_domain·threat·keyword_route), pattern, created_by, created_at | 상시 |
+| `rule_entry` | id, channel_id, kind(strong·weak·exception·allow·allow_domain·threat·keyword_route·spam), pattern, created_by, created_at | 상시 |
 | `verdict` | id, channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason(rule_id 또는 model), unsafe_probability, category, status(pending·hidden·ignored·restricted·false_positive), created_at | 30일 |
 | `audit_log` | id, channel_id, actor_type(manager·rule·system), actor_channel_id, action, target_sender_channel_id, verdict_id, result, error, created_at | 180일(원문 없음) |
 | `minute_stat` | channel_id, minute, received, skipped, deduplicated, stage1_forwarded, stage2_done, stage2_dropped, candidates, auto_hidden, shadow, invalid_events | 180일 |

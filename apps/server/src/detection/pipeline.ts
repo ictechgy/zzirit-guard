@@ -108,7 +108,9 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
 }
 
 /**
- * 스펙 5.2 순서: 금칙어 강 → 떼도배 → 광고 → 전화번호 → 허용어 → 금칙어 약 → 개인 도배 → 협박 → 주소 → 요주의 사용자.
+ * 스펙 5.2 순서: 금칙어 강 → 떼도배 → 광고 → 전화번호 → 허용어 → 금칙어 약 → 광고 낱말 → 개인 도배 → 협박 → 주소 → 요주의 사용자.
+ * 광고 낱말(rule:spam)은 링크·연락처 없이 낱말만으로 광고하는 메시지("꽁머니 지급", "리딩방 무료")를 후보로 올린다. 낱말만으로는
+ * 대화일 수 있어 되돌릴 수 없는 자동 숨김 대신 후보로 둔다. 허용어보다 뒤라서 채널 허용어가 이길 수 있다.
  * 허용어는 금칙어 강·떼도배·광고·전화번호보다 뒤라서 그것들을 무력화하지 못한다.
  * 금칙어 강은 공백을 남긴 문장에서 단어 안에 그대로 있을 때만 auto_hide다. 공백을 지워야만 걸리는 일치(단어를 걸친 우연한 일치,
  * 글자마다 띄운 우회)는 되돌릴 수 없는 숨김 대신 후보(rule:strong_spanning)로 낮춘다(F4). 이 후보 검사는 떼도배·광고·전화번호의
@@ -128,6 +130,7 @@ function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: 
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.strong), "candidate", "strong_spanning"),
     (c) => (c.snapshot.allow.has(c.normalized) ? { decision: "pass", reason: "rule:allow" } : null),
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.weak), "candidate", "weak"),
+    (c) => matchRule(findFirstMatch(c.compact, c.snapshot.spam), "candidate", "spam"),
     (c) => (c.personalFloodTriggered ? { decision: "candidate", reason: "rule:personal_flood" } : null),
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.threat), "candidate", "threat"),
     (c) => (looksLikeAddress(c.event.content) ? { decision: "candidate", reason: "rule:address" } : null),
@@ -144,7 +147,7 @@ function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: 
  * 단어 규칙 일치를 판정으로 바꾼다. reason에 규칙 번호를 남겨 오판 신고 때 어떤 규칙인지 알 수 있게 한다.
  * @param matched 찾은 규칙(없으면 null → 다음 규칙으로)
  * @param decision 일치했을 때의 판정
- * @param kind reason에 넣을 규칙 종류(strong·strong_spanning·weak·threat)
+ * @param kind reason에 넣을 규칙 종류(strong·strong_spanning·weak·spam·threat)
  */
 function matchRule(matched: RuleEntry | null, decision: DetectionResult["decision"], kind: string): RuleOutcome {
   return matched ? { decision, reason: `rule:${kind}:${matched.id}` } : null;

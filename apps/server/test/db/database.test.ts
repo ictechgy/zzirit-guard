@@ -1,6 +1,7 @@
+import BetterSqlite3 from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
-import { runMigrations } from "../../src/db/migrations.js";
+import { MIGRATIONS, runMigrations } from "../../src/db/migrations.js";
 
 describe("openDatabase", () => {
   it("지운 행이 파일에 남지 않게 secure_delete를 켠다(F5)", () => {
@@ -22,7 +23,22 @@ describe("openDatabase", () => {
   it("마이그레이션을 두 번 실행해도 안전하다", () => {
     const database = openDatabase(":memory:");
     expect(() => runMigrations(database)).not.toThrow();
-    expect(database.pragma("user_version", { simple: true })).toBe(1);
+    expect(database.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+  });
+
+  it("v1 DB를 v2로 올리면 규칙 번호를 그대로 두고 광고 낱말(spam)을 받는다", () => {
+    const database = new BetterSqlite3(":memory:");
+    database.exec(MIGRATIONS[0] as string);
+    database.pragma("user_version = 1");
+    const insert = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', ?, ?, 'test', 0)");
+    insert.run("strong", "가");
+    insert.run("threat", "나");
+    database.prepare("DELETE FROM rule_entry WHERE pattern = '가'").run();
+    runMigrations(database);
+    expect(database.prepare("SELECT id, kind, pattern FROM rule_entry").all()).toEqual([{ id: 2, kind: "threat", pattern: "나" }]);
+    insert.run("spam", "꽁머니");
+    expect(database.prepare("SELECT id FROM rule_entry WHERE kind = 'spam'").get()).toEqual({ id: 3 });
+    expect(() => insert.run("unknown", "x")).toThrow(/CHECK/);
   });
 
   it("알 수 없는 규칙 종류를 거부한다", () => {

@@ -6,7 +6,7 @@ import type { Database } from "./database.js";
  * setting·rule_entry는 스펙 11장에서 상시 보관이라 channel 외래키를 두지 않는다. 연결 해제(DELETE FROM channel)가
  * 매니저가 다듬은 규칙·설정까지 cascade로 지우지 않게 하려는 것이다. 토큰(credential)만 채널과 함께 지워진다.
  */
-const migrations: readonly string[] = [
+export const MIGRATIONS: readonly string[] = [
   `
   CREATE TABLE channel (
     channel_id TEXT PRIMARY KEY,
@@ -101,6 +101,23 @@ const migrations: readonly string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  // v2: 규칙 종류에 광고 낱말(spam)을 더한다. SQLite는 CHECK 제약을 고칠 수 없어 표를 새로 만들어 옮긴다.
+  // id를 그대로 옮겨 판정 이유(rule:<종류>:<번호>)와 감사 기록이 가리키는 규칙 번호가 바뀌지 않게 한다.
+  `
+  CREATE TABLE rule_entry_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('strong','weak','exception','allow','allow_domain','threat','keyword_route','spam')),
+    pattern TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (channel_id, kind, pattern)
+  );
+  INSERT INTO rule_entry_v2 (id, channel_id, kind, pattern, created_by, created_at)
+    SELECT id, channel_id, kind, pattern, created_by, created_at FROM rule_entry;
+  DROP TABLE rule_entry;
+  ALTER TABLE rule_entry_v2 RENAME TO rule_entry;
+  `,
 ];
 
 /**
@@ -109,8 +126,8 @@ const migrations: readonly string[] = [
  */
 export function runMigrations(database: Database): void {
   const currentVersion = database.pragma("user_version", { simple: true }) as number;
-  for (let index = currentVersion; index < migrations.length; index += 1) {
-    const statement = migrations[index] as string;
+  for (let index = currentVersion; index < MIGRATIONS.length; index += 1) {
+    const statement = MIGRATIONS[index] as string;
     database.transaction(() => {
       database.exec(statement);
       database.pragma(`user_version = ${index + 1}`);

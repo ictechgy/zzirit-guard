@@ -120,7 +120,7 @@ const senderParamSchema = z.object({ senderChannelId: z.string().min(1).max(MAX_
 const autoHideBodySchema = z.object({ enabled: z.boolean() });
 /** 규칙 추가 본문. 종류는 허용 목록으로, 패턴은 길이로 제한한다. */
 const ruleBodySchema = z.object({
-  kind: z.enum(["strong", "weak", "exception", "allow", "allow_domain", "threat", "keyword_route"]),
+  kind: z.enum(["strong", "weak", "exception", "allow", "allow_domain", "threat", "keyword_route", "spam"]),
   pattern: z.string().min(1).max(100),
 });
 /** 설정 변경 본문. strict로 알 수 없는 키(예: 스위치 상태)를 거부한다. */

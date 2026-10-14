@@ -9,8 +9,8 @@ export type Decision = "auto_hide" | "shadow" | "candidate" | "needs_care" | "pa
 /** 저장된 판정의 처리 상태. */
 export type VerdictStatus = "pending" | "hidden" | "ignored" | "restricted" | "false_positive";
 
-/** 채널 규칙 종류. exception은 금칙어 비교 전에 지우는 예외 단어(예: 시발점)다. */
-export type RuleKind = "strong" | "weak" | "exception" | "allow" | "allow_domain" | "threat" | "keyword_route";
+/** 채널 규칙 종류. exception은 금칙어 비교 전에 지우는 예외 단어(예: 시발점)다. spam은 매니저 후보로 올리는 광고 낱말이다. */
+export type RuleKind = "strong" | "weak" | "exception" | "allow" | "allow_domain" | "threat" | "keyword_route" | "spam";
 
 /** 역할별로 허용되는 기능. 스펙 7장 권한 표와 일치해야 한다. */
 export type Permission =
