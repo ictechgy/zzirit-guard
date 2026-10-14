@@ -1,0 +1,42 @@
+# 생성 도구는 mlx 추론만 공유하므로 2차 워커와 별도 환경으로 잠금 범위를 좁힌다.
+[project]
+name = "zg-datagen"
+version = "0.1.0"
+description = "찌리릿 가드 M2 학습 문장 생성·필터·이중 라벨 도구"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-lm==0.31.3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==1.15.0",
+    "pytest==9.0.3",
+    "ruff==0.12.0",
+]
+
+[tool.uv]
+# 공급망 변동을 줄이려고 기준일보다 2주 이상 검증된 배포본만 잠근다.
+exclude-newer = "2026-09-30T00:00:00Z"
+# 실제 생성기는 Apple Silicon의 mlx에서만 돌아가므로 다른 플랫폼 해석을 막는다.
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+# 한국어 이유 설명과 구체적인 오류 안내를 한 줄에 읽을 수 있게 기존 워커 기준을 따른다.
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+# 저장소의 Python 품질 기준과 같아야 워커 사이 규칙이 갈리지 않는다.
+select = ["E", "F", "W", "B", "UP", "SIM", "N"]
+
+[tool.mypy]
+python_version = "3.12"
+# mlx 계열 일부가 타입 정보를 제공하지 않으므로 그 경계만 Any로 둔다.
+ignore_missing_imports = true
