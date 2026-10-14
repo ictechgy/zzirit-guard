@@ -24,6 +24,8 @@ export interface RuleSnapshot {
   exception: readonly RuleEntry[];
   threat: readonly RuleEntry[];
   keywordRoute: readonly RuleEntry[];
+  /** 광고 낱말. 걸리면 매니저 후보다(rule:spam). 2차 AI가 광고를 잘 못 잡아 규칙이 맡는다(docs/ml/2026-10-14-chat-eval-baseline.md). */
+  spam: readonly RuleEntry[];
   allow: ReadonlySet<string>;
   allowDomains: readonly string[];
 }
@@ -176,6 +178,7 @@ function buildSnapshot(rows: readonly RuleRow[]): RuleSnapshot {
     exception: ofKind("exception"),
     threat: ofKind("threat"),
     keywordRoute: ofKind("keyword_route"),
+    spam: ofKind("spam"),
     allow: new Set(ofKind("allow").map((entry) => entry.normalizedPattern)),
     allowDomains: ofKind("allow_domain").map((entry) => entry.normalizedPattern),
   };

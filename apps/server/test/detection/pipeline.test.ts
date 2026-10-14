@@ -47,10 +47,24 @@ describe("DetectionPipeline", () => {
     ["101동 1203호 맞지?", "candidate", /^rule:address$/],
     ["여기가 시발점이다", "pass", /^none$/],
     ["안녕하세요~", "pass", /^none$/],
+    ["토토 첫충 30% 꽁머니 지급", "candidate", /^rule:spam:\d+$/],
+    ["바.카.라 실시간 첫입금 보너스", "candidate", /^rule:spam:\d+$/],
+    ["토토로 다시 보는 중", "pass", /^none$/],
   ])("%s → %s", (content, decision, reason) => {
     const result = pipeline.evaluate(chat(content));
     expect(result.decision).toBe(decision);
     expect(result.reason).toMatch(reason);
+  });
+
+  it("광고 낱말은 금칙어 약보다 뒤, 협박보다 앞이고, 채널 허용어가 이긴다", () => {
+    expect(pipeline.evaluate(chat("시발 꽁머니 준다"))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:weak:/) });
+    expect(pipeline.evaluate(chat("꽁머니 주는 사람 찾아간다"))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:spam:/) });
+    rules.add("c1", "allow", "카지노 영화 봤어?", "m");
+    expect(pipeline.evaluate(chat("카지노 영화 봤어?"))).toMatchObject({ decision: "pass", reason: "rule:allow" });
+  });
+
+  it("AI 키워드 경로 규칙은 1단계 판정을 바꾸지 않는다(2차 워커가 생기면 쓴다)", () => {
+    expect(pipeline.evaluate(chat("요즘 진짜 죽고싶다"))).toMatchObject({ decision: "pass", reason: "none" });
   });
 
   it("허용 도메인 앞에 한글을 붙인 링크는 다른 주소일 수 있어 후보(rule:link_glued)로 올린다", () => {

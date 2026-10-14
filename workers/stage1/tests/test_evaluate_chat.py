@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from zg_stage1.chat_eval_data import ALLOW_CATEGORIES, HARMFUL_CATEGORIES, ChatEvalItem
+from zg_stage1.data import compute_file_sha256
 from zg_stage1.errors import DatasetFormatError, MetricError, OutputExistsError
 from zg_stage1.evaluate_chat import (
     DEFAULT_TRAFFIC_MIX,
@@ -18,11 +19,14 @@ from zg_stage1.evaluate_chat import (
     forward_rates_by_category,
     format_chat_report_markdown,
     load_traffic_mix,
+    RuleRoute,
+    load_rule_routes,
     read_dev_threshold,
     require_matching_decision,
     resolve_output_path,
     scored_pairs,
     select_budget_threshold,
+    stage2_rates_by_category,
     summarize_at_chat_threshold,
     validate_traffic_mix,
     weighted_forward_rate,
@@ -48,7 +52,7 @@ HALF_HALF_MIX = {"friendly_profanity": 0.5, "short_normal": 0.5}
 def test_scored_pairs_drop_ambiguous_and_check_length() -> None:
     """ambiguous는 빼고, 문장과 점수 개수가 다르면 오류를 낸다."""
     items = [item("t1", "harmful", "threat"), item("x1", "ambiguous", "abuse")]
-    assert [pair[0].item_id for pair in scored_pairs(items, [0.9, 0.9])] == ["t1"]
+    assert [pair.item.item_id for pair in scored_pairs(items, [0.9, 0.9])] == ["t1"]
     with pytest.raises(MetricError, match="개수"):
         scored_pairs(items, [0.9])
 
@@ -140,9 +144,10 @@ def test_decision_must_match_split() -> None:
     require_matching_decision(argparse.Namespace(forward_budget=None, dev_report=Path("x.json")), "holdout")
 
 
-def write_dev_report(path: Path, model_sha: str, split: str = "dev") -> Path:
+def write_dev_report(path: Path, model_sha: str, split: str = "dev", rule_routes: dict | None = None) -> Path:
     """개발셋 결과 파일(필요한 필드만)."""
-    path.write_text(json.dumps({"split": split, "model_weights_sha256": model_sha, "decision": {"mode": "budget", "threshold": 0.42}}), encoding="utf-8")
+    report = {"split": split, "model_weights_sha256": model_sha, "decision": {"mode": "budget", "threshold": 0.42}, "rule_routes": rule_routes}
+    path.write_text(json.dumps(report), encoding="utf-8")
     return path
 
 
@@ -152,16 +157,73 @@ def test_dev_threshold_must_be_in_range(tmp_path: Path, bad_threshold: object) -
     path = tmp_path / "dev.json"
     path.write_text(json.dumps({"split": "dev", "model_weights_sha256": "abc", "decision": {"mode": "budget", "threshold": bad_threshold}}), encoding="utf-8")
     with pytest.raises(DatasetFormatError, match="범위의 수가 아닙니다"):
-        read_dev_threshold(path, "abc")
+        read_dev_threshold(path, "abc", policy_sha256=None)
 
 
 def test_dev_threshold_requires_same_model(tmp_path: Path) -> None:
     """같은 모델의 개발셋 결과에서만 임계값을 읽는다."""
-    assert read_dev_threshold(write_dev_report(tmp_path / "dev.json", "abc"), "abc") == 0.42
+    assert read_dev_threshold(write_dev_report(tmp_path / "dev.json", "abc"), "abc", policy_sha256=None) == 0.42
     with pytest.raises(DatasetFormatError, match="다른 모델"):
-        read_dev_threshold(write_dev_report(tmp_path / "other.json", "abc"), "xyz")
+        read_dev_threshold(write_dev_report(tmp_path / "other.json", "abc"), "xyz", policy_sha256=None)
     with pytest.raises(DatasetFormatError, match="개발셋 예산 결과가 아닙니다"):
-        read_dev_threshold(write_dev_report(tmp_path / "holdout.json", "abc", split="holdout"), "abc")
+        read_dev_threshold(write_dev_report(tmp_path / "holdout.json", "abc", split="holdout"), "abc", policy_sha256=None)
+
+
+def test_dev_threshold_requires_same_rule_policy(tmp_path: Path) -> None:
+    """보류셋은 개발셋과 같은 규칙 목록(지문)으로 만든 규칙 경로를 써야 한다. 쓰지 않은 쪽과도 섞지 않는다."""
+    with_routes = write_dev_report(tmp_path / "with.json", "abc", rule_routes={"file_name": "rules-dev.jsonl", "policy_sha256": "p1"})
+    assert read_dev_threshold(with_routes, "abc", policy_sha256="p1") == 0.42
+    for policy in (None, "p2"):
+        with pytest.raises(DatasetFormatError, match="규칙 경로"):
+            read_dev_threshold(with_routes, "abc", policy_sha256=policy)
+    with pytest.raises(DatasetFormatError, match="규칙 경로"):
+        read_dev_threshold(write_dev_report(tmp_path / "without.json", "abc"), "abc", policy_sha256="p1")
+    legacy = write_dev_report(tmp_path / "legacy.json", "abc", rule_routes={"file_name": "rules-dev.jsonl"})
+    with pytest.raises(DatasetFormatError, match="지문이 없는 옛 결과"):
+        read_dev_threshold(legacy, "abc", policy_sha256=None)
+
+
+def test_rule_routes_count_toward_recall_but_not_stage2_load() -> None:
+    """규칙이 잡은 문장은 재현율에는 들어가지만 2차 부하에서는 빠진다. 키워드 경로 문장은 둘 다에 들어간다.
+    가벼운 반응(AI 건너뜀)은 점수가 높아도 2차 부하에 넣지 않는다."""
+    items = [item("d1", "harmful", "doxxing"), item("s1", "harmful", "self_harm"), item("n1", "allow", "short_normal"), item("n2", "allow", "long_normal")]
+    routes = {
+        "d1": RuleRoute(rule_flagged=True, keyword=False), "s1": RuleRoute(rule_flagged=False, keyword=True),
+        "n1": RuleRoute(False, False, skip_ai=True), "n2": RuleRoute(False, False),
+    }
+    pairs = scored_pairs(items, [0.1, 0.1, 0.9, 0.1], routes)
+    assert forward_rates_by_category(pairs, 0.5) == {"doxxing": 1.0, "long_normal": 0.0, "self_harm": 1.0, "short_normal": 1.0}
+    assert stage2_rates_by_category(pairs, 0.5) == {"doxxing": 0.0, "long_normal": 0.0, "self_harm": 1.0, "short_normal": 0.0}
+    assert stage2_rates_by_category(pairs, 0.05) == {"doxxing": 0.0, "long_normal": 1.0, "self_harm": 1.0, "short_normal": 0.0}
+
+
+def route_line(identifier: str, decision: str, keyword: int | None, eval_sha: str, policy: str = "p1", skip_ai: bool = False) -> str:
+    """규칙 평가 도구가 쓰는 결과 한 줄."""
+    record = {"id": identifier, "decision": decision, "reason": "x", "keyword": keyword, "skipAi": skip_ai, "evalSha256": eval_sha, "policySha256": policy}
+    return json.dumps(record) + "\n"
+
+
+def test_load_rule_routes_validates_ids_hashes_and_policy(tmp_path: Path) -> None:
+    """규칙 결과의 id가 평가셋과 같고, 평가셋 파일 해시가 맞고, 규칙 목록 지문이 하나여야 한다."""
+    items = [item("a", "allow", "short_normal"), item("b", "harmful", "spam")]
+    eval_path = tmp_path / "dev.jsonl"
+    eval_path.write_text("평가셋 내용", encoding="utf-8")
+    sha = compute_file_sha256(eval_path)
+    good = tmp_path / "good.jsonl"
+    good.write_text(route_line("a", "pass", None, sha, skip_ai=True) + route_line("b", "candidate", 3, sha))
+    assert load_rule_routes(good, items, eval_path) == ({"a": RuleRoute(False, False, True), "b": RuleRoute(True, True)}, "p1")
+    cases = [
+        (route_line("a", "pass", None, sha), "id가 평가셋과 다릅니다"),
+        (route_line("a", "block", None, sha) + route_line("b", "pass", None, sha), "규칙 경로 결과 형식"),
+        (route_line("a", "pass", None, "old") + route_line("b", "pass", None, "old"), "평가셋 파일과 한 규칙 목록"),
+        (route_line("a", "pass", None, sha, "p1") + route_line("b", "pass", None, sha, "p2"), "평가셋 파일과 한 규칙 목록"),
+        (route_line("a", "pass", None, sha).replace('"skipAi": false', '"skipAi": "no"') + route_line("b", "pass", None, sha), "규칙 경로 결과 형식"),
+    ]
+    for content, message in cases:
+        bad = tmp_path / "bad.jsonl"
+        bad.write_text(content)
+        with pytest.raises(DatasetFormatError, match=message):
+            load_rule_routes(bad, items, eval_path)
 
 
 def test_output_path_protects_holdout_results(tmp_path: Path) -> None:
