@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AutoHideSwitch } from "../actions/autoHideSwitch.js";
 import type { Broadcaster } from "../actions/decisionHandler.js";
 import type { ActionOutcome, ActionRequest, Actor, Executor } from "../actions/executor.js";
+import type { MessageHideBlock, MessageHideGuard } from "../actions/messageHideGuard.js";
 import { RESTRICT_REPEAT_BLOCK_MS, type SenderActionBlock, type SenderActionGuard, type SenderActionKind } from "../actions/senderActionGuard.js";
 import { settleHideClaim, type VerdictClaims } from "../actions/verdictClaims.js";
 import type { ConnectedChannel } from "../connection/credentialStore.js";
@@ -29,6 +30,8 @@ export interface RouteServices {
   claims: VerdictClaims;
   /** 사람 단위 제재(임시 제한·활동 제한)가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). */
   senderActions: SenderActionGuard;
+  /** 같은 메시지에 숨김이 두 번 나가지 않게 막는 표. 판정이 여럿인 메시지(AI 후보·떼도배 소급 숨김)도 한 번만 숨긴다(계획 R4). */
+  hideGuard: MessageHideGuard;
   executor: Executor;
   autoHide: AutoHideSwitch;
   rules: RuleRepository;
@@ -96,6 +99,8 @@ const AUTO_HIDE_IN_PROGRESS_MESSAGE = "자동 숨김이 진행 중입니다. 잠
  * 왜 다시 보내지 않나: 치지직이 이미 숨겼을 수 있어, 서버가 다시 보내면 되돌릴 수 없는 숨김이 겹친다. 확인은 매니저가 치지직에서 한다.
  */
 const HIDE_RESULT_UNKNOWN_MESSAGE = "숨김 결과를 알 수 없습니다. 치지직 채팅에서 숨겨졌는지 확인하고, 숨겨지지 않았다면 치지직 기본 도구로 숨기세요.";
+/** 같은 메시지가 다른 판정으로 이미 숨겨졌거나 숨기는 중일 때의 안내 문구(계획 R4). 화면이 다시 불러오게 already_handled 코드를 쓴다. */
+const MESSAGE_ALREADY_HIDDEN_MESSAGE = "이 메시지는 이미 숨겼거나 숨기는 중입니다. '다시 불러오기'를 눌러 지금 상태를 확인하세요.";
 /** 다른 요청이 같은 사람에게 같은 제재를 보내는 중일 때의 안내 문구(K2). 화면이 다시 불러오게 already_handled 코드를 쓴다. */
 const RESTRICT_IN_PROGRESS_MESSAGE = "다른 요청이 이 사용자를 제한하는 중입니다. 잠시 뒤 '다시 불러오기'를 눌러 결과를 확인하세요.";
 /** 같은 사람에게 같은 제재가 방금 성공했을 때의 안내 문구(K2). 코드는 already_handled다. */
@@ -125,7 +130,14 @@ const ruleBodySchema = z.object({
 });
 /** 설정 변경 본문. strict로 알 수 없는 키(예: 스위치 상태)를 거부한다. */
 const settingsBodySchema = z
-  .object({ breakerPerMinute: z.number().int().optional(), retentionDaysContent: z.number().int().optional(), retentionDaysAudit: z.number().int().optional() })
+  .object({
+    breakerPerMinute: z.number().int().optional(),
+    retentionDaysContent: z.number().int().optional(),
+    retentionDaysAudit: z.number().int().optional(),
+    stage1Threshold: z.number().optional(),
+    candidateThreshold: z.number().optional(),
+    sureThreshold: z.number().optional(),
+  })
   .strict();
 /** 채팅 설정 본문. 치지직이 허용하는 값만 통과시켜 쓰기 API 거부를 미리 막는다. */
 const chatSettingsBodySchema = z.object({
@@ -229,15 +241,31 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
 async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
   const verdict = findVerdict(services, request.params, channelId);
   if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-  if (!services.claims.tryClaim(verdict.id, "manager")) throw claimConflict(services, verdict.id);
+  const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
+  // 메시지 막기를 먼저 잡는다(장부를 읽다 실패해도 판정 붙잡기가 남지 않게). 판정 붙잡기가 실패하면 메시지 막기를 푼다.
+  const blocked = services.hideGuard.tryAcquire(target);
+  if (blocked) throw messageHideConflict(blocked);
+  if (!services.claims.tryClaim(verdict.id, "manager")) {
+    services.hideGuard.settle(target, null);
+    throw claimConflict(services, verdict.id);
+  }
   let outcome: ActionOutcome | null = null;
   try {
-    const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
     outcome = await services.executor.submit(channelId, { kind: "hide", target, verdictId: verdict.id }, actorOf(manager));
     return sendOutcome(reply, outcome);
   } finally {
     settleHideClaim(services.claims, verdict.id, outcome);
+    services.hideGuard.settle(target, outcome);
   }
+}
+
+/**
+ * 같은 메시지가 다른 판정으로 이미 숨겨졌거나 숨기는 중일 때의 409 오류. 결과를 알 수 없으면 result_unknown(K1), 그 밖은 already_handled다.
+ * @param blocked 막은 이유
+ */
+function messageHideConflict(blocked: MessageHideBlock): RouteError {
+  if (blocked === "result_unknown") return new RouteError(409, "result_unknown", HIDE_RESULT_UNKNOWN_MESSAGE);
+  return new RouteError(409, "already_handled", MESSAGE_ALREADY_HIDDEN_MESSAGE);
 }
 
 /**
@@ -534,5 +562,8 @@ function toMe(manager: ManagerSession): MeDto {
 
 /** 스위치 상태를 뺀 설정 DTO. */
 function toSettingsDto(settings: ChannelSettings): SettingsDto {
-  return { breakerPerMinute: settings.breakerPerMinute, retentionDaysContent: settings.retentionDaysContent, retentionDaysAudit: settings.retentionDaysAudit };
+  return {
+    breakerPerMinute: settings.breakerPerMinute, retentionDaysContent: settings.retentionDaysContent, retentionDaysAudit: settings.retentionDaysAudit,
+    stage1Threshold: settings.stage1Threshold, candidateThreshold: settings.candidateThreshold, sureThreshold: settings.sureThreshold,
+  };
 }

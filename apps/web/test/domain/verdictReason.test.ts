@@ -25,3 +25,20 @@ describe("describeReason", () => {
     expect([ruleIdOf("rule:strong:12"), ruleIdOf("rule:weak:7:privileged"), ruleIdOf("rule:link"), ruleIdOf("model:x"), ruleIdOf("rule:strong:3:unknown_role")]).toEqual([12, 7, null, null, 3]);
   });
 });
+
+describe("describeReason AI 판정(로드맵 2단계)", () => {
+  it.each([
+    ["ai:S1", "AI · 증오(S1)"],
+    ["ai:S2", "AI · 괴롭힘(S2)"],
+    ["ai:S6", "AI · 자살·자해(S6)"],
+    ["ai:S7", "AI · 잘못된 정보(S7)"],
+  ])("%s → %s", (reason, expected) => {
+    expect(describeReason(reason)).toBe(expected);
+  });
+
+  it("모르는 AI 범주와 프로토타입 이름은 원문 그대로 보여 준다", () => {
+    expect(describeReason("ai:S9")).toBe("ai:S9");
+    expect(describeReason("ai:toString")).toBe("ai:toString");
+    expect(ruleIdOf("ai:S2")).toBeNull();
+  });
+});

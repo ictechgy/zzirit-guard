@@ -99,7 +99,12 @@ function MessageRow({ verdict, kind, canHide, run, isLocked, isHandled, actions,
     <li className={isHandled ? "message message-handled" : "message"}>
       <span className="time">{formatClockTime(verdict.createdAt)}</span>
       <span className="content">{verdict.content}</span>
-      <span className="reason">{describeReason(verdict.reason)}{isHandled && <span className="handled-label">처리됨</span>}</span>
+      <span className="reason">
+        {describeReason(verdict.reason)}
+        {typeof verdict.aiProbability === "number" && <span className="ai-probability"> · 확률 {verdict.aiProbability.toFixed(2)}</span>}
+        {verdict.sure && <span className="badge badge-sure">확실</span>}
+        {isHandled && <span className="handled-label">처리됨</span>}
+      </span>
       <span className="buttons">
         <button type="button" aria-label={`${label} 숨기기`} disabled={isDisabled} onClick={() => run(lockKey, () => actions.hide(verdict), verdict.id)}>숨기기</button>
         {kind === "shadow" ? (

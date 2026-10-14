@@ -2,9 +2,10 @@ import type { ChatLine, RealtimeEvent, ServerStatus, VerdictDto } from "@zzirit-
 import { describe, expect, it } from "vitest";
 import { VERDICT_KEEP_MS } from "../../src/domain/candidates";
 import { initialServerState, MAX_CHAT_LINES, serverReducer, type ServerAction, type ServerState } from "../../src/state/serverReducer";
+import { AI_OFF, NO_AI } from "../helpers/aiFixtures";
 
 /** 상태 예시. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 
 /** 채팅 줄 예시. */
 function line(index: number): ChatLine {
@@ -13,7 +14,7 @@ function line(index: number): ChatLine {
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
-  return { id, chatChannelId: "c", senderChannelId: "s", senderNickname: "n", content: "x", messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: id, ...overrides };
+  return { id, chatChannelId: "c", senderChannelId: "s", senderNickname: "n", content: "x", messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: id, ...NO_AI, ...overrides };
 }
 
 /** 동작을 차례로 적용한다. */
@@ -142,5 +143,17 @@ describe("serverReducer", () => {
     const rejected = reduce([{ type: "connection", connected: true }, { type: "realtime_rejected" }]);
     expect(rejected).toMatchObject({ realtimeRejected: true, realtimeConnected: false });
     expect(serverReducer(rejected, { type: "connection", connected: true }).realtimeRejected).toBe(false);
+  });
+});
+
+describe("AI 칸이 없는 상태(이전 서버, Codex PR C 리뷰)", () => {
+  /** AI 단계 이전 서버가 보내던 상태. */
+  const legacy = { ...status, ai: undefined } as unknown as ServerStatus;
+
+  it("조회 결과와 실시간 상태 모두 AI 꺼짐으로 채운다(화면이 깨지지 않게)", () => {
+    const loaded = serverReducer(initialServerState, { type: "snapshot_loaded", status: legacy, verdicts: [] });
+    expect(loaded.status?.ai.enabled).toBe(false);
+    const updated = serverReducer(loaded, { type: "event", event: { type: "status", status: legacy } });
+    expect(updated.status?.ai).toMatchObject({ enabled: false, queueLength: 0 });
   });
 });

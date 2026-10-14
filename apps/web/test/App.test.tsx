@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { json, stubFetch } from "./helpers/stubFetch";
+import { AI_OFF, NO_AI } from "./helpers/aiFixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -10,7 +11,7 @@ afterEach(() => {
 });
 
 /** 정상 서버 상태. */
-const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 /** not_manager 코드의 문구. */
 const NOT_MANAGER_TEXT = "이 채널의 매니저가 아닙니다. 치지직에서 채널 관리자나 채팅 운영자로 등록돼 있어야 합니다.";
 /** 일반 실패(failed·모르는 코드)의 문구. */
@@ -139,7 +140,7 @@ describe("App 세션 종료(W1 확인)", () => {
 
   it("세션이 끝나면 본 화면 전체가 사라져 채팅 원문·닉네임이 남지 않는다", async () => {
     vi.stubGlobal("WebSocket", EndingWebSocket);
-    const verdict = { id: 1, chatChannelId: "c", senderChannelId: "s1", senderNickname: "닉네임1", content: "남으면 안 되는 원문", messageTime: 1, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: Date.now() };
+    const verdict = { id: 1, chatChannelId: "c", senderChannelId: "s1", senderNickname: "닉네임1", content: "남으면 안 되는 원문", messageTime: 1, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: Date.now(), ...NO_AI };
     stubFetch({
       "GET /api/me": () => json(200, me),
       "GET /api/status": () => json(200, status),

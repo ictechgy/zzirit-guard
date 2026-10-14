@@ -63,3 +63,41 @@ describe("SettingsRepository 자동 숨김 스위치(S6, C03)", () => {
     expect(settings.get("c1").autoHideEnabled).toBe(true);
   });
 });
+
+describe("SettingsRepository AI 임계값(로드맵 2단계 계획 R10)", () => {
+  it("기본값은 스펙 11장 값이다", () => {
+    expect(settings.get("c1")).toMatchObject({ stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99 });
+  });
+
+  it("비율은 소수를 받는다(정수 설정의 정수 검사는 그대로다)", () => {
+    expect(settings.update("c1", { stage1Threshold: 0.012, candidateThreshold: 0.6, sureThreshold: 1 })).toMatchObject({ stage1Threshold: 0.012, sureThreshold: 1 });
+    expectValidationError({ breakerPerMinute: 1.5 }, /정수/);
+  });
+
+  it.each([
+    [{ stage1Threshold: 0 }, /stage1Threshold/],
+    [{ stage1Threshold: 1 }, /stage1Threshold/],
+    [{ candidateThreshold: -0.1 }, /candidateThreshold/],
+    [{ sureThreshold: 1.01 }, /sureThreshold/],
+    [{ stage1Threshold: Number.NaN }, /stage1Threshold/],
+    [{ stage1Threshold: "0.1" }, /stage1Threshold/],
+  ])("범위 밖·숫자 아님은 거부한다: %o", (patch, pattern) => {
+    expectValidationError(patch, pattern);
+  });
+
+  it("후보 임계값이 확실 임계값보다 크면 거부하고, 함께 보낸 다른 값도 바꾸지 않는다", () => {
+    expectValidationError({ stage1Threshold: 0.2, candidateThreshold: 0.995 }, /확실 임계값/);
+    expect(settings.get("c1")).toMatchObject({ stage1Threshold: 0.05, candidateThreshold: 0.5 });
+  });
+});
+
+describe("SettingsRepository 깨진 임계값 읽기", () => {
+  it("DB 값이 범위 밖이면 기본값으로 읽고 경고를 남긴다", () => {
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO setting (channel_id, stage1_threshold, candidate_threshold, sure_threshold) VALUES ('c1', 7, 0.9, 0.5)").run();
+    const warnings: string[] = [];
+    const repository = createSettingsRepository(database, { info: () => undefined, warn: (message) => warnings.push(message), error: () => undefined });
+    expect(repository.get("c1")).toMatchObject({ stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99 });
+    expect(warnings).toHaveLength(2);
+  });
+});

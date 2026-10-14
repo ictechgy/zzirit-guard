@@ -17,7 +17,7 @@ afterEach(() => {
 /** 채널 관리자. */
 const manager: MeDto = { channelId: "m1", channelName: "관리자", role: "STREAMING_CHANNEL_MANAGER", permissions: ["edit_rules", "edit_chat_settings", "view_audit"] };
 /** 기본 설정값. */
-const settings: SettingsDto = { breakerPerMinute: 30, retentionDaysContent: 7, retentionDaysAudit: 90 };
+const settings: SettingsDto = { breakerPerMinute: 30, retentionDaysContent: 7, retentionDaysAudit: 90, stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99 };
 
 /** 응답하지 않는 요청을 가진 fetch. 진행 중 상태를 붙잡는다. */
 function stubPending(getRoutes: Record<string, () => Response>) {
@@ -233,5 +233,81 @@ describe("SettingsScreen", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     render(<SettingsScreen me={manager} onSignedOut={vi.fn()} refreshKey={0} onRefresh={vi.fn()} />);
     expect(screen.getByText("영구 제한·해제는 치지직 기본 도구에서 합니다.")).toBeTruthy();
+  });
+});
+
+describe("LimitsSection AI 임계값(로드맵 2단계 계획 R10)", () => {
+  /** 보낸 PUT 본문들. */
+  function sentBodies(fetchMock: ReturnType<typeof vi.fn>): unknown[] {
+    return fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PUT").map(([, init]) => JSON.parse(String((init as RequestInit).body)) as unknown);
+  }
+
+  it("AI를 끈 배포에서는 AI 임계값 칸을 보이지 않는다", async () => {
+    stubFetch({ "GET /api/settings": () => json(200, settings) });
+    render(<LimitsSection me={manager} />);
+    await screen.findByLabelText(/원문 보관 기간/);
+    expect(screen.queryByLabelText(/AI 1차 임계값/)).toBeNull();
+  });
+
+  it("AI를 켜면 소수 임계값을 바꿔 바꾼 항목만 보낸다", async () => {
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, settings), "PUT /api/settings": () => json(200, { ...settings, stage1Threshold: 0.012 }) });
+    render(<LimitsSection me={manager} aiEnabled />);
+    const stage1 = await screen.findByLabelText(/AI 1차 임계값/);
+    await userEvent.clear(stage1);
+    await userEvent.type(stage1, "0.012");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장했습니다.")).toBeTruthy();
+    expect(sentBodies(fetchMock)).toEqual([{ stage1Threshold: 0.012 }]);
+  });
+
+  it.each([
+    ["AI 1차 임계값", "1", /AI 1차 임계값.*0보다 크고 1보다 작은/],
+    ["AI '확실' 임계값", "0.3", /후보 임계값은 확실 임계값보다 클 수 없습니다/],
+  ])("%s를 %s로 바꾸면 보내지 않고 알린다", async (label, value, pattern) => {
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, settings) });
+    render(<LimitsSection me={manager} aiEnabled />);
+    const input = await screen.findByLabelText(new RegExp(label));
+    await userEvent.clear(input);
+    await userEvent.type(input, value);
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(screen.getByRole("status").textContent).toMatch(pattern);
+    expect(callsTo(fetchMock, "PUT", "/api/settings")).toBe(0);
+  });
+});
+
+describe("StatusSection AI 행(로드맵 2단계)", () => {
+  it("AI를 켜면 워커 상태·모델·대기열·미검사를 보이고, 끄면 보이지 않는다", async () => {
+    const base = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+    const ai = {
+      enabled: true, stage1: { state: "ok", model: "kcelectra@abc", since: 0 }, stage2: { state: "down", model: null, since: 0 },
+      queueLength: 4, uncheckedLastMinute: { dropped: 1, unchecked: 2 },
+    };
+    stubFetch({ "GET /api/status": () => json(200, { ...base, ai }) });
+    render(<StatusSection />);
+    expect((await screen.findByText("AI 1차 워커")).nextElementSibling?.textContent).toMatch(/^정상 \(kcelectra@abc\)/);
+    expect(screen.getByText("AI 2차 워커").nextElementSibling?.textContent).toMatch(/^중지/);
+    expect(screen.getByText("AI 2차 대기열").nextElementSibling?.textContent).toBe("4건");
+    expect(screen.getByText("최근 1분 AI 미검사").nextElementSibling?.textContent).toBe("과부하 1건, 장애·너무 긴 문장 2건");
+  });
+});
+
+describe("이전 서버와의 호환(Codex PR C 리뷰)", () => {
+  it("임계값이 없는 이전 설정 응답이어도 다른 설정은 저장하고, AI 키를 보내지 않는다", async () => {
+    const legacy = { breakerPerMinute: 30, retentionDaysContent: 7, retentionDaysAudit: 90 } as unknown as SettingsDto;
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, legacy), "PUT /api/settings": () => json(200, { ...legacy, retentionDaysContent: 71 }) });
+    render(<LimitsSection me={manager} aiEnabled />);
+    expect(screen.queryByLabelText(/AI 1차 임계값/)).toBeNull();
+    await userEvent.type(await screen.findByLabelText(/원문 보관 기간/), "1");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장했습니다.")).toBeTruthy();
+    const bodies = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PUT").map(([, init]) => JSON.parse(String((init as RequestInit).body)) as unknown);
+    expect(bodies).toEqual([{ retentionDaysContent: 71 }]);
+  });
+
+  it("상태 점검은 AI 칸이 없는 이전 상태를 AI 꺼짐으로 보인다", async () => {
+    stubFetch({ "GET /api/status": () => json(200, { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }) });
+    render(<StatusSection />);
+    expect(await screen.findByText("치지직 채팅 연결")).toBeTruthy();
+    expect(screen.queryByText("AI 1차 워커")).toBeNull();
   });
 });

@@ -22,21 +22,23 @@ export interface SettingsScreenProps {
   refreshKey: number;
   /** 머리의 '새로 고침'을 누르면 부른다(refreshKey를 올린다). iOS 홈 화면 앱에는 새로고침이 없다. */
   onRefresh(): void;
+  /** 서버가 AI 단계를 켰는지(실시간 상태). 켜져 있을 때만 AI 임계값을 보인다. 생략하면 꺼짐으로 본다. */
+  aiEnabled?: boolean;
 }
 
 /** 기록·설정 화면(스펙 6장 ③). 영구 제한·해제는 이 앱에 없다: 치지직 기본 도구로 한다(B4, 운영 안내서). */
-export function SettingsScreen({ me, onSignedOut, refreshKey, onRefresh }: SettingsScreenProps) {
+export function SettingsScreen({ me, onSignedOut, refreshKey, onRefresh, aiEnabled = false }: SettingsScreenProps) {
   return (
     <section className="screen settings">
       <div className="toolbar">
         <button type="button" onClick={onRefresh}>새로 고침</button>
       </div>
       <StatusSection />
-      <StatsSection refreshKey={refreshKey} />
+      <StatsSection refreshKey={refreshKey} aiEnabled={aiEnabled} />
       <FalsePositiveSection refreshKey={refreshKey} />
       <RulesSection me={me} refreshKey={refreshKey} />
       <p className="hint">영구 제한·해제는 치지직 기본 도구에서 합니다.</p>
-      <LimitsSection me={me} refreshKey={refreshKey} />
+      <LimitsSection me={me} refreshKey={refreshKey} aiEnabled={aiEnabled} />
       <ChatSettingsSection me={me} />
       <AuditSection me={me} refreshKey={refreshKey} />
       <AccountSection me={me} onSignedOut={onSignedOut} />

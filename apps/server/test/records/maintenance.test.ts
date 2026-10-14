@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
 import { createSessionStore } from "../../src/managers/sessionStore.js";
 import { createAuditLog } from "../../src/records/auditLog.js";
+import { createMessageHideLedger } from "../../src/records/messageHideLedger.js";
 import { runBackup, runRetention } from "../../src/records/maintenance.js";
 import { createVerdictRepository } from "../../src/records/verdictRepository.js";
 
@@ -40,9 +41,22 @@ describe("runRetention", () => {
     sessions.create({ channelId: "m", channelName: "m", role: "STREAMING_CHAT_MANAGER" });
     now = 31 * DAY;
     verdicts.insert(verdict);
-    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toEqual({ verdicts: 1, audits: 0, stats: 0, sessions: 1 });
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toEqual({ verdicts: 1, audits: 0, stats: 0, sessions: 1, hides: 0 });
     now = 181 * DAY;
     expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ audits: 1, stats: 1 });
+  });
+
+  it("숨김 장부는 원문·감사 기록 중 더 긴 기간이 지나야 지운다(그 메시지의 판정이 남아 있는 동안 지우지 않게)", () => {
+    let now = 0;
+    const database = openDatabase(":memory:");
+    database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    database.prepare("INSERT INTO setting (channel_id, retention_days_content, retention_days_audit) VALUES ('c1', 30, 7)").run();
+    const deps = { database, verdicts: createVerdictRepository(database, () => now), auditLog: createAuditLog(database, () => now), sessions: createSessionStore(database, () => now), clock: () => now };
+    createMessageHideLedger(database, () => now).record({ chatChannelId: "x", senderChannelId: "s", messageTime: 0 }, "hidden");
+    now = 8 * DAY;
+    expect(runRetention(deps)).toMatchObject({ hides: 0 });
+    now = 31 * DAY;
+    expect(runRetention(deps)).toMatchObject({ hides: 1 });
   });
 
   it("정리 뒤 WAL을 비워, 지운 원문이 WAL 파일에 남지 않게 한다(F5)", () => {

@@ -19,6 +19,10 @@ export interface AppConfig {
   vapidPublicKey: string;
   vapidPrivateKey: string;
   vapidSubject: string;
+  /** AI 단계(1차·2차 워커)를 쓸지(ZG_AI_ENABLED). 기본은 꺼짐이라 워커를 설치하지 않은 배포는 규칙만 돈다. */
+  aiEnabled: boolean;
+  /** 워커 소켓 디렉터리($ZG_DATA_DIR/run). 워커가 0700으로 만들고 stage1.sock·stage2.sock을 둔다. */
+  aiRunDirectory: string;
 }
 
 /** 설정 오류. 메시지에 빠진 항목과 해결 방법을 담는다. */
@@ -42,6 +46,8 @@ const environmentSchema = z.object({
   ZG_VAPID_PUBLIC_KEY: z.string().min(1),
   ZG_VAPID_PRIVATE_KEY: z.string().min(1),
   ZG_VAPID_SUBJECT: z.string().startsWith("mailto:"),
+  /** AI 단계 켜기. "1"·"true"만 켠다(오타가 켜짐으로 읽히지 않게 값을 좁힌다). */
+  ZG_AI_ENABLED: z.enum(["0", "1", "false", "true"]).default("0"),
 });
 
 /**
@@ -81,5 +87,7 @@ function toAppConfig(values: z.infer<typeof environmentSchema>): AppConfig {
     vapidPublicKey: values.ZG_VAPID_PUBLIC_KEY,
     vapidPrivateKey: values.ZG_VAPID_PRIVATE_KEY,
     vapidSubject: values.ZG_VAPID_SUBJECT,
+    aiEnabled: values.ZG_AI_ENABLED === "1" || values.ZG_AI_ENABLED === "true",
+    aiRunDirectory: join(values.ZG_DATA_DIR, "run"),
   };
 }

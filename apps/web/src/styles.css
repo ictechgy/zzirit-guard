@@ -73,6 +73,9 @@ button:disabled { opacity: 0.4; }
 .tab-bar button { border: none; border-radius: 0; background: transparent; }
 .tab-bar button[aria-pressed="true"] { color: var(--accent); font-weight: 700; }
 .badge { margin-left: 6px; background: var(--danger); color: white; border-radius: 999px; padding: 0 6px; font-size: 12px; }
+/* AI가 '확실'(결과가 나온 때의 확실 임계값 이상)로 판정한 후보. */
+.badge-sure { background: #b3261e; color: #ffffff; } /* 흰 글자와 대비 약 6.5:1(작은 글자 기준 4.5:1 이상). */
+.ai-probability { color: var(--muted); }
 .login { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; text-align: center; }
 .login .button { width: 100%; max-width: 320px; }
 .rows div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #2c2c38; }

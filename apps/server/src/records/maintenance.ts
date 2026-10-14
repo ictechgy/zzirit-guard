@@ -12,6 +12,8 @@ export interface RetentionResult {
   audits: number;
   stats: number;
   sessions: number;
+  /** 지운 메시지 숨김 장부 행 수(원문 없음, 감사 기록과 같은 기간). */
+  hides: number;
 }
 
 /** runRetention 의존성. */
@@ -78,7 +80,22 @@ function deleteExpiredRecords(deps: RetentionDeps): RetentionResult {
     audits: deps.auditLog.deleteOlderThan(auditCutoff),
     stats: deps.database.prepare("DELETE FROM minute_stat WHERE minute < ?").run(auditCutoff).changes,
     sessions: deps.sessions.deleteExpired(),
+    hides: deleteExpiredHides(deps.database, now - Math.max(days.content, days.audit) * DAY_MS),
   };
+}
+
+/**
+ * 숨김 장부에서 기한이 지난 행을 지운다. 원문·감사 기록 중 더 긴 기간이 지난 것만 지운다.
+ * 왜 더 긴 기간인가: 같은 메시지의 판정이 남아 있는 동안 장부가 먼저 지워지면, 그 판정(예: 늦게 온 AI 후보)으로 같은 메시지에 숨김이 또 나간다.
+ * 판정은 원문 기간에 지워지고 장부 행은 판정보다 늦게 적히므로, 더 긴 기간이 지나면 그 메시지를 가리키는 판정이 남아 있지 않다.
+ * 그 뒤에 막을 일은 치지직이 그만큼 지난 메시지를 다시 보낼 때뿐인데, 채팅 연결은 지난 메시지를 다시 보내지 않는다고 본다(가정).
+ * 보낸 사람 식별자를 기한 없이 쥐고 있지 않으려고 이 가정 위에서 지운다.
+ * @param database 서버 SQLite 연결
+ * @param cutoffMs 이보다 오래된(마지막으로 적힌 시각 기준) 행을 지운다
+ * @returns 지운 행 수
+ */
+function deleteExpiredHides(database: Database, cutoffMs: number): number {
+  return database.prepare("DELETE FROM message_hide WHERE updated_at < ?").run(cutoffMs).changes;
 }
 
 /**

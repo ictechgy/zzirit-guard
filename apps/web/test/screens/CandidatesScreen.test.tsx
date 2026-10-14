@@ -7,11 +7,12 @@ import { formatClockTime } from "../../src/domain/timeFormat";
 import { buildSections } from "../../src/domain/candidates";
 import { CandidatesScreen, type CandidateActions } from "../../src/screens/CandidatesScreen";
 import { TIMEOUT_LOCK_MS } from "../../src/state/useTimeoutHolds";
+import { AI_OFF, NO_AI } from "../helpers/aiFixtures";
 
 /** 채팅 운영자. */
 const chatManager: MeDto = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER", permissions: ["disable_auto_hide", "hide_message", "temporary_restrict"] };
 /** 정상 상태. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 /** 기준 시각. */
 const NOW = 1_000_000;
 /** 시스템 꺼짐 안내를 띄우지 않고 실시간도 멈추지 않은 속성(F8 안내·실시간 멈춤은 MainScreen 테스트가 다룬다). */
@@ -19,7 +20,7 @@ const noNotice = { systemDisableNotice: null, onDismissSystemDisableNotice: () =
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
-  return { id, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: `나쁜 말 ${id}`, messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: NOW - id * 1000, ...overrides };
+  return { id, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: `나쁜 말 ${id}`, messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: NOW - id * 1000, ...NO_AI, ...overrides };
 }
 
 /** 모든 동작이 안내 없이 성공하는 가짜. */
@@ -630,5 +631,30 @@ describe("CandidatesScreen 같은 초 메시지의 버튼 이름(K22)", () => {
     expect(new Set(names).size).toBe(2);
     await userEvent.click(screen.getByRole("button", { name: `악플러의 ${sameSecond} 2번째 메시지 숨기기` }));
     expect(actions.hide).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
+  });
+});
+
+describe("CandidatesScreen AI 후보(로드맵 2단계)", () => {
+  it("AI 후보는 범주 이름과 확률을 보이고, '확실'이면 배지를 단다", () => {
+    renderScreen([
+      verdict(1, { reason: "ai:S2", aiProbability: 0.993, aiCategory: "S2", sure: true }),
+      verdict(2, { reason: "ai:S1", aiProbability: 0.71, aiCategory: "S1", sure: false, senderChannelId: "other", senderNickname: "다른사람" }),
+    ]);
+    expect(screen.getByText("AI · 괴롭힘(S2)")).toBeTruthy();
+    expect(screen.getByText("· 확률 0.99", { exact: false })).toBeTruthy();
+    expect(screen.getByText("· 확률 0.71", { exact: false })).toBeTruthy();
+    expect(screen.getAllByText("확실")).toHaveLength(1);
+  });
+
+  it("규칙 판정에는 확률·확실 표시가 없다", () => {
+    renderScreen([verdict(1)]);
+    expect(screen.queryByText(/확률/)).toBeNull();
+    expect(screen.queryByText("확실")).toBeNull();
+  });
+
+  it("AI '도움 필요'(S6)는 따로 묶어 보인다", () => {
+    renderScreen([verdict(1, { decision: "needs_care", reason: "ai:S6", aiProbability: 0.9, aiCategory: "S6" })]);
+    expect(screen.getByRole("heading", { name: /도움 필요/ })).toBeTruthy();
+    expect(screen.getByText("AI · 자살·자해(S6)")).toBeTruthy();
   });
 });

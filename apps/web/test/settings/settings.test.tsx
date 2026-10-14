@@ -8,6 +8,7 @@ import { RulesSection } from "../../src/settings/RulesSection";
 import { StatsSection } from "../../src/settings/StatsSection";
 import { StatusSection } from "../../src/settings/StatusSection";
 import { json, stubFetch } from "../helpers/stubFetch";
+import { AI_OFF, NO_AI } from "../helpers/aiFixtures";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -79,18 +80,31 @@ describe("AuditSection", () => {
 
 describe("StatsSection", () => {
   it("최근 1시간 합계와 가장 바빴던 분을 초당으로 보여 준다", async () => {
-    const minute = (received: number) => ({ minute: 0, received, skipped: 10, deduplicated: 5, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0, candidates: 2, auto_hidden: 0, shadow: 1, invalid_events: 0 });
+    const minute = (received: number) => ({ minute: 0, received, skipped: 10, deduplicated: 5, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0, ai_unchecked: 0, candidates: 2, auto_hidden: 0, shadow: 1, invalid_events: 0 });
     stubFetch({ "GET /api/stats?sinceMinutes=60": () => json(200, [minute(600), minute(3000)]) });
     render(<StatsSection />);
     expect(await screen.findByText("3600")).toBeTruthy();
     expect(screen.getByText("50.0")).toBeTruthy();
+  });
+
+  it("AI를 켠 배포에서만 AI 항목을 보인다(0이어도 보여 꺼짐과 구분된다)", async () => {
+    const row = { minute: 0, received: 10, skipped: 0, deduplicated: 0, stage1_forwarded: 4, stage2_done: 3, stage2_dropped: 0, ai_unchecked: 1, candidates: 1, auto_hidden: 0, shadow: 0, invalid_events: 0 };
+    stubFetch({ "GET /api/stats?sinceMinutes=60": () => json(200, [row]) });
+    const { unmount } = render(<StatsSection aiEnabled />);
+    expect((await screen.findByText("AI 2차로 보낸 채팅")).nextElementSibling?.textContent).toBe("4");
+    expect(screen.getByText("AI 미검사(과부하)").nextElementSibling?.textContent).toBe("0");
+    expect(screen.getByText("AI 미검사(장애·너무 긴 문장)").nextElementSibling?.textContent).toBe("1");
+    unmount();
+    render(<StatsSection />);
+    await screen.findByText("받은 채팅");
+    expect(screen.queryByText("AI 2차로 보낸 채팅")).toBeNull();
   });
 });
 
 describe("StatusSection", () => {
   it("열릴 때 상태를 읽고 15초마다 다시 읽는다(마지막 채팅 수신·처리 대기는 실시간으로 오지 않는다, R-7)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 2 };
+    const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 2, ai: AI_OFF };
     const fetchMock = stubFetch({ "GET /api/status": () => json(200, status) });
     render(<StatusSection />);
     expect(await screen.findByText("2건")).toBeTruthy();
@@ -104,7 +118,7 @@ describe("StatusSection", () => {
 describe("FalsePositiveSection", () => {
   it("오판이 나온 규칙을 규칙 내용과 건수로, 최근 오판을 이유와 함께 보여 준다(스펙 5.5, R-16)", async () => {
     const review: FalsePositiveReviewDto = {
-      recent: [{ id: 9, chatChannelId: "c", senderChannelId: "s", senderNickname: "시청자", content: "정상 문장", messageTime: 1, decision: "candidate", reason: "rule:strong_spanning:3", status: "false_positive", createdAt: 0 }],
+      recent: [{ id: 9, chatChannelId: "c", senderChannelId: "s", senderNickname: "시청자", content: "정상 문장", messageTime: 1, decision: "candidate", reason: "rule:strong_spanning:3", status: "false_positive", createdAt: 0, ...NO_AI }],
       byReason: [{ reason: "rule:strong_spanning:3", count: 2 }, { reason: "rule:link", count: 1 }],
     };
     stubFetch({

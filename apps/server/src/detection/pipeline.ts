@@ -7,7 +7,7 @@ import { containsBareHangulLink, containsBlockedLink, containsGluedAllowedLink, 
 import type { RuleEntry, RuleRepository, RuleSnapshot } from "./ruleRepository.js";
 import { findFirstIntactMatch, findFirstMatch, locateExceptions, locateExceptionsKeepingWhitespace, type ExceptionAwareText } from "./wordMatch.js";
 
-/** 메시지 1건의 판정. 1단계에서는 AI가 없어 needs_care가 나오지 않는다. */
+/** 메시지 1건의 규칙 판정. AI 판정(needs_care 등)은 AI 단계가 나중에 따로 기록한다. */
 export interface DetectionResult {
   decision: "auto_hide" | "candidate" | "pass";
   reason: string;
@@ -19,6 +19,13 @@ export interface DetectionResult {
   earlierFloodRefs: MessageRef[];
   trivial: boolean;
   duplicate: boolean;
+  /**
+   * AI 단계에 보낼지: 규칙이 판정하지 않았고(pass·none) 가벼운 반응이 아니다(스펙 5.2 ③④).
+   * 채널 허용어(rule:allow)는 스펙대로 AI보다 앞서 통과하므로 보내지 않는다.
+   */
+  aiEligible: boolean;
+  /** AI 대상일 때 키워드 경로에 걸린 규칙 번호(스펙 5.2 ④). 걸리면 1차 점수와 상관없이 2차로 간다. 아니면 null. */
+  keywordRouteId: number | null;
 }
 
 /** 판정 파이프라인. */
@@ -80,7 +87,9 @@ function evaluate(deps: DetectionPipelineDeps, event: ChatEvent): DetectionResul
   const outcome = decide(deps, context);
   const traits = { trivial: isTrivialMessage(normalized), duplicate: deps.duplicates.seen(normalized, event.receivedAt) };
   const earlierFloodRefs = flood.triggered ? flood.earlierRefs.filter(canAutoHide) : [];
-  const result = applyPrivilege({ ...outcome, ref, earlierFloodRefs, ...traits });
+  const aiEligible = outcome.decision === "pass" && outcome.reason === "none" && !traits.trivial;
+  const keywordRouteId = aiEligible ? (findFirstMatch(context.compact, context.snapshot.keywordRoute)?.id ?? null) : null;
+  const result = applyPrivilege({ ...outcome, ref, earlierFloodRefs, ...traits, aiEligible, keywordRouteId });
   markAutoHiddenFloodEntry(deps.groupFlood, result);
   return result;
 }

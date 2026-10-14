@@ -260,7 +260,7 @@ export function MainScreen({ me, onSignedOut, onRefreshMe }: MainScreenProps) {
       </div>
       {hasVisitedSettings && (
         <div hidden={tab !== "settings"}>
-          <SettingsScreen me={me} onSignedOut={onSignedOut} refreshKey={settingsRefreshKey} onRefresh={refreshSettings} />
+          <SettingsScreen me={me} onSignedOut={onSignedOut} refreshKey={settingsRefreshKey} onRefresh={refreshSettings} aiEnabled={state.status?.ai.enabled ?? false} />
         </div>
       )}
       <TabBar active={tab} onChange={changeTab} pendingCount={countActionable(sections)} />
