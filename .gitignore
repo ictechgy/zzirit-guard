@@ -23,3 +23,4 @@ workers/*/outputs/
 
 # 평가 문장 초안(작성·검토 중간 산출물). 검토를 통과해 합친 파일만 커밋한다.
 workers/stage1/eval_data/_drafts/
+workers/stage1/train_data/_drafts/
