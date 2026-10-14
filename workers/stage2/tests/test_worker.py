@@ -26,6 +26,7 @@ def fake_model_directory(tmp_path: Path) -> Path:
     directory = tmp_path / "kanana-fake"
     directory.mkdir()
     (directory / "model.safetensors").write_bytes(b"weights")
+    (directory / "config.json").write_text('{"model_type": "llama"}', encoding="utf-8")
     (directory / "chat_template.jinja").write_text("{{ messages }}", encoding="utf-8")
     return directory
 
@@ -35,19 +36,30 @@ def fake_build(model_directory: Path) -> Callable[[Sequence[str]], list[ItemVerd
     return lambda texts: [ItemVerdict(0.97, "S6") for _ in texts]
 
 
-def test_model_directory_needs_safetensors(tmp_path: Path, fake_model_directory: Path) -> None:
-    """가중치 없는 경로는 시작 전에 거절한다(없는 경로를 허브 저장소 이름으로 오해하지 않게)."""
+def test_model_directory_needs_model_weights_and_config(tmp_path: Path, fake_model_directory: Path) -> None:
+    """model*.safetensors와 config.json이 없으면 시작 전에 거절한다(없는 경로를 허브 저장소 이름으로 오해하지 않게)."""
     assert ensure_model_directory(fake_model_directory) == fake_model_directory
     with pytest.raises(PathResolutionError):
         ensure_model_directory(tmp_path / "kakaocorp/kanana-safeguard-8b")
+    adapter_only = tmp_path / "adapter-only"
+    adapter_only.mkdir()
+    (adapter_only / "adapters.safetensors").write_bytes(b"x")
+    (adapter_only / "config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(PathResolutionError):
+        ensure_model_directory(adapter_only)
 
 
-def test_model_identifier_covers_template(fake_model_directory: Path) -> None:
-    """식별자는 `<디렉터리 이름>@<12자>`이고, 채팅 템플릿만 바뀌어도 달라진다."""
+def test_model_identifier_covers_every_model_file(fake_model_directory: Path) -> None:
+    """식별자는 `<디렉터리 이름>@<12자>`이고, 템플릿·토크나이저 자산이 바뀌면 달라진다. 숨김 파일과 README는 영향이 없다."""
     before = compute_model_identifier(fake_model_directory)
     assert re.fullmatch(r"kanana-fake@[0-9a-f]{12}", before)
+    (fake_model_directory / ".DS_Store").write_bytes(b"x")
+    (fake_model_directory / "README.md").write_text("설명", encoding="utf-8")
+    assert compute_model_identifier(fake_model_directory) == before
+    (fake_model_directory / "merges.txt").write_text("a b", encoding="utf-8")
+    after_merges = compute_model_identifier(fake_model_directory)
     (fake_model_directory / "chat_template.jinja").write_text("{{ other }}", encoding="utf-8")
-    assert compute_model_identifier(fake_model_directory) != before
+    assert len({before, after_merges, compute_model_identifier(fake_model_directory)}) == 3
 
 
 def test_data_directory_comes_from_argument_or_environment(tmp_path: Path) -> None:

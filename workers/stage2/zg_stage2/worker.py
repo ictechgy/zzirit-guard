@@ -36,14 +36,15 @@ from zg_stage2.worker_server import WorkerHTTPServer, WorkerSettings
 # 워커 이름. 소켓(`stage2.sock`)과 잠금 파일 이름에 쓴다.
 WORKER_NAME = "stage2"
 
-# 한 요청의 항목 수 상한(계약 v1).
-MAX_ITEMS_PER_REQUEST = 4
+# 한 요청의 항목 수 상한(계약 v1). 1건씩만 받는다. 직렬 추론이라 묶어도 빨라지지 않고, 여러 건이면 한 요청이
+# 서버의 2초 제한과 감시 시간(10초)을 넘길 수 있다(채팅 1건은 최대 MAX_CONTENT_TOKENS, 약 1초).
+MAX_ITEMS_PER_REQUEST = 1
 
 # 서버와 같은 데이터 디렉터리를 가리키는 환경 변수.
 DATA_DIRECTORY_VARIABLE = "ZG_DATA_DIR"
 
-# 모델 식별자 해시에 넣는 파일(가중치 말고). 토크나이저·템플릿·설정이 바뀌어도 판정이 달라지므로 같이 본다.
-IDENTITY_FILE_NAMES = ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "chat_template.jinja")
+# 모델 식별자 해시에서 뺄 파일. 설명 문서는 판정에 영향이 없다. 숨김 파일(.DS_Store 등)도 뺀다.
+IDENTITY_EXCLUDED_NAMES = frozenset({"README.md", "LICENSE"})
 
 # 모델 식별자에 붙이는 sha256 앞 글자 수.
 MODEL_HASH_PREFIX_LENGTH = 12
@@ -76,20 +77,27 @@ def resolve_data_directory(explicit_path: Path | None, environment: Mapping[str,
 
 
 def ensure_model_directory(model_directory: Path) -> Path:
-    """모델 디렉터리가 있고 safetensors 가중치가 있는지 확인한다. 없는 경로를 mlx_lm에 넘기면 허브 저장소 이름으로 오해한다."""
-    if not model_directory.is_dir() or not any(model_directory.glob("*.safetensors")):
-        raise PathResolutionError(f"{model_directory.name}에 safetensors 가중치가 없습니다. 모델 디렉터리 경로를 확인하세요.")
+    """모델 디렉터리에 mlx_lm이 읽는 가중치(model*.safetensors)와 config.json이 있는지 확인한다.
+
+    없는 경로를 mlx_lm에 넘기면 허브 저장소 이름으로 오해하고, 다른 이름의 safetensors(어댑터 등)만 있으면 시작 중에 실패한다.
+    """
+    has_weights = model_directory.is_dir() and any(model_directory.glob("model*.safetensors"))
+    if not has_weights or not (model_directory / "config.json").is_file():
+        raise PathResolutionError(f"{model_directory.name}에 model*.safetensors나 config.json이 없습니다. mlx 변환 결과 디렉터리인지 확인하세요.")
     return model_directory
 
 
 def identity_files(model_directory: Path) -> list[Path]:
-    """모델 식별자에 넣는 파일: 가중치 전부와, 있으면 설정·토크나이저·템플릿(이름순)."""
-    extras = [model_directory / name for name in IDENTITY_FILE_NAMES if (model_directory / name).is_file()]
-    return sorted([*model_directory.glob("*.safetensors"), *extras])
+    """모델 식별자에 넣는 파일: 디렉터리의 모든 일반 파일(숨김 파일·설명 문서 제외, 이름순).
+
+    왜 전부인가: 가중치·설정뿐 아니라 토크나이저 자산(tokenizer.json, vocab, merges, added_tokens), 채팅 템플릿도 판정을 바꾼다.
+    목록을 고르면 빠뜨리기 쉽다.
+    """
+    return sorted(path for path in model_directory.iterdir() if path.is_file() and not path.name.startswith(".") and path.name not in IDENTITY_EXCLUDED_NAMES)
 
 
 def compute_model_identifier(model_directory: Path) -> str:
-    """모델 식별자 `<디렉터리 이름>@<sha256 앞 12자>`. 가중치·토크나이저·템플릿 중 하나만 바뀌어도 서버가 알아채고 캐시를 비우게 한다."""
+    """모델 식별자 `<디렉터리 이름>@<sha256 앞 12자>`. 모델 파일 중 하나만 바뀌어도 서버가 알아채고 캐시를 비우게 한다."""
     digest = hashlib.sha256()
     for path in identity_files(model_directory):
         digest.update(path.name.encode("utf-8") + b"\0")

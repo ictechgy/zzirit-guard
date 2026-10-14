@@ -28,6 +28,9 @@ IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # 모델 식별자 길이 상한(응답).
 MAX_MODEL_LENGTH = 200
 
+# 응답의 범주로 쓸 수 있는 값. 1차는 None, 2차는 kanana-safeguard 범주 S1~S7이다.
+VALID_CATEGORIES: frozenset[str | None] = frozenset({None, *(f"S{index}" for index in range(1, 8))})
+
 
 class ContractError(Exception):
     """계약에 맞지 않는 요청. code는 오류 본문에 그대로 싣는 짧은 코드이고, status는 HTTP 상태 코드다."""
@@ -133,6 +136,8 @@ def validate_verdict(verdict: ItemVerdict) -> None:
     probability = verdict.unsafe_probability
     if not (isinstance(probability, float | int) and math.isfinite(probability) and 0.0 <= probability <= 1.0):
         raise ValueError("unsafe_probability가 0~1의 유한한 수가 아닙니다. 모델 출력 계산을 확인하세요.")
+    if verdict.category not in VALID_CATEGORIES:
+        raise ValueError("category가 계약 밖의 값입니다(1차는 None, 2차는 S1~S7). 분류기 출력을 확인하세요.")
 
 
 def encode_json(document: object) -> bytes:

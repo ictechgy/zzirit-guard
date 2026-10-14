@@ -1,4 +1,4 @@
-"""2차 워커 HTTP 테스트: 계약 사례 전부를 2차 기준(항목 4건까지, 범주 S1~S7)으로 보낸다. 공용 서버의 나머지 동작은 1차 테스트가 맡는다."""
+"""2차 워커 HTTP 테스트: 계약 사례 전부를 2차 기준(항목 1건, 범주 S1~S7)으로 보낸다. 공용 서버의 나머지 동작은 1차 테스트가 맡는다."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.worker_cases import build_case_body, expected_status, load_request_cases, send_case, short_temporary_directory
+from tests.worker_cases import build_case_body, expected_error, expected_status, load_request_cases, send_case, short_temporary_directory
 from zg_stage2.worker import MAX_ITEMS_PER_REQUEST
 from zg_stage2.worker_contract import ItemVerdict
 from zg_stage2.worker_runtime import InferenceRunner
@@ -50,7 +50,7 @@ def test_contract_request_cases_for_stage2(case: dict) -> None:
         response = send_case(socket_path, case)
     assert response.status == expected_status(case, "stage2")
     if response.status != 200:
-        assert response.body == {"error": case["error"]}
+        assert response.body == {"error": expected_error(case, "stage2")}
         return
     body = build_case_body(case)
     assert body is not None

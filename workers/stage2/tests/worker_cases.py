@@ -49,6 +49,12 @@ def expected_status(case: dict, worker_name: str) -> int:
     return int(case["status"][worker_name])
 
 
+def expected_error(case: dict, worker_name: str) -> str:
+    """이 워커에서 기대하는 오류 코드. 사례의 error가 워커별 표이면 그 워커의 값을 쓴다."""
+    error = case["error"]
+    return str(error[worker_name]) if isinstance(error, dict) else str(error)
+
+
 def build_raw_request(case: dict) -> tuple[bytes, bytes]:
     """사례를 (헤더, 본문) 바이트로 만든다. chunked 사례는 본문을 chunk 형식으로 감싼다."""
     body = build_case_body(case) or b""

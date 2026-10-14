@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from tests.worker_cases import build_case_body, expected_status, load_request_cases
+from tests.worker_cases import build_case_body, expected_error, expected_status, load_request_cases
 from zg_stage1.worker_contract import (
     MAX_BODY_BYTES,
     ClassifyItem,
@@ -38,12 +38,12 @@ def test_body_cases_match_contract(case: dict) -> None:
         return
     with pytest.raises(ContractError) as raised:
         parse_classify_request(body, STAGE1_MAX_ITEMS)
-    assert (raised.value.status, raised.value.code) == (expected_status(case, "stage1"), case["error"])
+    assert (raised.value.status, raised.value.code) == (expected_status(case, "stage1"), expected_error(case, "stage1"))
 
 
 def test_body_cases_cover_every_error_code_checked_in_bodies() -> None:
     """본문 사례가 본문 검증의 모든 오류 코드를 한 번 이상 다룬다(사례 파일이 줄어들어 검증이 빠지지 않게)."""
-    codes = {case["error"] for case in BODY_CASES if "error" in case}
+    codes = {expected_error(case, "stage1") for case in BODY_CASES if "error" in case}
     assert codes >= {"invalid_json", "invalid_body", "too_many_items", "bad_id", "duplicate_id", "bad_text"}
 
 
@@ -87,3 +87,16 @@ def test_model_identifier_length(model: str) -> None:
     """모델 식별자는 1~200자다."""
     with pytest.raises(ValueError):
         validate_model_identifier(model)
+
+
+@pytest.mark.parametrize("category", [None, "S1", "S7"])
+def test_response_accepts_contract_categories(category: str | None) -> None:
+    """범주는 None(1차)이나 S1~S7(2차)이다."""
+    build_classify_response("m", [ClassifyItem("a", "가")], [ItemVerdict(0.5, category)])
+
+
+@pytest.mark.parametrize("category", ["S0", "S8", "s1", ""])
+def test_response_rejects_unknown_category(category: str) -> None:
+    """계약 밖의 범주는 응답을 만들지 않는다."""
+    with pytest.raises(ValueError):
+        build_classify_response("m", [ClassifyItem("a", "가")], [ItemVerdict(0.5, category)])

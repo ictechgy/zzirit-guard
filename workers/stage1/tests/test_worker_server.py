@@ -18,6 +18,7 @@ import pytest
 
 from tests.worker_cases import (
     build_case_body,
+    expected_error,
     expected_status,
     load_request_cases,
     receive_all,
@@ -85,7 +86,7 @@ def test_contract_request_cases(case: dict) -> None:
         response = send_case(socket_path, case)
     assert response.status == expected_status(case, "stage1")
     if response.status != 200:
-        assert response.body == {"error": case["error"]}
+        assert response.body == {"error": expected_error(case, "stage1")}
         return
     body = build_case_body(case)
     assert body is not None
@@ -339,3 +340,21 @@ def test_failed_handler_thread_start_does_not_break_shutdown(monkeypatch: pytest
         server.server_close()
         right.close()
         runner.stop()
+
+
+def test_classifier_contract_error_is_returned_as_is() -> None:
+    """분류기가 입력을 거절하면(예: 2차의 text_too_long) 500이 아니라 그 계약 오류로 답한다."""
+
+    def refusing(texts: Sequence[str]) -> list[ItemVerdict]:
+        raise ContractError("text_too_long")
+
+    with serving(refusing) as socket_path:
+        response = send_json(socket_path, "POST", "/classify", {"items": [{"id": "a", "text": "가"}]})
+    assert (response.status, response.body) == (400, {"error": "text_too_long"})
+
+
+def test_invalid_category_is_500() -> None:
+    """분류기가 계약 밖의 범주(S8)를 내면 500이다."""
+    with serving(lambda texts: [ItemVerdict(0.5, "S8") for _ in texts]) as socket_path:
+        response = send_json(socket_path, "POST", "/classify", {"items": [{"id": "a", "text": "가"}]})
+    assert (response.status, response.body) == (500, {"error": "internal"})
