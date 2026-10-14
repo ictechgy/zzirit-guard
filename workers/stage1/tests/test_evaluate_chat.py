@@ -20,7 +20,10 @@ from zg_stage1.evaluate_chat import (
     format_chat_report_markdown,
     load_traffic_mix,
     RuleRoute,
+    ShortRule,
     load_rule_routes,
+    message_length,
+    short_rule_argument,
     read_dev_threshold,
     require_matching_decision,
     resolve_output_path,
@@ -144,9 +147,10 @@ def test_decision_must_match_split() -> None:
     require_matching_decision(argparse.Namespace(forward_budget=None, dev_report=Path("x.json")), "holdout")
 
 
-def write_dev_report(path: Path, model_sha: str, split: str = "dev", rule_routes: dict | None = None) -> Path:
+def write_dev_report(path: Path, model_sha: str, split: str = "dev", rule_routes: dict | None = None, short_rule: dict | None = None) -> Path:
     """개발셋 결과 파일(필요한 필드만)."""
     report = {"split": split, "model_weights_sha256": model_sha, "decision": {"mode": "budget", "threshold": 0.42}, "rule_routes": rule_routes}
+    report["short_rule"] = short_rule
     path.write_text(json.dumps(report), encoding="utf-8")
     return path
 
@@ -188,8 +192,10 @@ def test_rule_routes_count_toward_recall_but_not_stage2_load() -> None:
     가벼운 반응(AI 건너뜀)은 점수가 높아도 2차 부하에 넣지 않는다."""
     items = [item("d1", "harmful", "doxxing"), item("s1", "harmful", "self_harm"), item("n1", "allow", "short_normal"), item("n2", "allow", "long_normal")]
     routes = {
-        "d1": RuleRoute(rule_flagged=True, keyword=False), "s1": RuleRoute(rule_flagged=False, keyword=True),
-        "n1": RuleRoute(False, False, skip_ai=True), "n2": RuleRoute(False, False),
+        "d1": RuleRoute(rule_flagged=True, keyword=False),
+        "s1": RuleRoute(rule_flagged=False, keyword=True),
+        "n1": RuleRoute(False, False, skip_ai=True),
+        "n2": RuleRoute(False, False),
     }
     pairs = scored_pairs(items, [0.1, 0.1, 0.9, 0.1], routes)
     assert forward_rates_by_category(pairs, 0.5) == {"doxxing": 1.0, "long_normal": 0.0, "self_harm": 1.0, "short_normal": 0.0}
@@ -257,3 +263,78 @@ def test_holdout_report_hides_table_and_scores() -> None:
     expected_summary = summarize_at_chat_threshold(scored_pairs(items, scores), 0.42, DEFAULT_TRAFFIC_MIX)
     assert report["decision"] == {"mode": "fixed", "threshold": 0.42, "at_threshold": expected_summary}
     assert format_chat_report_markdown(report).count("| 0.42 |") == 1
+
+
+def text_item(identifier: str, label: str, category: str, text: str) -> ChatEvalItem:
+    """원문 길이가 필요한 테스트용 평가 문장."""
+    return ChatEvalItem(identifier, "dev", label, category, f"{category}-x", "model-a", "model-b", text)
+
+
+def test_message_length_ignores_whitespace() -> None:
+    """짧은 문장 규칙의 길이는 공백을 뺀 코드 포인트 수다."""
+    assert message_length(" ㅎ ㅇ  ") == 2
+    assert message_length("안녕 하세요") == 5
+
+
+def test_short_rule_raises_threshold_only_for_short_messages() -> None:
+    """짧은 문장은 기준 임계값의 k배를 넘어야 2차로 가고, 긴 문장은 기준 임계값 그대로다."""
+    items = [text_item("s", "allow", "short_normal", "ㅎㅇ"), text_item("l", "harmful", "threat", "퇴근길에 따라가서 기다릴게")]
+    pairs = scored_pairs(items, [0.2, 0.2], short_rule=ShortRule(max_length=4, multiplier=3.0))
+    assert [pair.threshold_multiplier for pair in pairs] == [3.0, 1.0]
+    assert [pair.goes_to_stage2(0.1) for pair in pairs] == [False, True]
+    assert [pair.goes_to_stage2(0.06) for pair in pairs] == [True, True]
+
+
+def test_candidates_include_score_over_multiplier_for_short_messages() -> None:
+    """짧은 문장은 점수/배수에서 넘어가기 시작하므로, 그 값이 임계값 후보에 들어간다."""
+    pairs = scored_pairs([text_item("s", "allow", "short_normal", "ㅋ")], [0.3], short_rule=ShortRule(max_length=2, multiplier=3.0))
+    candidates = candidate_thresholds(pairs)
+    assert 0.1 in candidates and 0.100001 in candidates
+    assert pairs[0].goes_to_stage2(0.1) and not pairs[0].goes_to_stage2(0.100001)
+
+
+def test_short_rule_argument_validates_values() -> None:
+    """N:k에서 N은 1 이상 정수, k는 1보다 커야 한다."""
+    assert short_rule_argument("6:2.5") == ShortRule(6, 2.5)
+    for bad in ("6", "0:2", "6:1", "6:nan", "x:2"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            short_rule_argument(bad)
+
+
+def test_reports_record_short_rule_and_holdout_must_match(tmp_path: Path) -> None:
+    """개발셋 결과에 짧은 문장 규칙이 남고, 보류셋은 같은 규칙일 때만 임계값을 읽는다."""
+    items, scores = full_coverage(0.9, 0.1)
+    rule = ShortRule(6, 3.0)
+    report = build_dev_report(items, scores, HALF_HALF_MIX, budget=0.5, short_rule=rule)
+    assert report["short_rule"] == {"max_length": 6, "multiplier": 3.0}
+    path = write_dev_report(tmp_path / "dev.json", "abc", short_rule=rule.to_dict())
+    assert read_dev_threshold(path, "abc", policy_sha256=None, short_rule=rule) == 0.42
+    for other in (None, ShortRule(6, 2.0)):
+        with pytest.raises(DatasetFormatError, match="짧은 문장 규칙"):
+            read_dev_threshold(path, "abc", policy_sha256=None, short_rule=other)
+    holdout_items, holdout_scores = full_coverage(0.9, 0.1, split="holdout")
+    assert build_holdout_report(holdout_items, holdout_scores, HALF_HALF_MIX, 0.5, short_rule=rule)["short_rule"] == rule.to_dict()
+
+
+def test_candidates_cover_scaled_boundary_despite_rounding() -> None:
+    """배수가 3처럼 이진수로 딱 떨어지지 않아도, 짧은 문장을 빼는 가장 작은 격자값이 후보에 들어간다(Codex 리뷰)."""
+    pairs = scored_pairs([text_item("s", "allow", "short_normal", "ㅋ")], [0.000159], short_rule=ShortRule(max_length=2, multiplier=3.0))
+    excluding = [value for value in candidate_thresholds(pairs) if not pairs[0].goes_to_stage2(value)]
+    assert min(excluding) == 0.000054
+    assert pairs[0].goes_to_stage2(0.000053)
+
+
+def test_holdout_requires_same_traffic_mix(tmp_path: Path) -> None:
+    """보류셋은 개발셋과 같은 트래픽 구성비일 때만 임계값을 읽는다."""
+    path = tmp_path / "dev.json"
+    report = {
+        "split": "dev",
+        "model_weights_sha256": "abc",
+        "decision": {"mode": "budget", "threshold": 0.42},
+        "rule_routes": None,
+        "traffic_mix": HALF_HALF_MIX,
+    }
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert read_dev_threshold(path, "abc", policy_sha256=None, traffic_mix=HALF_HALF_MIX) == 0.42
+    with pytest.raises(DatasetFormatError, match="트래픽 구성비"):
+        read_dev_threshold(path, "abc", policy_sha256=None, traffic_mix={"short_normal": 1.0})
