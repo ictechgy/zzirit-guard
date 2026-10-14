@@ -51,8 +51,11 @@ LISTEN_BACKLOG = 16
 # 한도를 넘은 연결에 503을 쓸 때 기다리는 최대 시간(초).
 BUSY_REPLY_TIMEOUT_SECONDS = 1.0
 
-# Content-Length의 자릿수 상한. 본문 상한(65,536)보다 큰 값은 여섯 자리를 넘기 전에 413으로 거절한다.
-CONTENT_LENGTH_PATTERN = re.compile(r"[0-9]{1,7}")
+# Content-Length 값: 앞뒤 ASCII 공백(SP·HTAB)과 ASCII 숫자만 받는다. 비ASCII 공백·위첨자 숫자는 받지 않는다.
+CONTENT_LENGTH_PATTERN = re.compile(r"[ \t]*([0-9]+)[ \t]*")
+
+# Content-Length 자릿수 상한. 본문 상한(65,536)보다 큰 값은 정수로 바꾸기 전에 413으로 거절한다.
+MAX_CONTENT_LENGTH_DIGITS = 7
 
 # 경로별로 받는 메서드.
 ALLOWED_METHOD_BY_PATH = {"/classify": "POST", "/health": "GET"}
@@ -121,10 +124,6 @@ class DeadlineSocketReader(io.RawIOBase):
 class WorkerHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     """유닉스 소켓 HTTP 서버. 소켓 파일은 0600으로 만들고, 동시 처리 연결 수를 제한하며, 멈출 때 처리 스레드를 기다린다."""
 
-    # 처리 스레드를 데몬으로 두지 않는다. 표준 서버는 데몬 스레드를 기다리지 않아, 멈출 때 처리 중인 요청이 잘린다.
-    # 처리 스레드 하나는 요청 마감(5초)·추론 대기(5초)·응답 쓰기(2초)로 끝이 정해져 있어 종료를 오래 막지 않는다.
-    daemon_threads = False
-    block_on_close = True
     request_queue_size = LISTEN_BACKLOG
 
     def __init__(self, socket_path: Path, settings: WorkerSettings) -> None:
@@ -132,6 +131,7 @@ class WorkerHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServe
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_CONNECTIONS)
         self._active_lock = threading.Lock()
         self._active_connections = 0
+        self._handler_threads: list[threading.Thread] = []
         previous_umask = os.umask(0o177)  # 바인딩 순간부터 0600이 되게 한다(만든 뒤 chmod하면 그 사이가 빈다)
         try:
             super().__init__(str(socket_path), WorkerRequestHandler)
@@ -145,16 +145,38 @@ class WorkerHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServe
             return self._active_connections
 
     def process_request(self, request: socket.socket, client_address: object) -> None:  # type: ignore[override]
-        """자리가 있으면 처리 스레드를 만들고, 없으면 바로 503을 쓰고 닫는다."""
+        """자리가 있으면 처리 스레드를 만들고, 없으면 바로 503을 쓰고 닫는다.
+
+        표준 구현은 스레드를 시작하기 전에 기록해, 시작이 실패하면 멈출 때 시작하지 않은 스레드를 기다리다 오류가 난다.
+        그래서 시작에 성공한 스레드만 기록한다.
+        """
         if not self._slots.acquire(blocking=False):
             reply_busy_and_close(request)
             return
         self._change_active(1)
+        # 처리 스레드는 데몬이 아니고, 멈출 때 server_close가 기다린다. 처리 중인 요청이 잘리지 않게 하기 위해서다.
+        # 스레드 하나는 요청 마감(5초)·추론 대기(5초)·응답 쓰기(2초)로 끝이 정해져 있어 종료를 오래 막지 않는다.
+        thread = threading.Thread(target=self.process_request_thread, args=(request, client_address), name="handler", daemon=False)
         try:
-            super().process_request(request, client_address)  # type: ignore[arg-type]
+            thread.start()
         except BaseException:
             self._release_slot()
+            self.shutdown_request(request)
             raise
+        self._remember_handler(thread)
+
+    def server_close(self) -> None:
+        """소켓을 닫고 처리 중인 요청이 끝나기를 기다린다."""
+        super().server_close()
+        with self._active_lock:
+            threads = list(self._handler_threads)
+        for thread in threads:
+            thread.join()
+
+    def _remember_handler(self, thread: threading.Thread) -> None:
+        """시작한 처리 스레드를 기록하고, 끝난 것은 지운다(목록이 끝없이 늘지 않게)."""
+        with self._active_lock:
+            self._handler_threads = [known for known in self._handler_threads if known.is_alive()] + [thread]
 
     def process_request_thread(self, request: socket.socket, client_address: object) -> None:  # type: ignore[override]
         """처리 스레드 본체. 끝나면 자리를 돌려준다."""
@@ -187,6 +209,15 @@ class WorkerRequestHandler(BaseHTTPRequestHandler):
     default_request_version = "HTTP/1.1"
     request_deadline_seconds = REQUEST_DEADLINE_SECONDS
     server: WorkerHTTPServer
+
+    def parse_request(self) -> bool:
+        """요청 줄은 '메서드 경로 HTTP/버전' 세 단어만 받는다. 두 단어(HTTP/0.9)는 400 invalid_request다."""
+        if not super().parse_request():
+            return False
+        if len(self.requestline.split()) != 3:
+            self.send_error(400)
+            return False
+        return True
 
     def setup(self) -> None:
         """표준 읽기 스트림을 마감이 있는 스트림으로 바꾼다. 원래 스트림은 닫아야 소켓이 제때 닫힌다."""
@@ -318,12 +349,13 @@ def parse_content_length(raw_values: list[str]) -> int:
         raise ContractError("length_required", 411)
     if len(raw_values) != 1:
         raise ContractError("invalid_body")
-    value = raw_values[0].strip()
-    if not value.isascii() or not value.isdigit():
+    matched = CONTENT_LENGTH_PATTERN.fullmatch(raw_values[0])
+    if matched is None:
         raise ContractError("invalid_body")
-    if not CONTENT_LENGTH_PATTERN.fullmatch(value):
+    digits = matched.group(1)
+    if len(digits) > MAX_CONTENT_LENGTH_DIGITS:
         raise ContractError("payload_too_large", 413)
-    return int(value)
+    return int(digits)
 
 
 def is_json_content_type(raw_value: str | None) -> bool:

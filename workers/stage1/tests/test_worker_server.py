@@ -26,9 +26,10 @@ from tests.worker_cases import (
     send_raw,
     short_temporary_directory,
 )
-from zg_stage1.worker_contract import ItemVerdict
+from zg_stage1 import worker_server
+from zg_stage1.worker_contract import ContractError, ItemVerdict
 from zg_stage1.worker_runtime import InferenceRunner
-from zg_stage1.worker_server import MAX_CONCURRENT_CONNECTIONS, WorkerHTTPServer, WorkerRequestHandler, WorkerSettings
+from zg_stage1.worker_server import MAX_CONCURRENT_CONNECTIONS, WorkerHTTPServer, WorkerRequestHandler, WorkerSettings, parse_content_length
 
 # 가짜 모델 식별자.
 FAKE_MODEL = "fake@0123456789ab"
@@ -296,3 +297,45 @@ def test_shutdown_waits_for_active_request() -> None:
         closer.join(5)
         background.join(5)
     assert responses and responses[0].status == 200
+
+
+def test_http_0_9_request_line_is_rejected() -> None:
+    """두 단어 요청 줄(HTTP/0.9)은 받지 않는다."""
+    with serving(length_score) as socket_path:
+        response = send_raw(socket_path, b"GET /health\r\n\r\n")
+    assert (response.status, response.body) == (400, {"error": "invalid_request"})
+
+
+@pytest.mark.parametrize("raw_value", ["\xa02\xa0", "\u20032", "2\u00b2", "+2", ""])
+def test_content_length_rejects_non_ascii_whitespace_and_signs(raw_value: str) -> None:
+    """Content-Length는 ASCII 공백과 ASCII 숫자만 받는다. 비ASCII 공백은 지우지 않고 거절한다."""
+    with pytest.raises(ContractError) as raised:
+        parse_content_length([raw_value])
+    assert raised.value.code == "invalid_body"
+
+
+def test_content_length_allows_ascii_whitespace() -> None:
+    """앞뒤 ASCII 공백(SP·HTAB)은 받는다."""
+    assert parse_content_length([" \t12 "]) == 12
+
+
+def test_failed_handler_thread_start_does_not_break_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """처리 스레드를 시작하지 못해도 자리를 돌려주고, 멈출 때 시작하지 않은 스레드를 기다리다 오류가 나지 않는다."""
+
+    class FailingThread(threading.Thread):
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    with short_temporary_directory() as directory:
+        runner = InferenceRunner(lambda: length_score)
+        runner.start()
+        server = WorkerHTTPServer(directory / "stage1.sock", WorkerSettings(FAKE_MODEL, 32, runner))
+        left, right = socket.socketpair()
+        monkeypatch.setattr(worker_server.threading, "Thread", FailingThread)
+        with pytest.raises(RuntimeError):
+            server.process_request(left, None)
+        monkeypatch.undo()
+        assert server.active_connections() == 0
+        server.server_close()
+        right.close()
+        runner.stop()

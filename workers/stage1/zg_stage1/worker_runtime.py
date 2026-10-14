@@ -116,6 +116,8 @@ def open_lock_file(path: Path) -> int:
     if not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid():
         os.close(descriptor)
         raise WorkerSetupError(f"{path.name}이 이 사용자의 일반 파일이 아닙니다. 지우고 다시 시작하세요.")
+    if stat.S_IMODE(status.st_mode) != SOCKET_FILE_MODE:
+        os.fchmod(descriptor, SOCKET_FILE_MODE)
     return descriptor
 
 
@@ -203,6 +205,8 @@ class InferenceRunner:
         self._ready = threading.Event()
         self._startup_error: Exception | None = None
         self._stopping = threading.Event()
+        # 작업 넣기와 멈추기를 한 잠금으로 묶는다. '멈추지 않았음'을 본 뒤 종료 신호 뒤에 작업을 넣는 일이 없게 한다.
+        self._submit_lock = threading.Lock()
         self._threads = [
             threading.Thread(target=self._run_jobs, name="inference", daemon=True),
             threading.Thread(target=self._watch, name="watchdog", daemon=True),
@@ -219,11 +223,12 @@ class InferenceRunner:
 
     def stop(self, join_seconds: float = DEFAULT_STOP_JOIN_SECONDS) -> None:
         """새 작업을 받지 않고, 대기열의 작업을 마친 뒤 추론 스레드와 감시자를 끝낸다. 각 스레드를 최대 join_seconds 기다린다."""
-        self._stopping.set()
-        try:
-            self._jobs.put(None, timeout=join_seconds)
-        except queue.Full:
-            LOGGER.warning("추론 대기열이 비지 않아 종료 신호를 넣지 못했습니다. 데몬 스레드라 프로세스와 함께 끝납니다.")
+        with self._submit_lock:
+            self._stopping.set()
+            try:
+                self._jobs.put(None, timeout=join_seconds)
+            except queue.Full:
+                LOGGER.warning("추론 대기열이 비지 않아 종료 신호를 넣지 못했습니다. 데몬 스레드라 프로세스와 함께 끝납니다.")
         for thread in self._threads:
             thread.join(join_seconds)
             if thread.is_alive():
@@ -231,19 +236,24 @@ class InferenceRunner:
 
     def classify(self, texts: Sequence[str]) -> list:
         """작업을 넘기고 결과를 기다린다. 멈추는 중이거나, 대기열이 꽉 찼거나, 제때 끝나지 않으면 InferenceBusyError다."""
-        if self._stopping.is_set():
-            raise InferenceBusyError("stopping")
         job = InferenceJob(texts)
-        try:
-            self._jobs.put_nowait(job)
-        except queue.Full as error:
-            raise InferenceBusyError("inference queue full") from error
+        self._submit(job)
         if not job.done.wait(self._result_wait_seconds):
             job.abandon()
             raise InferenceBusyError("inference timed out")
         if job.error is not None:
             raise job.error
         return job.results or []
+
+    def _submit(self, job: InferenceJob) -> None:
+        """멈추는 중이 아니면 작업을 넣는다. 확인과 넣기를 멈추기와 같은 잠금 안에서 한다."""
+        with self._submit_lock:
+            if self._stopping.is_set():
+                raise InferenceBusyError("stopping")
+            try:
+                self._jobs.put_nowait(job)
+            except queue.Full as error:
+                raise InferenceBusyError("inference queue full") from error
 
     def _run_jobs(self) -> None:
         """추론 스레드 본체: 모델을 만들고, 작업을 하나씩 꺼내 계산한다. 포기한 작업은 건너뛴다."""

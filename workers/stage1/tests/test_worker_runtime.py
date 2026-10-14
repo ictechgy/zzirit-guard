@@ -289,3 +289,12 @@ def test_watchdog_ignores_job_that_finishes_in_time() -> None:
     finally:
         runner.stop()
     assert hang_calls == []
+
+
+def test_existing_lock_file_mode_is_narrowed(tmp_path: Path) -> None:
+    """이미 있던 잠금 파일이 0644면 0600으로 좁힌다."""
+    lock_path = tmp_path / "stage1.lock"
+    lock_path.write_bytes(b"")
+    os.chmod(lock_path, 0o644)
+    acquire_instance_lock(tmp_path, "stage1").close()
+    assert mode_of(lock_path) == 0o600
