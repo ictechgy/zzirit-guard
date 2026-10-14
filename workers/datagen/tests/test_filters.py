@@ -29,6 +29,16 @@ def test_jamo_age_and_pii_detection(tmp_path: Path) -> None:
     assert detect_drop_reason("수단가", lists) == "self_harm_means"
 
 
+def test_invisible_symbol_and_combining_insertions_do_not_bypass(tmp_path: Path) -> None:
+    """폭 없는 문자·기호·결합 부호를 낱말이나 숫자 사이에 끼워도 같은 규칙에 걸린다(보안 검토)."""
+    lists = load_private_lists(make_lists(tmp_path / "lists"))
+    assert detect_drop_reason("미\u200b성\u2060표식 금\u200d칙★가", lists) == "minor_sexual"
+    assert detect_drop_reason("1\u200b3살 금칙\u0301가", lists) == "minor_sexual"
+    assert detect_drop_reason("수\ufeff단✦가", lists) == "self_harm_means"
+    assert detect_drop_reason("010·1234·5678", lists) == "pii_like"
+    assert detect_drop_reason("평범한 중립 문장", lists) is None
+
+
 def test_missing_or_empty_list_is_an_error(tmp_path: Path) -> None:
     """안전 목록이 덜 로드된 상태를 정상으로 오해하지 않도록 즉시 중단한다."""
     directory = make_lists(tmp_path / "lists")

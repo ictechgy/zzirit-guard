@@ -20,11 +20,21 @@ def test_batches_hide_kind_and_intended(tmp_path: Path) -> None:
     source = tmp_path / "source.jsonl"
     write_jsonl(source, [{"id": "x", "kind": "harmful", "intended": "threat", "text": "중립 자리표시자"}])
     out = tmp_path / "batches"
-    make_batches([source], 7, 100, out)
+    make_batches([source], 7, 100, out, tmp_path / "key.jsonl")
     visible = json.loads((out / "batch-001.jsonl").read_text(encoding="utf-8"))
-    private = json.loads((out / "key.jsonl").read_text(encoding="utf-8"))
+    private = json.loads((tmp_path / "key.jsonl").read_text(encoding="utf-8"))
     assert visible == {"lid": "L00001", "text": "중립 자리표시자"}
     assert private == {"lid": "L00001", "id": "x", "kind": "harmful", "intended": "threat"}
+    assert sorted(path.name for path in out.iterdir()) == ["batch-001.jsonl"]
+
+
+def test_key_must_live_outside_batch_directory(tmp_path: Path) -> None:
+    """묶음 디렉터리는 외부 라벨러에게 넘기므로 작성 의도가 든 key를 그 안(하위 포함)에 두면 거절한다."""
+    source = tmp_path / "source.jsonl"
+    write_jsonl(source, [{"id": "x", "kind": "harmful", "intended": "threat", "text": "중립 자리표시자"}])
+    for key in (tmp_path / "batches" / "key.jsonl", tmp_path / "batches" / "sub" / "key.jsonl"):
+        with pytest.raises(ValueError, match="--key-out"):
+            make_batches([source], 7, 100, tmp_path / "batches", key)
 
 
 def test_merge_agreement_logic_and_metrics(tmp_path: Path) -> None:
