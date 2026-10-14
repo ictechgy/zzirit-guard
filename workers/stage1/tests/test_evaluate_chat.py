@@ -314,3 +314,27 @@ def test_reports_record_short_rule_and_holdout_must_match(tmp_path: Path) -> Non
             read_dev_threshold(path, "abc", policy_sha256=None, short_rule=other)
     holdout_items, holdout_scores = full_coverage(0.9, 0.1, split="holdout")
     assert build_holdout_report(holdout_items, holdout_scores, HALF_HALF_MIX, 0.5, short_rule=rule)["short_rule"] == rule.to_dict()
+
+
+def test_candidates_cover_scaled_boundary_despite_rounding() -> None:
+    """배수가 3처럼 이진수로 딱 떨어지지 않아도, 짧은 문장을 빼는 가장 작은 격자값이 후보에 들어간다(Codex 리뷰)."""
+    pairs = scored_pairs([text_item("s", "allow", "short_normal", "ㅋ")], [0.000159], short_rule=ShortRule(max_length=2, multiplier=3.0))
+    excluding = [value for value in candidate_thresholds(pairs) if not pairs[0].goes_to_stage2(value)]
+    assert min(excluding) == 0.000054
+    assert pairs[0].goes_to_stage2(0.000053)
+
+
+def test_holdout_requires_same_traffic_mix(tmp_path: Path) -> None:
+    """보류셋은 개발셋과 같은 트래픽 구성비일 때만 임계값을 읽는다."""
+    path = tmp_path / "dev.json"
+    report = {
+        "split": "dev",
+        "model_weights_sha256": "abc",
+        "decision": {"mode": "budget", "threshold": 0.42},
+        "rule_routes": None,
+        "traffic_mix": HALF_HALF_MIX,
+    }
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert read_dev_threshold(path, "abc", policy_sha256=None, traffic_mix=HALF_HALF_MIX) == 0.42
+    with pytest.raises(DatasetFormatError, match="트래픽 구성비"):
+        read_dev_threshold(path, "abc", policy_sha256=None, traffic_mix={"short_normal": 1.0})

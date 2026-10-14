@@ -223,12 +223,17 @@ def candidate_thresholds(pairs: Sequence[ScoredItem]) -> list[float]:
 
     왜 둘 다인가: 내림한 값은 그 점수의 문장을 넣고, 바로 위 값은 빼는 가장 작은 임계값이다. 이 둘이면 격자 위의
     모든 전달 경우를 덮어, 예산을 지키는 가장 작은 격자값을 놓치지 않는다. 범위 (0, 1] 밖의 값은 뺀다.
-    짧은 문장 규칙에 걸린 문장은 기준 임계값이 점수/배수일 때 넘어가므로, 점수 대신 점수/배수로 격자를 만든다.
+    짧은 문장 규칙에 걸린 문장은 기준 임계값이 점수/배수일 때 넘어가므로, 점수 대신 점수/배수 둘레에 격자 후보를 만든다.
+    배수를 곱할 때는 나눗셈의 이진 소수 오차와 허용 오차 때문에 넘어가는 경계가 격자 한 칸쯤 어긋날 수 있어,
+    내림값 앞뒤 두 칸까지 넣는다. 후보는 모두 실제 전달률로 다시 확인하므로 남는 후보는 결과를 바꾸지 않는다.
     """
     step = 10**-THRESHOLD_DECIMALS
-    floored = {round(math.floor(pair.score / pair.threshold_multiplier / step) * step, THRESHOLD_DECIMALS) for pair in pairs}
-    above = {round(value + step, THRESHOLD_DECIMALS) for value in floored}
-    return sorted(value for value in floored | above | {MAX_THRESHOLD} if 0 < value <= MAX_THRESHOLD)
+    values: set[float] = {MAX_THRESHOLD}
+    for pair in pairs:
+        floored = math.floor(pair.score / pair.threshold_multiplier / step)
+        offsets = (0, 1) if pair.threshold_multiplier == 1.0 else (-1, 0, 1, 2)
+        values |= {round((floored + offset) * step, THRESHOLD_DECIMALS) for offset in offsets}
+    return sorted(value for value in values if 0 < value <= MAX_THRESHOLD)
 
 
 def select_budget_threshold(pairs: Sequence[ScoredItem], mix: Mapping[str, float], budget: float) -> float | None:
@@ -351,7 +356,24 @@ def require_same_short_rule(report: Mapping, short_rule: ShortRule | None, file_
         raise DatasetFormatError(f"{file_name}과 짧은 문장 규칙이 다릅니다(개발셋 {report.get('short_rule')}, 지금 {expected}). 같은 --short-rule을 주세요.")
 
 
-def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_sha256: str | None, short_rule: ShortRule | None = None) -> float:
+def require_same_traffic_mix(report: Mapping, traffic_mix: Mapping[str, float] | None, file_name: str) -> None:
+    """보류셋은 개발셋과 같은 트래픽 구성비를 써야 한다. 구성비가 다르면 고른 임계값이 다른 부하 예산을 뜻하기 때문이다.
+
+    traffic_mix가 None이면(옛 호출) 검사하지 않는다. 개발셋 결과에 구성비가 없으면(옛 결과) 오류다.
+    """
+    if traffic_mix is None:
+        return
+    if report.get("traffic_mix") != dict(traffic_mix):
+        raise DatasetFormatError(f"{file_name}과 트래픽 구성비가 다릅니다. 개발셋을 평가할 때 쓴 --mix-file을 그대로 주세요.")
+
+
+def read_dev_threshold(
+    dev_report_path: Path,
+    model_weights_sha256: str,
+    policy_sha256: str | None,
+    short_rule: ShortRule | None = None,
+    traffic_mix: Mapping[str, float] | None = None,
+) -> float:
     """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나, 다른 모델의 결과거나, 임계값이 잘못됐으면 오류다.
 
     policy_sha256: 이번 보류셋 평가에 쓴 규칙 목록 지문(규칙 경로를 쓰지 않으면 None). 개발셋과 다르면 오류다.
@@ -370,6 +392,7 @@ def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_
         message = f"{dev_report_path.name}과 규칙 경로(사용 여부나 규칙 목록)가 다릅니다. 개발셋과 같은 규칙 목록으로 만든 --rule-routes를 주세요."
         raise DatasetFormatError(message)
     require_same_short_rule(report, short_rule, dev_report_path.name)
+    require_same_traffic_mix(report, traffic_mix, dev_report_path.name)
     return require_valid_threshold(report["decision"].get("threshold"), dev_report_path.name)
 
 
@@ -481,7 +504,7 @@ def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEv
     route_provenance = None if arguments.rule_routes is None else describe_file_provenance(arguments.rule_routes) | {"policy_sha256": policy}
     provenance = {"rule_routes": route_provenance}
     if items[0].split == "holdout":
-        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule)
+        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule, mix)
         report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes, arguments.short_rule)
         return report | provenance | {"dev_report": describe_file_provenance(arguments.dev_report)}
     return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes, arguments.short_rule) | provenance
