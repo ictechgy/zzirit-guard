@@ -152,6 +152,31 @@ uv run python -m zg_stage1.thresholds --scores-file "$ZG_DATA_DIR/ml/stage1/kcel
 
 결과는 **참고용**이다. 운영 기본값은 스펙의 0.05로 두고, 바꾸는 결정은 섀도 데이터를 본 뒤 사람이 한다.
 
+### 채팅 평가셋과 2차 용량
+
+1차 분류기를 '2차가 감당하는 양 안에서 핵심 범주를 놓치지 않는 거름망'으로 본다([모델 보강 계획](../../docs/ml/2026-10-14-model-strengthening-plan.md), [기준선](../../docs/ml/2026-10-14-chat-eval-baseline.md)).
+
+```sh
+# 1) 2차(kanana) 대기열이 감당하는 최대 전달률(F_max)을 초당 채팅량별로 계산한다
+uv run python -m zg_stage1.capacity --rates 10 20 30 50
+
+# 2) 평가셋 형식·겹침 검사(72문장, 두 셋 사이, 셋 안)
+uv run python -m zg_stage1.chat_eval_data eval_data/chat-dev-v1.jsonl eval_data/chat-holdout-v1.jsonl
+
+# 3) 개발셋에서 F_max 예산을 지키는 임계값을 고른다
+uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>" \
+  --eval-file eval_data/chat-dev-v1.jsonl --forward-budget 0.304
+
+# 4) 3의 결과(같은 모델)로 보류셋을 한 번 본다. 임계값 하나의 집계만 남고, 결과 파일은 덮어쓰지 않는다
+uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>" \
+  --eval-file eval_data/chat-holdout-v1.jsonl --dev-report "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>/chat-eval-dev.json"
+```
+
+- 가중 전달률은 가정한 트래픽 구성비(`evaluate_chat.DEFAULT_TRAFFIC_MIX`)로 계산한다. 실측 비율이 생기면 `--mix-file`로 바꾼다.
+- 72문장 회귀 세트는 봉인했다. 파일이 바뀌면 테스트와 겹침 검사가 실패한다.
+- `evaluate_chat`도 평가 전에 같은 검사(72문장 겹침, 셋 안 중복, 애매 5% 이하, 범주마다 20문장 이상)를 한다.
+- F_max는 시드가 다른 반복 5번 모두에서 기준을 지키는 값이다.
+
 ## 알려진 한계
 
 - 학습 데이터(K-HATERS)는 뉴스 댓글이라 방송 채팅과 말투가 다르다.

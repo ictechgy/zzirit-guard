@@ -20,3 +20,6 @@ __pycache__/
 # 1차 분류기 학습 결과·모델 가중치는 저장소에 넣지 않는다(스펙 §17). 기본 출력 위치는 $ZG_DATA_DIR/ml/stage1/이다.
 workers/*/outputs/
 *.safetensors
+
+# 평가 문장 초안(작성·검토 중간 산출물). 검토를 통과해 합친 파일만 커밋한다.
+workers/stage1/eval_data/_drafts/
