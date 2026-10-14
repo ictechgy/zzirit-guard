@@ -12,6 +12,8 @@
   - 재현율(범주별 전달률)은 규칙·키워드·1차 중 하나라도 잡으면 잡은 것으로 센다.
   - 2차 부하(가중 전달률)는 규칙이 먼저 판정한 문장을 빼고(스펙 §5: 앞 단계에서 결정되면 멈춘다), 키워드나 1차로 2차에 가는 문장만 센다.
   주지 않으면 규칙·키워드가 아무것도 잡지 않은 것으로 본다(1차만 평가).
+- 짧은 문장 규칙(--short-rule N:k, 선택): 공백을 뺀 N자 이하 문장은 기준 임계값의 k배를 넘어야 2차로 간다(M2 2차 계획 0).
+  결과 파일에 규칙을 남기고, 보류셋은 개발셋과 같은 규칙일 때만 임계값을 읽는다.
 원문은 출력·결과 파일에 넣지 않는다. 문장은 id로만 가리킨다.
 
 CLI 사용 예:
@@ -79,12 +81,42 @@ class RuleRoute(NamedTuple):
     skip_ai: bool = False
 
 
+class ShortRule(NamedTuple):
+    """짧은 문장 임계값 규칙: 공백을 뺀 길이가 max_length 이하인 문장은 기준 임계값의 multiplier배를 넘어야 2차로 간다.
+
+    왜: 짧은 일반 문장(인사·리액션)이 채팅의 대부분이라 2차 부하를 크게 차지한다. 짧은 문장만 문턱을 높이면
+    그만큼 기준 임계값을 낮출 수 있어, 긴 유해 문장의 재현율을 지키면서 부하 예산을 맞출 수 있는지 잰다(M2 2차 계획 0).
+    """
+
+    max_length: int
+    multiplier: float
+
+    def to_dict(self) -> dict:
+        """보고서에 남기는 모양."""
+        return {"max_length": self.max_length, "multiplier": self.multiplier}
+
+
+# 짧은 문장 규칙으로 임계값에 배수를 곱할 때 쓰는 허용 오차.
+# 왜: 0.1 × 3 = 0.30000000000000004처럼 이진 소수 오차가 생겨, 점수/배수로 만든 격자 후보가 그 점수의 문장을 넣지 못한다.
+# 배수가 1이면 쓰지 않아 기존 결과는 그대로다.
+SCALED_THRESHOLD_TOLERANCE = 1e-12
+
+
+def message_length(text: str) -> int:
+    """짧은 문장 규칙이 보는 길이: 공백을 뺀 코드 포인트 수. 띄어쓰기 습관에 따라 길이가 달라지지 않게 한다."""
+    return len("".join(text.split()))
+
+
 class ScoredItem(NamedTuple):
-    """평가 문장 하나의 1차 점수와 규칙 경로 결과. 규칙 결과를 주지 않으면 규칙·키워드 모두 걸리지 않은 것으로 본다."""
+    """평가 문장 하나의 1차 점수와 규칙 경로 결과. 규칙 결과를 주지 않으면 규칙·키워드 모두 걸리지 않은 것으로 본다.
+
+    threshold_multiplier는 이 문장에 쓰는 임계값 배수다(짧은 문장 규칙에 걸리면 그 배수, 아니면 1).
+    """
 
     item: ChatEvalItem
     score: float
     route: RuleRoute = RuleRoute(rule_flagged=False, keyword=False)
+    threshold_multiplier: float = 1.0
 
     def is_routed(self, threshold: float) -> bool:
         """매니저나 2차 중 어디로든 올라가는지: 규칙이 잡거나, 2차로 가거나(goes_to_stage2).
@@ -97,7 +129,9 @@ class ScoredItem(NamedTuple):
         """2차(kanana)로 가는지. 규칙이 먼저 판정하거나 가벼운 반응이면 멈추므로(스펙 §5.2 ②·③) 2차 부하에서 뺀다."""
         if self.route.rule_flagged or self.route.skip_ai:
             return False
-        return self.route.keyword or self.score >= threshold
+        if self.threshold_multiplier == 1.0:
+            return self.route.keyword or self.score >= threshold
+        return self.route.keyword or self.score >= threshold * self.threshold_multiplier - SCALED_THRESHOLD_TOLERANCE
 
 
 def validate_traffic_mix(mix: Mapping[str, float]) -> None:
@@ -111,13 +145,26 @@ def validate_traffic_mix(mix: Mapping[str, float]) -> None:
         raise DatasetFormatError(f"구성비의 합이 {sum(mix.values()):.6f}입니다. 합이 1이 되게 고치세요.")
 
 
-def scored_pairs(items: Sequence[ChatEvalItem], scores: Sequence[float], routes: Mapping[str, RuleRoute] | None = None) -> list[ScoredItem]:
-    """지표에 들어가는(ambiguous가 아닌) 문장과 점수·규칙 경로의 묶음. routes가 없으면 규칙·키워드 없음으로 본다."""
+def scored_pairs(
+    items: Sequence[ChatEvalItem], scores: Sequence[float], routes: Mapping[str, RuleRoute] | None = None, short_rule: ShortRule | None = None
+) -> list[ScoredItem]:
+    """지표에 들어가는(ambiguous가 아닌) 문장과 점수·규칙 경로·임계값 배수의 묶음. routes가 없으면 규칙·키워드 없음으로 본다."""
     if len(items) != len(scores):
         raise MetricError(f"문장 {len(items)}개와 점수 {len(scores)}개의 개수가 다릅니다.")
     no_route = RuleRoute(rule_flagged=False, keyword=False)
     pairs = zip(items, scores, strict=True)
-    return [ScoredItem(item, score, no_route if routes is None else routes[item.item_id]) for item, score in pairs if item.is_scored]
+    return [
+        ScoredItem(item, score, no_route if routes is None else routes[item.item_id], threshold_multiplier_for(item.text, short_rule))
+        for item, score in pairs
+        if item.is_scored
+    ]
+
+
+def threshold_multiplier_for(text: str, short_rule: ShortRule | None) -> float:
+    """문장에 쓸 임계값 배수. 짧은 문장 규칙이 없거나 문장이 길면 1이다."""
+    if short_rule is None or message_length(text) > short_rule.max_length:
+        return 1.0
+    return short_rule.multiplier
 
 
 def rates_by_category(pairs: Sequence[ScoredItem], is_counted: Callable[[ScoredItem], bool]) -> dict[str, float]:
@@ -176,9 +223,10 @@ def candidate_thresholds(pairs: Sequence[ScoredItem]) -> list[float]:
 
     왜 둘 다인가: 내림한 값은 그 점수의 문장을 넣고, 바로 위 값은 빼는 가장 작은 임계값이다. 이 둘이면 격자 위의
     모든 전달 경우를 덮어, 예산을 지키는 가장 작은 격자값을 놓치지 않는다. 범위 (0, 1] 밖의 값은 뺀다.
+    짧은 문장 규칙에 걸린 문장은 기준 임계값이 점수/배수일 때 넘어가므로, 점수 대신 점수/배수로 격자를 만든다.
     """
     step = 10**-THRESHOLD_DECIMALS
-    floored = {round(math.floor(pair.score / step) * step, THRESHOLD_DECIMALS) for pair in pairs}
+    floored = {round(math.floor(pair.score / pair.threshold_multiplier / step) * step, THRESHOLD_DECIMALS) for pair in pairs}
     above = {round(value + step, THRESHOLD_DECIMALS) for value in floored}
     return sorted(value for value in floored | above | {MAX_THRESHOLD} if 0 < value <= MAX_THRESHOLD)
 
@@ -209,10 +257,15 @@ def describe_counts(items: Sequence[ChatEvalItem], pairs: Sequence[ScoredItem]) 
 
 
 def build_dev_report(
-    items: Sequence[ChatEvalItem], scores: Sequence[float], mix: Mapping[str, float], budget: float, routes: Mapping[str, RuleRoute] | None = None
+    items: Sequence[ChatEvalItem],
+    scores: Sequence[float],
+    mix: Mapping[str, float],
+    budget: float,
+    routes: Mapping[str, RuleRoute] | None = None,
+    short_rule: ShortRule | None = None,
 ) -> dict:
-    """개발셋 결과: 임계값 표, 예산 임계값과 그 요약, 문장별 점수(id만). 원문은 넣지 않는다."""
-    pairs = scored_pairs(items, scores, routes)
+    """개발셋 결과: 임계값 표, 예산 임계값과 그 요약, 문장별 점수(id만), 짧은 문장 규칙. 원문은 넣지 않는다."""
+    pairs = scored_pairs(items, scores, routes, short_rule)
     threshold = select_budget_threshold(pairs, mix, budget)
     at_threshold = None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix)
     return {
@@ -222,21 +275,28 @@ def build_dev_report(
         "traffic_mix": dict(mix),
         "threshold_table": [summarize_at_chat_threshold(pairs, value, mix) for value in CHAT_REPORT_THRESHOLDS],
         "decision": {"mode": "budget", "budget": budget, "threshold": threshold, "at_threshold": at_threshold},
+        "short_rule": None if short_rule is None else short_rule.to_dict(),
         "scores": {item.item_id: round(score, METRIC_DECIMALS) for item, score in zip(items, scores, strict=True)},
     }
 
 
 def build_holdout_report(
-    items: Sequence[ChatEvalItem], scores: Sequence[float], mix: Mapping[str, float], threshold: float, routes: Mapping[str, RuleRoute] | None = None
+    items: Sequence[ChatEvalItem],
+    scores: Sequence[float],
+    mix: Mapping[str, float],
+    threshold: float,
+    routes: Mapping[str, RuleRoute] | None = None,
+    short_rule: ShortRule | None = None,
 ) -> dict:
     """보류셋 결과: 개발셋에서 고른 임계값 하나의 집계와 AUC만. 임계값 표·문장별 점수는 넣지 않는다(보류셋 튜닝 방지)."""
-    pairs = scored_pairs(items, scores, routes)
+    pairs = scored_pairs(items, scores, routes, short_rule)
     return {
         "split": "holdout",
         "counts": describe_counts(items, pairs),
         "auc": compute_chat_auc(pairs),
         "traffic_mix": dict(mix),
         "decision": {"mode": "fixed", "threshold": threshold, "at_threshold": summarize_at_chat_threshold(pairs, threshold, mix)},
+        "short_rule": None if short_rule is None else short_rule.to_dict(),
     }
 
 
@@ -250,6 +310,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     decision.add_argument("--dev-report", type=Path, help="같은 모델의 개발셋 결과 JSON(보류셋을 볼 때)")
     parser.add_argument("--mix-file", type=Path, help="트래픽 구성비 JSON(범주→비율, 합 1). 없으면 기본 가정")
     parser.add_argument("--rule-routes", type=Path, help="서버 규칙 평가 도구가 낸 문장별 규칙·키워드 결과 JSONL(없으면 1차만 평가)")
+    parser.add_argument(
+        "--short-rule", type=short_rule_argument, help="짧은 문장 임계값 N:k(공백 뺀 N자 이하 문장은 임계값의 k배, k>1). 보류셋은 개발셋과 같아야 한다"
+    )
     parser.add_argument("--device", choices=modeling.DEVICE_CHOICES, default="cpu", help="점수 계산 장치(기본 cpu)")
     parser.add_argument("--batch-size", type=positive_integer, default=modeling.DEFAULT_INFERENCE_BATCH_SIZE, help="점수 계산 배치 크기")
     parser.add_argument("--output", type=Path, help="결과 JSON 경로(기본: <모델>/chat-eval-<셋>.json)")
@@ -269,7 +332,26 @@ def require_valid_threshold(value: object, file_name: str) -> float:
     return float(value)
 
 
-def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_sha256: str | None) -> float:
+def short_rule_argument(value: str) -> ShortRule:
+    """--short-rule 값 N:k를 읽는다. N은 1 이상 정수, k는 1보다 큰 유한한 수다."""
+    length_text, _, multiplier_text = value.partition(":")
+    try:
+        max_length, multiplier = int(length_text), float(multiplier_text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"짧은 문장 규칙은 N:k 모양이어야 합니다(받은 값: {value!r}). 예: 6:3") from error
+    if max_length < 1 or not (math.isfinite(multiplier) and multiplier > 1):
+        raise argparse.ArgumentTypeError(f"짧은 문장 규칙의 N은 1 이상, k는 1보다 커야 합니다(받은 값: {value!r}).")
+    return ShortRule(max_length, multiplier)
+
+
+def require_same_short_rule(report: Mapping, short_rule: ShortRule | None, file_name: str) -> None:
+    """보류셋은 개발셋과 같은 짧은 문장 규칙을 써야 한다. 규칙이 다르면 고른 임계값이 다른 부하를 뜻하기 때문이다."""
+    expected = None if short_rule is None else short_rule.to_dict()
+    if report.get("short_rule") != expected:
+        raise DatasetFormatError(f"{file_name}과 짧은 문장 규칙이 다릅니다(개발셋 {report.get('short_rule')}, 지금 {expected}). 같은 --short-rule을 주세요.")
+
+
+def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_sha256: str | None, short_rule: ShortRule | None = None) -> float:
     """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나, 다른 모델의 결과거나, 임계값이 잘못됐으면 오류다.
 
     policy_sha256: 이번 보류셋 평가에 쓴 규칙 목록 지문(규칙 경로를 쓰지 않으면 None). 개발셋과 다르면 오류다.
@@ -287,6 +369,7 @@ def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_
     if dev_policy != policy_sha256:
         message = f"{dev_report_path.name}과 규칙 경로(사용 여부나 규칙 목록)가 다릅니다. 개발셋과 같은 규칙 목록으로 만든 --rule-routes를 주세요."
         raise DatasetFormatError(message)
+    require_same_short_rule(report, short_rule, dev_report_path.name)
     return require_valid_threshold(report["decision"].get("threshold"), dev_report_path.name)
 
 
@@ -398,10 +481,10 @@ def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEv
     route_provenance = None if arguments.rule_routes is None else describe_file_provenance(arguments.rule_routes) | {"policy_sha256": policy}
     provenance = {"rule_routes": route_provenance}
     if items[0].split == "holdout":
-        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy)
-        report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes)
+        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule)
+        report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes, arguments.short_rule)
         return report | provenance | {"dev_report": describe_file_provenance(arguments.dev_report)}
-    return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes) | provenance
+    return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes, arguments.short_rule) | provenance
 
 
 def main(argv: Sequence[str] | None = None) -> None:
