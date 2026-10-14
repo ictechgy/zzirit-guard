@@ -99,6 +99,7 @@ find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
 - 이 표는 15초마다 서버에서 다시 읽는다.
 - 채널: (채널 이름) / 치지직 채팅 연결: 연결됨 / 숨김·제재 가능: 가능 / 마지막 채팅 수신: 채팅이 오고 있으면 방금 / 처리 대기 중인 조치: 0건 근처
 - 하나라도 아니면 12장.
+- AI를 켰으면(19장) AI 1차·2차 워커가 정상이고 AI 2차 대기열이 0건 근처인지도 본다.
 
 ## 12. 장애 대응
 | 증상 | 조치 |
@@ -165,3 +166,42 @@ launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server
 - 로그인한 스트리머(소유자 세션)는 시작·콜백 한도를 받지 않아 재연결이 막히지 않는다. 다른 로그인 세션은 전체 상한(120)만 건너뛴다.
 - 누군가 로그인 주소를 계속 부르는 동안에는 세션 없는 새 로그인이 막힐 수 있고, 멈추면 수 초 안에 회복한다.
 - 한도를 넘으면 `/?loginError=`로 돌아가 "요청이 너무 많습니다…" 문구가 보인다.
+
+## 19. AI 워커(로드맵 2단계)
+AI는 규칙이 판정하지 않은 채팅을 1차(KcELECTRA, CPU)·2차(kanana-safeguard, GPU) 워커로 보내 **후보**와 **'도움 필요'**를 올린다. 자동 숨김은 하지 않는다(스펙 5.2 ⑤).
+- 기본은 꺼짐이다(`ZG_AI_ENABLED=0`). 워커를 설치하지 않은 배포는 규칙만 돈다.
+- 실채팅으로 학습하거나 임계값을 맞추지 않는다(스펙 9장). 아래 숫자는 합성 평가셋 기준이다.
+
+### 켜기 전 준비
+1. **워커 환경**: `(cd workers/stage1 && uv sync)`, `(cd workers/stage2 && uv sync)`. 의존성은 `uv.lock`에 고정돼 있다.
+2. **1차 모델**: `workers/stage1/README.md`대로 학습한다(미세조정 가중치는 배포하지 않으므로 운영자가 직접 학습한다).
+   - 학습 결과 디렉터리에 `inference.json`이 있어야 워커가 시작한다.
+3. **1차 임계값 정하기**: 개발셋으로 정하고, 보류셋은 설정을 고정한 뒤 한 번만 본다(`workers/stage1/README.md`의 "채팅 평가셋과 2차 용량").
+   - 모델마다 맞는 값이 다르다. 재학습한 모델은 0.003~0.03 근처였다(`docs/ml/2026-10-14-stage1-retrain-results.md`).
+4. **2차 모델**: `workers/stage2/README.md`대로 공식 가중치를 받아 4비트로 변환한다(약 5GB).
+5. **데이터 디렉터리 경로 길이**: 워커 소켓 `$ZG_DATA_DIR/run/stage1.sock` 경로가 103바이트를 넘으면 워커가 시작하지 않는다. 기본 위치(`~/Library/Application Support/zzirit-guard`)는 보통 괜찮다.
+
+### 설치와 켜기
+```bash
+ops/scripts/install-launchd.sh stage1-worker "$HOME/Library/Application Support/zzirit-guard/ml/stage1/<학습 결과>"
+ops/scripts/install-launchd.sh stage2-worker "$HOME/Library/Application Support/zzirit-guard/ml/stage2/kanana-safeguard-8b-mlx-4bit"
+# .env에 ZG_AI_ENABLED=1을 넣고 서버를 다시 시작한다(7장)
+launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server
+```
+- 설치 스크립트는 먼저 `ZG_INSTALL_DRY_RUN=1`로 시험할 수 있다(plist만 만들어 검사하고 launchd는 건드리지 않는다).
+- 워커는 모델을 다 불러온 뒤에 소켓을 만든다. 1차는 수 초, 2차는 약 10초 걸린다.
+- 워커 로그는 `~/Library/Logs/zzirit-guard/stage1-worker.err.log`·`stage2-worker.err.log`이다. 건수·지연만 남고 채팅 원문은 남지 않는다.
+- 설정 화면(기록·설정 → 한도·보관 기간)에서 **AI 1차 임계값**을 3에서 정한 값으로 바꾼다. 후보(0.5)·확실(0.99) 임계값은 스펙 값 그대로 둔다.
+
+### 확인(방송 전 점검에 더하기)
+- 상태 점검의 **AI 1차 워커·AI 2차 워커**가 "정상"이고 모델 이름(`<디렉터리>@<해시>`)이 맞는지 본다.
+- **AI 2차 대기열**은 평소 0건 근처다. 계속 쌓이거나 "최근 1분 AI 미검사(과부하)"가 늘면 1차 임계값이 너무 낮은 것이다. 임계값을 올리거나 키워드 경로를 줄인다.
+- 통계(최근 1시간)의 AI 항목: 2차로 보낸 채팅, 2차 판정, 미검사(과부하·장애·너무 긴 문장).
+
+### 장애
+| 증상 | 조치 |
+|---|---|
+| 상태 배너 "AI 중지(1차/2차 워커 응답 없음)" | `launchctl print gui/$(id -u)/com.zzirit-guard.stage1-worker`(또는 stage2)로 떠 있는지 보고, `*.err.log`를 본다. 규칙은 계속 동작한다 |
+| 워커가 계속 재시작됨 | 종료 코드 2는 설정 오류다(모델 경로, `inference.json` 없음, 소켓 경로 길이, 다른 인스턴스). `*.err.log`의 "오류:" 줄을 보고 고친다. 종료 코드 70은 추론이 10초 넘게 멈춘 경우다(launchd가 다시 띄운다) |
+| "최근 1분 AI 미검사(장애·너무 긴 문장)"만 늘어남 | 2차는 384토큰(한국어 약 300자)이 넘는 채팅을 판정하지 않는다. 긴 도배가 많으면 정상이다 |
+| AI를 끄고 싶음 | `.env`의 `ZG_AI_ENABLED=0` 뒤 서버 재시작. 워커를 내리려면 `launchctl bootout gui/$(id -u)/com.zzirit-guard.stage1-worker`(stage2도 같다) |
