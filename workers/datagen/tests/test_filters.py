@@ -49,6 +49,15 @@ def test_pattern_rules_keep_digit_boundaries(tmp_path: Path) -> None:
     assert detect_drop_reason("2024년 3월 15일 금칙가", lists) is None
 
 
+def test_hangul_filler_letters_do_not_bypass(tmp_path: Path) -> None:
+    """글자로 분류되는 보이지 않는 한글 채움 문자(U+3164 등)를 끼워도 목록·형태 규칙을 피하지 못한다."""
+    lists = load_private_lists(make_lists(tmp_path / "lists"))
+    for filler in ("\u3164", "\u115f", "\u1160", "\uffa0"):
+        assert detect_drop_reason(f"미{filler}성표식 금{filler}칙가", lists) == "minor_sexual"
+        assert detect_drop_reason(f"1{filler}3살 금칙가", lists) == "minor_sexual"
+        assert detect_drop_reason(f"0{filler}10 1234 5678", lists) == "pii_like"
+
+
 def test_missing_or_empty_list_is_an_error(tmp_path: Path) -> None:
     """안전 목록이 덜 로드된 상태를 정상으로 오해하지 않도록 즉시 중단한다."""
     directory = make_lists(tmp_path / "lists")
