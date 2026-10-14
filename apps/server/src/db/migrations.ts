@@ -103,7 +103,10 @@ export const MIGRATIONS: readonly string[] = [
   `,
   // v2: 규칙 종류에 광고 낱말(spam)을 더한다. SQLite는 CHECK 제약을 고칠 수 없어 표를 새로 만들어 옮긴다.
   // id를 그대로 옮겨 판정 이유(rule:<종류>:<번호>)와 감사 기록이 가리키는 규칙 번호가 바뀌지 않게 한다.
+  // 옛 표의 AUTOINCREMENT 값(sqlite_sequence)도 옮긴다. 남은 가장 큰 id만 이어 쓰면, 지워진 규칙 번호를 새 규칙이 다시 받아
+  // 예전 판정 이유가 엉뚱한 규칙을 가리키게 되기 때문이다.
   `
+  CREATE TEMP TABLE rule_entry_sequence AS SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry';
   CREATE TABLE rule_entry_v2 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id TEXT NOT NULL,
@@ -117,6 +120,12 @@ export const MIGRATIONS: readonly string[] = [
     SELECT id, channel_id, kind, pattern, created_by, created_at FROM rule_entry;
   DROP TABLE rule_entry;
   ALTER TABLE rule_entry_v2 RENAME TO rule_entry;
+  DELETE FROM sqlite_sequence WHERE name IN ('rule_entry', 'rule_entry_v2');
+  INSERT INTO sqlite_sequence (name, seq)
+    SELECT 'rule_entry', MAX(seq) FROM (
+      SELECT seq FROM rule_entry_sequence UNION ALL SELECT MAX(id) AS seq FROM rule_entry
+    ) WHERE seq IS NOT NULL HAVING COUNT(*) > 0;
+  DROP TABLE rule_entry_sequence;
   `,
 ];
 

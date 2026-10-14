@@ -3,6 +3,7 @@
 // 왜: 1차 분류기 평가(zg_stage1.evaluate_chat)는 1차 점수만 본다. 실제 경로는 "규칙 → 키워드 경로 → 1차"라서,
 // 규칙이 먼저 잡는 문장(전화번호·주소·링크·금칙어)과 키워드 경로가 2차로 보내는 문장을 합쳐야 핵심 범주를 얼마나 지키는지 알 수 있다.
 // 사용법: npm run build -w @zzirit-guard/server && node apps/server/dist/tools/evaluateRules.js --eval-file <평가셋> --output <결과> [--keywords <목록>]
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -20,23 +21,31 @@ import { createAuditLog } from "../records/auditLog.js";
 const EVALUATION_CHANNEL_ID = "evaluation";
 
 /**
- * 문장 사이 간격(ms). 떼도배(10초 창)·개인 도배(10초 창)·중복 판정이 서로 다른 평가 문장끼리 걸리지 않게 충분히 띄운다.
- * 평가는 문장 하나하나의 규칙 판정을 보려는 것이라, 도배 규칙은 이 도구의 측정 대상이 아니다.
+ * 문장 사이 간격(ms). 떼도배(10초 창)·개인 도배(10초 창)·중복 판정(10분 보관)이 서로 다른 평가 문장끼리 걸리지 않게
+ * 중복 판정 보관 시간보다 길게 띄운다. 평가는 문장 하나하나의 규칙 판정을 보려는 것이라, 도배·중복은 측정 대상이 아니다.
  */
-const MESSAGE_SPACING_MS = 60_000;
+const MESSAGE_SPACING_MS = 11 * 60_000;
 
-/** 평가셋 한 줄에서 쓰는 값. */
+/** 평가셋 한 줄에서 쓰는 값. split은 평가셋의 셋 이름(dev·holdout, 없으면 null)이다. */
 export interface EvaluationItem {
   id: string;
   text: string;
+  split: string | null;
 }
 
-/** 문장 하나의 규칙 경로 결과. keyword는 키워드 경로에 걸린 규칙 번호(없으면 null)다. */
+/**
+ * 문장 하나의 규칙 경로 결과.
+ * keyword는 키워드 경로에 걸린 규칙 번호(없으면 null), skipAi는 AI 단계를 건너뛰는 가벼운 반응(스펙 5.2 ③)인지다.
+ * evalSha256·policySha256은 어떤 평가셋과 어떤 규칙 목록으로 만든 결과인지 확인하는 값이다(줄마다 같다).
+ */
 export interface RuleRoute {
   id: string;
   decision: "auto_hide" | "candidate" | "pass";
   reason: string;
   keyword: number | null;
+  skipAi: boolean;
+  evalSha256: string;
+  policySha256: string;
 }
 
 /** 도구 인자가 잘못됐을 때 던진다. 원인을 그대로 사용자에게 보여 준다. */
@@ -86,15 +95,28 @@ function findKeywordRoute(rules: RuleRepository, text: string): number | null {
 }
 
 /**
- * 평가 문장마다 규칙 판정·이유·키워드 경로 일치를 구한다.
- * @param items 평가 문장 목록
- * @param keywordPatterns 키워드 경로 패턴 목록
+ * 규칙 목록의 지문(sha256). 종류·패턴을 정렬해 해시하므로 같은 목록이면 같은 값이다.
+ * 왜: 개발셋과 보류셋을 같은 규칙 목록으로 평가했는지 평가 도구(evaluate_chat)가 확인하게 하기 위해서다.
+ * @param rules 규칙 저장소
  */
-export function evaluateRuleRoutes(items: readonly EvaluationItem[], keywordPatterns: readonly string[] = []): RuleRoute[] {
+function computePolicySha256(rules: RuleRepository): string {
+  const lines = rules.list(EVALUATION_CHANNEL_ID).map((rule) => `${rule.kind}\t${rule.pattern}`).sort();
+  return createHash("sha256").update(lines.join("\n")).digest("hex");
+}
+
+/**
+ * 평가 문장마다 규칙 판정·이유·키워드 경로 일치·AI 건너뜀 여부를 구한다.
+ * @param items 평가 문장 목록
+ * @param keywordPatterns 키워드 경로 패턴 목록(기본 규칙에 더한다)
+ * @param evalSha256 평가셋 파일의 sha256(결과에 그대로 적는다)
+ */
+export function evaluateRuleRoutes(items: readonly EvaluationItem[], keywordPatterns: readonly string[] = [], evalSha256 = ""): RuleRoute[] {
   const { pipeline, rules } = buildEvaluationPipeline(keywordPatterns);
+  const policySha256 = computePolicySha256(rules);
   return items.map((item, index) => {
     const result = pipeline.evaluate(toEvaluationEvent(item, index));
-    return { id: item.id, decision: result.decision, reason: result.reason, keyword: findKeywordRoute(rules, item.text) };
+    const keyword = findKeywordRoute(rules, item.text);
+    return { id: item.id, decision: result.decision, reason: result.reason, keyword, skipAi: result.trivial, evalSha256, policySha256 };
   });
 }
 
@@ -105,9 +127,9 @@ export function evaluateRuleRoutes(items: readonly EvaluationItem[], keywordPatt
 export function parseEvaluationItems(content: string): EvaluationItem[] {
   return content.split("\n").filter((line) => line.trim() !== "").map((line, index) => {
     const record: unknown = JSON.parse(line);
-    const { id, text } = (record ?? {}) as { id?: unknown; text?: unknown };
+    const { id, text, split } = (record ?? {}) as { id?: unknown; text?: unknown; split?: unknown };
     if (typeof id !== "string" || typeof text !== "string") throw new EvaluateRulesArgumentError(`${index + 1}번째 줄에 문자열 id·text가 없습니다. 평가셋 파일인지 확인하세요`);
-    return { id, text };
+    return { id, text, split: typeof split === "string" ? split : null };
   });
 }
 
@@ -126,12 +148,26 @@ function readArguments(): { evalFile: string; output: string; keywords: string |
   return { evalFile: values["eval-file"], output: values.output, keywords: values.keywords };
 }
 
+/**
+ * 보류셋에는 저장소 기본 목록만 쓴다. 임의 키워드로 보류셋을 몇 번이고 돌리면 보류셋으로 목록을 다듬게 되기 때문이다.
+ * 목록을 바꾸려면 기본 목록(defaultRules.ts)을 커밋으로 바꾸고 개발셋부터 다시 본다.
+ * @param items 평가 문장 목록
+ * @param keywords 추가 키워드 패턴
+ */
+export function ensureHoldoutUsesDefaults(items: readonly EvaluationItem[], keywords: readonly string[]): void {
+  if (keywords.length > 0 && items.some((item) => item.split === "holdout")) {
+    throw new EvaluateRulesArgumentError("보류셋에는 --keywords를 쓸 수 없습니다. 목록은 개발셋으로 다듬고 기본 목록에 넣은 뒤 보류셋을 보세요");
+  }
+}
+
 /** 명령행 실행: 평가셋을 판정해 결과 JSONL을 쓰고, 판정별 건수만 출력한다. */
 function runFromCommandLine(): void {
   const options = readArguments();
-  const items = parseEvaluationItems(readFileSync(options.evalFile, "utf8"));
+  const content = readFileSync(options.evalFile);
+  const items = parseEvaluationItems(content.toString("utf8"));
   const keywords = options.keywords ? parseKeywordPatterns(readFileSync(options.keywords, "utf8")) : [];
-  const routes = evaluateRuleRoutes(items, keywords);
+  ensureHoldoutUsesDefaults(items, keywords);
+  const routes = evaluateRuleRoutes(items, keywords, createHash("sha256").update(content).digest("hex"));
   writeFileSync(options.output, routes.map((route) => JSON.stringify(route)).join("\n") + "\n");
   const counts: Record<string, number> = {};
   routes.forEach((route) => { counts[route.decision] = (counts[route.decision] ?? 0) + 1; });

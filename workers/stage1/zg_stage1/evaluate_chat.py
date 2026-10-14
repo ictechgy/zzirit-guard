@@ -72,10 +72,11 @@ RULE_DECISIONS: frozenset[str] = frozenset({"auto_hide", "candidate", "pass"})
 
 
 class RuleRoute(NamedTuple):
-    """문장 하나의 규칙 경로 결과: 규칙이 잡았는지(pass가 아님), 키워드 경로에 걸렸는지."""
+    """문장 하나의 규칙 경로 결과: 규칙이 잡았는지(pass가 아님), 키워드 경로에 걸렸는지, AI 단계를 건너뛰는 가벼운 반응인지."""
 
     rule_flagged: bool
     keyword: bool
+    skip_ai: bool = False
 
 
 class ScoredItem(NamedTuple):
@@ -90,8 +91,10 @@ class ScoredItem(NamedTuple):
         return self.route.rule_flagged or self.route.keyword or self.score >= threshold
 
     def goes_to_stage2(self, threshold: float) -> bool:
-        """2차(kanana)로 가는지. 규칙이 먼저 판정하면 멈추므로(스펙 §5) 2차 부하에서 뺀다."""
-        return not self.route.rule_flagged and (self.route.keyword or self.score >= threshold)
+        """2차(kanana)로 가는지. 규칙이 먼저 판정하거나 가벼운 반응이면 멈추므로(스펙 §5.2 ②·③) 2차 부하에서 뺀다."""
+        if self.route.rule_flagged or self.route.skip_ai:
+            return False
+        return self.route.keyword or self.score >= threshold
 
 
 def validate_traffic_mix(mix: Mapping[str, float]) -> None:
@@ -263,38 +266,65 @@ def require_valid_threshold(value: object, file_name: str) -> float:
     return float(value)
 
 
-def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, uses_rule_routes: bool) -> float:
+def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_sha256: str | None) -> float:
     """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나, 다른 모델의 결과거나, 임계값이 잘못됐으면 오류다.
 
-    uses_rule_routes: 이번 보류셋 평가에 규칙 경로를 쓰는지. 개발셋과 다르면 오류다. 1차만으로 고른 임계값을 규칙과 합친
-    경로에 쓰거나 그 반대로 쓰면 2차 부하가 예산과 맞지 않기 때문이다.
+    policy_sha256: 이번 보류셋 평가에 쓴 규칙 목록 지문(규칙 경로를 쓰지 않으면 None). 개발셋과 다르면 오류다.
+    1차만으로 고른 임계값을 규칙과 합친 경로에 쓰거나, 다른 키워드 목록으로 만든 규칙 결과와 섞으면 2차 부하가 예산과 맞지 않기 때문이다.
     """
     report = json.loads(dev_report_path.read_text(encoding="utf-8"))
     if report.get("split") != "dev" or report.get("decision", {}).get("mode") != "budget":
         raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 예산 결과가 아닙니다. --forward-budget으로 만든 개발셋 결과를 주세요.")
     if report.get("model_weights_sha256") != model_weights_sha256:
         raise DatasetFormatError(f"{dev_report_path.name}은 다른 모델의 결과입니다. 같은 --model-dir로 개발셋을 먼저 평가하세요.")
-    if (report.get("rule_routes") is not None) != uses_rule_routes:
-        raise DatasetFormatError(f"{dev_report_path.name}과 규칙 경로 사용 여부가 다릅니다. 개발셋과 똑같이 --rule-routes를 주거나 빼세요.")
+    dev_policy = (report.get("rule_routes") or {}).get("policy_sha256")
+    if dev_policy != policy_sha256:
+        message = f"{dev_report_path.name}과 규칙 경로(사용 여부나 규칙 목록)가 다릅니다. 개발셋과 같은 규칙 목록으로 만든 --rule-routes를 주세요."
+        raise DatasetFormatError(message)
     return require_valid_threshold(report["decision"].get("threshold"), dev_report_path.name)
 
 
-def parse_rule_route(line: str, location: str) -> tuple[str, RuleRoute]:
-    """규칙 경로 결과 한 줄을 (id, RuleRoute)로 읽는다. 판정 값이 이상하면 오류다."""
+class RouteRecord(NamedTuple):
+    """규칙 경로 결과 한 줄: id, 경로, 만든 평가셋 sha256, 규칙 목록 지문."""
+
+    item_id: str
+    route: RuleRoute
+    eval_sha256: str
+    policy_sha256: str
+
+
+def parse_rule_route(line: str, location: str) -> RouteRecord:
+    """규칙 경로 결과 한 줄을 읽는다. 판정 값이나 해시 필드가 이상하면 오류다."""
     record = json.loads(line)
-    decision = record.get("decision") if isinstance(record, dict) else None
-    if decision not in RULE_DECISIONS or not isinstance(record.get("id"), str):
-        raise DatasetFormatError(f"{location}: 규칙 경로 결과 형식이 아닙니다(id 문자열, decision은 {', '.join(sorted(RULE_DECISIONS))}).")
-    return record["id"], RuleRoute(rule_flagged=decision != "pass", keyword=record.get("keyword") is not None)
+    fields = record if isinstance(record, dict) else {}
+    hashes = [fields.get("evalSha256"), fields.get("policySha256")]
+    has_hashes = all(isinstance(value, str) and value for value in hashes)
+    if fields.get("decision") not in RULE_DECISIONS or not isinstance(fields.get("id"), str) or not has_hashes:
+        raise DatasetFormatError(f"{location}: 규칙 경로 결과 형식이 아닙니다(id, decision, evalSha256, policySha256). 규칙 평가 도구를 다시 돌리세요.")
+    route = RuleRoute(rule_flagged=fields["decision"] != "pass", keyword=fields.get("keyword") is not None, skip_ai=fields.get("skipAi") is True)
+    return RouteRecord(fields["id"], route, fields["evalSha256"], fields["policySha256"])
 
 
-def load_rule_routes(path: Path, items: Sequence[ChatEvalItem]) -> dict[str, RuleRoute]:
-    """규칙 경로 결과를 읽고, 평가셋의 id와 정확히 같은지 확인한다. 다른 셋의 결과를 섞어 쓰지 않게 하기 위해서다."""
+def ensure_routes_match_eval_file(records: Sequence[RouteRecord], eval_path: Path, file_name: str) -> str:
+    """모든 줄이 이 평가셋 파일(sha256)과 한 규칙 목록으로 만든 결과인지 확인하고, 규칙 목록 지문을 돌려준다.
+
+    왜: 평가셋 문장을 고친 뒤 옛 규칙 결과를 쓰거나, 다른 목록으로 만든 결과를 섞으면 숫자가 조용히 틀린다.
+    """
+    eval_hashes = {record.eval_sha256 for record in records}
+    policies = {record.policy_sha256 for record in records}
+    if eval_hashes != {compute_file_sha256(eval_path)} or len(policies) != 1:
+        raise DatasetFormatError(f"{file_name}이 이 평가셋 파일과 한 규칙 목록으로 만든 결과가 아닙니다. 지금 평가셋으로 규칙 평가 도구를 다시 돌리세요.")
+    return policies.pop()
+
+
+def load_rule_routes(path: Path, items: Sequence[ChatEvalItem], eval_path: Path) -> tuple[dict[str, RuleRoute], str]:
+    """규칙 경로 결과를 읽고, 평가셋 id·파일 해시와 맞는지 확인한다. (id별 경로, 규칙 목록 지문)을 돌려준다."""
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    routes = dict(parse_rule_route(line, f"{path.name}:{number}") for number, line in enumerate(lines, 1))
-    if len(routes) != len(lines) or set(routes) != {item.item_id for item in items}:
+    records = [parse_rule_route(line, f"{path.name}:{number}") for number, line in enumerate(lines, 1)]
+    routes = {record.item_id: record.route for record in records}
+    if len(routes) != len(records) or set(routes) != {item.item_id for item in items}:
         raise DatasetFormatError(f"{path.name}의 id가 평가셋과 다릅니다. 같은 평가셋 파일로 규칙 평가 도구를 다시 돌리세요.")
-    return routes
+    return routes, ensure_routes_match_eval_file(records, eval_path, path.name)
 
 
 def require_matching_decision(arguments: argparse.Namespace, split: str) -> None:
@@ -357,10 +387,11 @@ def format_chat_report_markdown(report: dict) -> str:
 
 def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEvalItem], mix: Mapping[str, float], model_sha: str) -> dict:
     """셋에 맞는 보고서를 만든다. 보류셋은 채점 전에 개발셋 결과를 확인한다(다른 모델이면 채점하지 않는다)."""
-    routes = None if arguments.rule_routes is None else load_rule_routes(arguments.rule_routes, items)
-    provenance = {"rule_routes": None if arguments.rule_routes is None else describe_file_provenance(arguments.rule_routes)}
+    routes, policy = (None, None) if arguments.rule_routes is None else load_rule_routes(arguments.rule_routes, items, arguments.eval_file)
+    route_provenance = None if arguments.rule_routes is None else describe_file_provenance(arguments.rule_routes) | {"policy_sha256": policy}
+    provenance = {"rule_routes": route_provenance}
     if items[0].split == "holdout":
-        threshold = read_dev_threshold(arguments.dev_report, model_sha, routes is not None)
+        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy)
         report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes)
         return report | provenance | {"dev_report": describe_file_provenance(arguments.dev_report)}
     return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes) | provenance

@@ -41,6 +41,21 @@ describe("openDatabase", () => {
     expect(() => insert.run("unknown", "x")).toThrow(/CHECK/);
   });
 
+  it.each([
+    ["가장 큰 번호를 지운 뒤", ["가", "나", "다"], ["다"], 4],
+    ["모든 규칙을 지운 뒤", ["가", "나"], ["가", "나"], 3],
+    ["규칙을 한 번도 넣지 않은 채", [], [], 1],
+  ])("v1→v2 마이그레이션은 %s에도 지워진 규칙 번호를 다시 쓰지 않는다", (_label, added, removed, expectedNextId) => {
+    const database = new BetterSqlite3(":memory:");
+    database.exec(MIGRATIONS[0] as string);
+    database.pragma("user_version = 1");
+    const insert = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', ?, ?, 'test', 0)");
+    added.forEach((pattern) => insert.run("weak", pattern));
+    removed.forEach((pattern) => database.prepare("DELETE FROM rule_entry WHERE pattern = ?").run(pattern));
+    runMigrations(database);
+    expect(Number(insert.run("spam", "새규칙").lastInsertRowid)).toBe(expectedNextId);
+  });
+
   it("알 수 없는 규칙 종류를 거부한다", () => {
     const database = openDatabase(":memory:");
     database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
