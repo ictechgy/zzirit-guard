@@ -37,7 +37,7 @@ from zg_stage1.paths import KHATERS_RELATIVE_PATH, KHATERS_TRAIN_FILE_NAME, ML_D
 
 # 저장소에 넣은 학습용 허용 문장과 평가셋 위치. 평가셋과 겹치지 않는지 만들 때마다 확인한다.
 STAGE1_DIRECTORY = Path(__file__).resolve().parents[1]
-DEFAULT_HARD_NEGATIVES_PATH = STAGE1_DIRECTORY / "train_data" / "hard-negatives-v1.jsonl"
+DEFAULT_HARD_NEGATIVES_PATH = STAGE1_DIRECTORY / "train_data" / "hard-negatives-v2.jsonl"
 EVAL_SET_PATHS: tuple[Path, ...] = (STAGE1_DIRECTORY / "eval_data" / "chat-dev-v2.jsonl", STAGE1_DIRECTORY / "eval_data" / "chat-holdout-v2.jsonl")
 
 # 기본 설정: 유해 50%(정상과 같은 수), 허용 어려운 예제 3번 반복. 2천여 문장을 한 번만 넣으면 9만여 문장 속에서 효과가 묻힌다.

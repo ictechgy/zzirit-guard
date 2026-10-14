@@ -2932,3 +2932,737 @@
 {"id": "hn-2932", "label": "allow", "category": "long_normal", "family": "newcomer-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "여기 방송 처음인데 보통 무슨 게임 해요?"}
 {"id": "hn-2933", "label": "allow", "category": "long_normal", "family": "newcomer-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "신입인데 채팅 규칙 있으면 알려주세요"}
 {"id": "hn-2934", "label": "allow", "category": "long_normal", "family": "newcomer-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "처음 왔는데 방장 별명이 왜 그거예요? ㅋㅋ"}
+{"id": "hn-2935", "label": "allow", "category": "short_normal", "family": "greeting-hello", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "hi"}
+{"id": "hn-2936", "label": "allow", "category": "short_normal", "family": "greeting-hello", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "hello"}
+{"id": "hn-2937", "label": "allow", "category": "short_normal", "family": "greeting-hello", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "안녕"}
+{"id": "hn-2938", "label": "allow", "category": "short_normal", "family": "greeting-arrived", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "왔어요"}
+{"id": "hn-2939", "label": "allow", "category": "short_normal", "family": "greeting-arrived", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "왔다"}
+{"id": "hn-2940", "label": "allow", "category": "short_normal", "family": "greeting-arrived", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저 왔어요"}
+{"id": "hn-2941", "label": "allow", "category": "short_normal", "family": "greeting-arrived", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "도착"}
+{"id": "hn-2942", "label": "allow", "category": "short_normal", "family": "greeting-arrived", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "일 끝나고 왔어요"}
+{"id": "hn-2943", "label": "allow", "category": "short_normal", "family": "greeting-attendance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "출첵이요"}
+{"id": "hn-2944", "label": "allow", "category": "short_normal", "family": "greeting-attendance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘도 출첵"}
+{"id": "hn-2945", "label": "allow", "category": "short_normal", "family": "first-place-race", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "2등"}
+{"id": "hn-2946", "label": "allow", "category": "short_normal", "family": "first-place-race", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "1빠"}
+{"id": "hn-2947", "label": "allow", "category": "short_normal", "family": "first-place-race", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "3등이다"}
+{"id": "hn-2948", "label": "allow", "category": "short_normal", "family": "first-place-race", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "1등 했다"}
+{"id": "hn-2949", "label": "allow", "category": "short_normal", "family": "first-place-race", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아 2등"}
+{"id": "hn-2950", "label": "allow", "category": "short_normal", "family": "greeting-bye", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅂㅇ"}
+{"id": "hn-2951", "label": "allow", "category": "short_normal", "family": "greeting-bye", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "bye"}
+{"id": "hn-2952", "label": "allow", "category": "short_normal", "family": "greeting-bye", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "바이"}
+{"id": "hn-2953", "label": "allow", "category": "short_normal", "family": "greeting-bye", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "빠이"}
+{"id": "hn-2954", "label": "allow", "category": "short_normal", "family": "greeting-goodnight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "gn"}
+{"id": "hn-2955", "label": "allow", "category": "short_normal", "family": "greeting-goodnight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "굿나잇"}
+{"id": "hn-2956", "label": "allow", "category": "short_normal", "family": "greeting-goodnight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "푹 쉬세요"}
+{"id": "hn-2957", "label": "allow", "category": "short_normal", "family": "greeting-time-of-day", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "좋은 아침"}
+{"id": "hn-2958", "label": "allow", "category": "short_normal", "family": "greeting-time-of-day", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "굿모닝"}
+{"id": "hn-2959", "label": "allow", "category": "short_normal", "family": "greeting-time-of-day", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "점심 맛있게"}
+{"id": "hn-2960", "label": "allow", "category": "short_normal", "family": "greeting-time-of-day", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "즐거운 하루"}
+{"id": "hn-2961", "label": "allow", "category": "short_normal", "family": "greeting-time-of-day", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "좋은 주말"}
+{"id": "hn-2962", "label": "allow", "category": "short_normal", "family": "cheer-fighting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "홧팅"}
+{"id": "hn-2963", "label": "allow", "category": "short_normal", "family": "cheer-fighting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅎㅇㅌ"}
+{"id": "hn-2964", "label": "allow", "category": "short_normal", "family": "cheer-letsgo", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "gogo"}
+{"id": "hn-2965", "label": "allow", "category": "short_normal", "family": "cheer-letsgo", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "가자"}
+{"id": "hn-2966", "label": "allow", "category": "short_normal", "family": "praise-good", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "굿"}
+{"id": "hn-2967", "label": "allow", "category": "short_normal", "family": "praise-good", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "good"}
+{"id": "hn-2968", "label": "allow", "category": "short_normal", "family": "praise-good", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "좋아요"}
+{"id": "hn-2969", "label": "allow", "category": "short_normal", "family": "praise-good", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "좋다"}
+{"id": "hn-2970", "label": "allow", "category": "short_normal", "family": "praise-nice", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "nice"}
+{"id": "hn-2971", "label": "allow", "category": "short_normal", "family": "praise-nice", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "나이스 플레이"}
+{"id": "hn-2972", "label": "allow", "category": "short_normal", "family": "praise-best", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "따봉"}
+{"id": "hn-2973", "label": "allow", "category": "short_normal", "family": "praise-best", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "👍 최고최고"}
+{"id": "hn-2974", "label": "allow", "category": "short_normal", "family": "praise-best", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "최고예요"}
+{"id": "hn-2975", "label": "allow", "category": "short_normal", "family": "praise-best", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "짱"}
+{"id": "hn-2976", "label": "allow", "category": "short_normal", "family": "praise-best", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "짱짱"}
+{"id": "hn-2977", "label": "allow", "category": "short_normal", "family": "reaction-wow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오오"}
+{"id": "hn-2978", "label": "allow", "category": "short_normal", "family": "reaction-wow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "wow"}
+{"id": "hn-2979", "label": "allow", "category": "short_normal", "family": "reaction-wow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "우와"}
+{"id": "hn-2980", "label": "allow", "category": "short_normal", "family": "reaction-wow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오"}
+{"id": "hn-2981", "label": "allow", "category": "short_normal", "family": "reaction-surprise", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "omg"}
+{"id": "hn-2982", "label": "allow", "category": "short_normal", "family": "reaction-surprise", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "헉"}
+{"id": "hn-2983", "label": "allow", "category": "short_normal", "family": "reaction-surprise", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "어?"}
+{"id": "hn-2984", "label": "allow", "category": "short_normal", "family": "reaction-amazing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "대박이다"}
+{"id": "hn-2985", "label": "allow", "category": "short_normal", "family": "reaction-amazing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "레전드다"}
+{"id": "hn-2986", "label": "allow", "category": "short_normal", "family": "reaction-amazing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "역대급"}
+{"id": "hn-2987", "label": "allow", "category": "short_normal", "family": "reaction-oops", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "앗"}
+{"id": "hn-2988", "label": "allow", "category": "short_normal", "family": "reaction-oops", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아앗"}
+{"id": "hn-2989", "label": "allow", "category": "short_normal", "family": "reaction-oops", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아이고"}
+{"id": "hn-2990", "label": "allow", "category": "short_normal", "family": "reaction-oops", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "어이쿠"}
+{"id": "hn-2991", "label": "allow", "category": "short_normal", "family": "reaction-oops", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "앗 실수"}
+{"id": "hn-2992", "label": "allow", "category": "short_normal", "family": "reaction-oops", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "에이 아깝"}
+{"id": "hn-2993", "label": "allow", "category": "short_normal", "family": "agree-yes", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "yes"}
+{"id": "hn-2994", "label": "allow", "category": "short_normal", "family": "agree-yes", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "응"}
+{"id": "hn-2995", "label": "allow", "category": "short_normal", "family": "agree-yes", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "네"}
+{"id": "hn-2996", "label": "allow", "category": "short_normal", "family": "agree-yes", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "넵"}
+{"id": "hn-2997", "label": "allow", "category": "short_normal", "family": "agree-yes", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "넹"}
+{"id": "hn-2998", "label": "allow", "category": "short_normal", "family": "agree-real", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그니까"}
+{"id": "hn-2999", "label": "allow", "category": "short_normal", "family": "agree-real", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "리얼"}
+{"id": "hn-3000", "label": "allow", "category": "short_normal", "family": "agree-real", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㄹㅇㄹㅇ"}
+{"id": "hn-3001", "label": "allow", "category": "short_normal", "family": "disagree-no", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㄴㄴ"}
+{"id": "hn-3002", "label": "allow", "category": "short_normal", "family": "disagree-no", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "no"}
+{"id": "hn-3003", "label": "allow", "category": "short_normal", "family": "disagree-no", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노노"}
+{"id": "hn-3004", "label": "allow", "category": "short_normal", "family": "disagree-no", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아니요"}
+{"id": "hn-3005", "label": "allow", "category": "short_normal", "family": "disagree-no", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아닌데?"}
+{"id": "hn-3006", "label": "allow", "category": "short_normal", "family": "disagree-no", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아뇨"}
+{"id": "hn-3007", "label": "allow", "category": "short_normal", "family": "ack-ok", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅇㅋ"}
+{"id": "hn-3008", "label": "allow", "category": "short_normal", "family": "ack-ok", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오키"}
+{"id": "hn-3009", "label": "allow", "category": "short_normal", "family": "ack-ok", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오케이"}
+{"id": "hn-3010", "label": "allow", "category": "short_normal", "family": "ack-ok", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ok"}
+{"id": "hn-3011", "label": "allow", "category": "short_normal", "family": "ack-ok", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오키도키"}
+{"id": "hn-3012", "label": "allow", "category": "short_normal", "family": "ack-ok", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "알겠어요"}
+{"id": "hn-3013", "label": "allow", "category": "short_normal", "family": "thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㄱㅅ"}
+{"id": "hn-3014", "label": "allow", "category": "short_normal", "family": "thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㄳ"}
+{"id": "hn-3015", "label": "allow", "category": "short_normal", "family": "thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ty"}
+{"id": "hn-3016", "label": "allow", "category": "short_normal", "family": "congrats", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "축하합니다"}
+{"id": "hn-3017", "label": "allow", "category": "short_normal", "family": "congrats", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅊㅋ"}
+{"id": "hn-3018", "label": "allow", "category": "short_normal", "family": "congrats", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "축하축하"}
+{"id": "hn-3019", "label": "allow", "category": "short_normal", "family": "congrats", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "추카"}
+{"id": "hn-3020", "label": "allow", "category": "short_normal", "family": "congrats", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "축하드려요"}
+{"id": "hn-3021", "label": "allow", "category": "short_normal", "family": "good-work", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "고생했어요"}
+{"id": "hn-3022", "label": "allow", "category": "short_normal", "family": "good-work", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅅㄱ"}
+{"id": "hn-3023", "label": "allow", "category": "short_normal", "family": "good-work", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "수고"}
+{"id": "hn-3024", "label": "allow", "category": "short_normal", "family": "good-work", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "수고했어요"}
+{"id": "hn-3025", "label": "allow", "category": "short_normal", "family": "good-work", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "고생 많았어요"}
+{"id": "hn-3026", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅠㅠ 아쉽"}
+{"id": "hn-3027", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아쉽다"}
+{"id": "hn-3028", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아까비"}
+{"id": "hn-3029", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아깝다"}
+{"id": "hn-3030", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아까워"}
+{"id": "hn-3031", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아쉬워요"}
+{"id": "hn-3032", "label": "allow", "category": "short_normal", "family": "sad-regret", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅠ 아깝네"}
+{"id": "hn-3033", "label": "allow", "category": "short_normal", "family": "game-gg", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "gg"}
+{"id": "hn-3034", "label": "allow", "category": "short_normal", "family": "game-gg", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지지"}
+{"id": "hn-3035", "label": "allow", "category": "short_normal", "family": "game-gg", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "굿겜"}
+{"id": "hn-3036", "label": "allow", "category": "short_normal", "family": "game-gg", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "겜 굿"}
+{"id": "hn-3037", "label": "allow", "category": "short_normal", "family": "game-gg", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "wp"}
+{"id": "hn-3038", "label": "allow", "category": "short_normal", "family": "game-gg", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "good game"}
+{"id": "hn-3039", "label": "allow", "category": "short_normal", "family": "game-next-round", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 판 ㄱ"}
+{"id": "hn-3040", "label": "allow", "category": "short_normal", "family": "game-next-round", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "한 판만 더"}
+{"id": "hn-3041", "label": "allow", "category": "short_normal", "family": "game-next-round", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 게임 가요"}
+{"id": "hn-3042", "label": "allow", "category": "short_normal", "family": "game-next-round", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "재도전"}
+{"id": "hn-3043", "label": "allow", "category": "short_normal", "family": "game-next-round", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "리겜?"}
+{"id": "hn-3044", "label": "allow", "category": "short_normal", "family": "game-next-round", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다시 가자"}
+{"id": "hn-3045", "label": "allow", "category": "short_normal", "family": "game-good-play", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "컨트롤 좋다"}
+{"id": "hn-3046", "label": "allow", "category": "short_normal", "family": "game-good-play", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "피지컬 굿"}
+{"id": "hn-3047", "label": "allow", "category": "short_normal", "family": "game-good-play", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "운 좋네"}
+{"id": "hn-3048", "label": "allow", "category": "short_normal", "family": "game-good-play", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "휴 살았다"}
+{"id": "hn-3049", "label": "allow", "category": "short_normal", "family": "game-good-play", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "역전!"}
+{"id": "hn-3050", "label": "allow", "category": "short_normal", "family": "game-good-play", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이겼다"}
+{"id": "hn-3051", "label": "allow", "category": "short_normal", "family": "game-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "몇 렙이에요?"}
+{"id": "hn-3052", "label": "allow", "category": "short_normal", "family": "game-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "무슨 겜이에요?"}
+{"id": "hn-3053", "label": "allow", "category": "short_normal", "family": "game-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이거 뭐 겜?"}
+{"id": "hn-3054", "label": "allow", "category": "short_normal", "family": "game-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "티어 뭐예요?"}
+{"id": "hn-3055", "label": "allow", "category": "short_normal", "family": "game-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "무슨 캐릭?"}
+{"id": "hn-3056", "label": "allow", "category": "short_normal", "family": "game-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "3판째"}
+{"id": "hn-3057", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "왼쪽!"}
+{"id": "hn-3058", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오른쪽"}
+{"id": "hn-3059", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "뒤에 뒤에"}
+{"id": "hn-3060", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "위에 있어요"}
+{"id": "hn-3061", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저기요!"}
+{"id": "hn-3062", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아래쪽"}
+{"id": "hn-3063", "label": "allow", "category": "short_normal", "family": "hint-direction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "옆에 상자"}
+{"id": "hn-3064", "label": "allow", "category": "short_normal", "family": "stream-schedule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "몇시까지?"}
+{"id": "hn-3065", "label": "allow", "category": "short_normal", "family": "stream-schedule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "언제까지 해요?"}
+{"id": "hn-3066", "label": "allow", "category": "short_normal", "family": "stream-schedule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "몇 시간 했어요?"}
+{"id": "hn-3067", "label": "allow", "category": "short_normal", "family": "stream-schedule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "내일도 방송?"}
+{"id": "hn-3068", "label": "allow", "category": "short_normal", "family": "stream-schedule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 방송 언제?"}
+{"id": "hn-3069", "label": "allow", "category": "short_normal", "family": "stream-schedule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "몇시에 켰어요?"}
+{"id": "hn-3070", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소리 작아요"}
+{"id": "hn-3071", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "볼륨 업"}
+{"id": "hn-3072", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소리 커요"}
+{"id": "hn-3073", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소리 안 나와요"}
+{"id": "hn-3074", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마이크 꺼짐"}
+{"id": "hn-3075", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마이크 켜주세요"}
+{"id": "hn-3076", "label": "allow", "category": "short_normal", "family": "stream-audio-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "음질 굿"}
+{"id": "hn-3077", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "화질 깨져요"}
+{"id": "hn-3078", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "화질 굿"}
+{"id": "hn-3079", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "화면 멈춤"}
+{"id": "hn-3080", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "화면 안 나와요"}
+{"id": "hn-3081", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "렉 걸려요"}
+{"id": "hn-3082", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "끊겨요"}
+{"id": "hn-3083", "label": "allow", "category": "short_normal", "family": "stream-video-report", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "버퍼링"}
+{"id": "hn-3084", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "브금 좋다"}
+{"id": "hn-3085", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "브금 뭐예요?"}
+{"id": "hn-3086", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노래 제목?"}
+{"id": "hn-3087", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 노래 좋다"}
+{"id": "hn-3088", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "브금 굿"}
+{"id": "hn-3089", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노래 추천 ㄱ"}
+{"id": "hn-3090", "label": "allow", "category": "short_normal", "family": "stream-bgm", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "브금 바꿔요?"}
+{"id": "hn-3091", "label": "allow", "category": "short_normal", "family": "food-hungry", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배고프다"}
+{"id": "hn-3092", "label": "allow", "category": "short_normal", "family": "food-hungry", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배고파"}
+{"id": "hn-3093", "label": "allow", "category": "short_normal", "family": "food-hungry", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "밥 먹었어요?"}
+{"id": "hn-3094", "label": "allow", "category": "short_normal", "family": "food-hungry", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저녁 뭐 먹지"}
+{"id": "hn-3095", "label": "allow", "category": "short_normal", "family": "food-hungry", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "치킨 땡긴다"}
+{"id": "hn-3096", "label": "allow", "category": "short_normal", "family": "food-hungry", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "라면 먹는 중"}
+{"id": "hn-3097", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "졸리다"}
+{"id": "hn-3098", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "졸려요"}
+{"id": "hn-3099", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "피곤하다"}
+{"id": "hn-3100", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "하품"}
+{"id": "hn-3101", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "잠 온다"}
+{"id": "hn-3102", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자러 갈게요"}
+{"id": "hn-3103", "label": "allow", "category": "short_normal", "family": "sleep-tired", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "졸린데 버팀"}
+{"id": "hn-3104", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅋㅋ 웃기다"}
+{"id": "hn-3105", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "웃겨요"}
+{"id": "hn-3106", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "빵터짐"}
+{"id": "hn-3107", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅋㅋㅋ 뭐야"}
+{"id": "hn-3108", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "웃음벨"}
+{"id": "hn-3109", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "꿀잼"}
+{"id": "hn-3110", "label": "allow", "category": "short_normal", "family": "laugh-funny", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "재밌다"}
+{"id": "hn-3111", "label": "allow", "category": "short_normal", "family": "cute-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅋㅋ 귀여워"}
+{"id": "hn-3112", "label": "allow", "category": "short_normal", "family": "cute-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "귀여워요"}
+{"id": "hn-3113", "label": "allow", "category": "short_normal", "family": "cute-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "강아지 귀엽다"}
+{"id": "hn-3114", "label": "allow", "category": "short_normal", "family": "cute-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "고양이다!"}
+{"id": "hn-3115", "label": "allow", "category": "short_normal", "family": "cute-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "냥이 귀여워"}
+{"id": "hn-3116", "label": "allow", "category": "short_normal", "family": "cute-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "멍멍이다"}
+{"id": "hn-3117", "label": "allow", "category": "short_normal", "family": "emoticon-face", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅇㅂㅇ"}
+{"id": "hn-3118", "label": "allow", "category": "short_normal", "family": "emoticon-face", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅇㅁㅇ"}
+{"id": "hn-3119", "label": "allow", "category": "short_normal", "family": "emoticon-face", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": ">_< 아깝"}
+{"id": "hn-3120", "label": "allow", "category": "short_normal", "family": "emoticon-face", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": ":D"}
+{"id": "hn-3121", "label": "allow", "category": "short_normal", "family": "emoticon-face", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "T_T"}
+{"id": "hn-3122", "label": "allow", "category": "short_normal", "family": "emoticon-heart", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "♥ 사랑해요"}
+{"id": "hn-3123", "label": "allow", "category": "short_normal", "family": "emoticon-heart", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "하트 뿅"}
+{"id": "hn-3124", "label": "allow", "category": "short_normal", "family": "emoticon-heart", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "♡♡ 오늘도 굿"}
+{"id": "hn-3125", "label": "allow", "category": "short_normal", "family": "emoticon-heart", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "하트하트"}
+{"id": "hn-3126", "label": "allow", "category": "short_normal", "family": "emoticon-heart", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "💕 응원"}
+{"id": "hn-3127", "label": "allow", "category": "short_normal", "family": "emoticon-heart", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "하트 보냄"}
+{"id": "hn-3128", "label": "allow", "category": "short_normal", "family": "number-cheer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "11111"}
+{"id": "hn-3129", "label": "allow", "category": "short_normal", "family": "number-cheer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "222"}
+{"id": "hn-3130", "label": "allow", "category": "short_normal", "family": "number-cheer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "7777"}
+{"id": "hn-3131", "label": "allow", "category": "short_normal", "family": "number-cheer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "100점"}
+{"id": "hn-3132", "label": "allow", "category": "short_normal", "family": "number-cheer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "10점 만점"}
+{"id": "hn-3133", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "1번"}
+{"id": "hn-3134", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "2번 ㄱ"}
+{"id": "hn-3135", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "3번이요"}
+{"id": "hn-3136", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "투표 2"}
+{"id": "hn-3137", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저는 1"}
+{"id": "hn-3138", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "1"}
+{"id": "hn-3139", "label": "allow", "category": "short_normal", "family": "number-vote", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "2"}
+{"id": "hn-3140", "label": "allow", "category": "short_normal", "family": "question-what", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "뭐야"}
+{"id": "hn-3141", "label": "allow", "category": "short_normal", "family": "question-what", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "머임"}
+{"id": "hn-3142", "label": "allow", "category": "short_normal", "family": "question-what", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이게 뭐야"}
+{"id": "hn-3143", "label": "allow", "category": "short_normal", "family": "question-what", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "뭐지?"}
+{"id": "hn-3144", "label": "allow", "category": "short_normal", "family": "question-what", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "왜요?"}
+{"id": "hn-3145", "label": "allow", "category": "short_normal", "family": "question-what", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "무슨 일?"}
+{"id": "hn-3146", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 뭐해요?"}
+{"id": "hn-3147", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 컨텐츠?"}
+{"id": "hn-3148", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "합방 언제?"}
+{"id": "hn-3149", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 겜 뭐?"}
+{"id": "hn-3150", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저녁 드셨어요?"}
+{"id": "hn-3151", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 기분 어때요?"}
+{"id": "hn-3152", "label": "allow", "category": "short_normal", "family": "question-streamer-plan", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 몇 판 해요?"}
+{"id": "hn-3153", "label": "allow", "category": "short_normal", "family": "waiting-missed", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "언제 켜나 했다"}
+{"id": "hn-3154", "label": "allow", "category": "short_normal", "family": "waiting-missed", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "대기중"}
+{"id": "hn-3155", "label": "allow", "category": "short_normal", "family": "waiting-missed", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "기다리는중"}
+{"id": "hn-3156", "label": "allow", "category": "short_normal", "family": "waiting-missed", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "보고싶었어요"}
+{"id": "hn-3157", "label": "allow", "category": "short_normal", "family": "waiting-missed", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오랜만이에요"}
+{"id": "hn-3158", "label": "allow", "category": "short_normal", "family": "waiting-missed", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오랜만!"}
+{"id": "hn-3159", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "팔로우 했어요"}
+{"id": "hn-3160", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "구독 완료"}
+{"id": "hn-3161", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "알림 설정함"}
+{"id": "hn-3162", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "첫 방문이에요"}
+{"id": "hn-3163", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "처음 왔어요"}
+{"id": "hn-3164", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "뉴비예요"}
+{"id": "hn-3165", "label": "allow", "category": "short_normal", "family": "newcomer-follow", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "정주행 중"}
+{"id": "hn-3166", "label": "allow", "category": "short_normal", "family": "donation-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "후원 ㄷㄷ"}
+{"id": "hn-3167", "label": "allow", "category": "short_normal", "family": "donation-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "치즈 감사"}
+{"id": "hn-3168", "label": "allow", "category": "short_normal", "family": "donation-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "후원 감사요"}
+{"id": "hn-3169", "label": "allow", "category": "short_normal", "family": "donation-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "와 큰 후원"}
+{"id": "hn-3170", "label": "allow", "category": "short_normal", "family": "donation-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "도네 축하"}
+{"id": "hn-3171", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "클립 땄다"}
+{"id": "hn-3172", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "클립각"}
+{"id": "hn-3173", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 클립 ㄱ"}
+{"id": "hn-3174", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "하이라이트각"}
+{"id": "hn-3175", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다시보기 있어요?"}
+{"id": "hn-3176", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "캡처했다"}
+{"id": "hn-3177", "label": "allow", "category": "short_normal", "family": "clip-highlight", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이거 클립 ㄱ"}
+{"id": "hn-3178", "label": "allow", "category": "short_normal", "family": "comfort", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "괜찮아 괜찮아"}
+{"id": "hn-3179", "label": "allow", "category": "short_normal", "family": "comfort", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음에 잘하면 돼"}
+{"id": "hn-3180", "label": "allow", "category": "short_normal", "family": "comfort", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "원래 어려움"}
+{"id": "hn-3181", "label": "allow", "category": "short_normal", "family": "comfort", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "천천히 하세요"}
+{"id": "hn-3182", "label": "allow", "category": "short_normal", "family": "comfort", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "진정해요"}
+{"id": "hn-3183", "label": "allow", "category": "short_normal", "family": "comfort", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "침착하게"}
+{"id": "hn-3184", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 춥네요"}
+{"id": "hn-3185", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "비 온다"}
+{"id": "hn-3186", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "날씨 좋다"}
+{"id": "hn-3187", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "덥다"}
+{"id": "hn-3188", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "눈 와요"}
+{"id": "hn-3189", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "월요일 싫다"}
+{"id": "hn-3190", "label": "allow", "category": "short_normal", "family": "weather-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말이다"}
+{"id": "hn-3191", "label": "allow", "category": "short_normal", "family": "work-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "퇴근!"}
+{"id": "hn-3192", "label": "allow", "category": "short_normal", "family": "work-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "출근 중"}
+{"id": "hn-3193", "label": "allow", "category": "short_normal", "family": "work-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "일하면서 봐요"}
+{"id": "hn-3194", "label": "allow", "category": "short_normal", "family": "work-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "점심시간"}
+{"id": "hn-3195", "label": "allow", "category": "short_normal", "family": "work-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "야근 중"}
+{"id": "hn-3196", "label": "allow", "category": "short_normal", "family": "work-daily", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "휴가다"}
+{"id": "hn-3197", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "긴장된다"}
+{"id": "hn-3198", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "떨린다"}
+{"id": "hn-3199", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "두근두근"}
+{"id": "hn-3200", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "손에 땀"}
+{"id": "hn-3201", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "조마조마"}
+{"id": "hn-3202", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "제발"}
+{"id": "hn-3203", "label": "allow", "category": "short_normal", "family": "tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "제발 제발"}
+{"id": "hn-3204", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "벌써 끝?"}
+{"id": "hn-3205", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방종 아쉽다"}
+{"id": "hn-3206", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "더 해줘요"}
+{"id": "hn-3207", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "10분만 더"}
+{"id": "hn-3208", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "끝나지마요"}
+{"id": "hn-3209", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "내일 또 와요"}
+{"id": "hn-3210", "label": "allow", "category": "short_normal", "family": "stream-ending", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방종 ㄴㄴ"}
+{"id": "hn-3211", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "텐션 업"}
+{"id": "hn-3212", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "분위기 좋다"}
+{"id": "hn-3213", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "신난다"}
+{"id": "hn-3214", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "축제다"}
+{"id": "hn-3215", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "와 신남"}
+{"id": "hn-3216", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "흥 폭발"}
+{"id": "hn-3217", "label": "allow", "category": "short_normal", "family": "hype-mood", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "텐션 최고"}
+{"id": "hn-3218", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오 꿀팁"}
+{"id": "hn-3219", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "꿀팁 감사"}
+{"id": "hn-3220", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배워갑니다"}
+{"id": "hn-3221", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "알아갑니다"}
+{"id": "hn-3222", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오 그렇구나"}
+{"id": "hn-3223", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아하"}
+{"id": "hn-3224", "label": "allow", "category": "short_normal", "family": "learning-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아~ 그렇군요"}
+{"id": "hn-3225", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅 빠르다"}
+{"id": "hn-3226", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "사람 많네"}
+{"id": "hn-3227", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "시청자 많다"}
+{"id": "hn-3228", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅창 조용"}
+{"id": "hn-3229", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다들 하이"}
+{"id": "hn-3230", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "여러분 ㅎㅇ"}
+{"id": "hn-3231", "label": "allow", "category": "short_normal", "family": "chat-meta", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅 올라간다"}
+{"id": "hn-3232", "label": "allow", "category": "short_normal", "family": "loading-wait", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "로딩중"}
+{"id": "hn-3233", "label": "allow", "category": "short_normal", "family": "loading-wait", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "로딩 길다"}
+{"id": "hn-3234", "label": "allow", "category": "short_normal", "family": "loading-wait", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "매칭 오래 걸리네"}
+{"id": "hn-3235", "label": "allow", "category": "short_normal", "family": "loading-wait", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "대기열 길다"}
+{"id": "hn-3236", "label": "allow", "category": "short_normal", "family": "loading-wait", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "매칭 잡혔다"}
+{"id": "hn-3237", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "무서워"}
+{"id": "hn-3238", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "깜놀"}
+{"id": "hn-3239", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "놀랐다"}
+{"id": "hn-3240", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "으악"}
+{"id": "hn-3241", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "꺄악"}
+{"id": "hn-3242", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소름"}
+{"id": "hn-3243", "label": "allow", "category": "short_normal", "family": "horror-scared", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소름 돋았다"}
+{"id": "hn-3244", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "정답!"}
+{"id": "hn-3245", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "맞췄다"}
+{"id": "hn-3246", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "정답 3번"}
+{"id": "hn-3247", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오답 ㅠ"}
+{"id": "hn-3248", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "땡"}
+{"id": "hn-3249", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "정답은 B"}
+{"id": "hn-3250", "label": "allow", "category": "short_normal", "family": "quiz-answer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "힌트 주세요"}
+{"id": "hn-3251", "label": "allow", "category": "short_normal", "family": "holiday-greeting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "메리 크리스마스"}
+{"id": "hn-3252", "label": "allow", "category": "short_normal", "family": "holiday-greeting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "해피 뉴이어"}
+{"id": "hn-3253", "label": "allow", "category": "short_normal", "family": "holiday-greeting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새해 복 많이"}
+{"id": "hn-3254", "label": "allow", "category": "short_normal", "family": "holiday-greeting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "추석 잘 보내요"}
+{"id": "hn-3255", "label": "allow", "category": "short_normal", "family": "holiday-greeting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "해피 할로윈"}
+{"id": "hn-3256", "label": "allow", "category": "short_normal", "family": "holiday-greeting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "즐거운 연휴"}
+{"id": "hn-3257", "label": "allow", "category": "short_normal", "family": "compliment-skill", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "목소리 좋다"}
+{"id": "hn-3258", "label": "allow", "category": "short_normal", "family": "compliment-skill", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "말 잘하신다"}
+{"id": "hn-3259", "label": "allow", "category": "short_normal", "family": "compliment-skill", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "설명 잘해요"}
+{"id": "hn-3260", "label": "allow", "category": "short_normal", "family": "compliment-skill", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "진행 좋다"}
+{"id": "hn-3261", "label": "allow", "category": "short_normal", "family": "compliment-skill", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "재능 있네"}
+{"id": "hn-3262", "label": "allow", "category": "short_normal", "family": "compliment-skill", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "실력 늘었다"}
+{"id": "hn-3263", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "lol"}
+{"id": "hn-3264", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "brb"}
+{"id": "hn-3265", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "np"}
+{"id": "hn-3266", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "cool"}
+{"id": "hn-3267", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "gj"}
+{"id": "hn-3268", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "yay"}
+{"id": "hn-3269", "label": "allow", "category": "short_normal", "family": "english-casual", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "let's gooo"}
+{"id": "hn-3270", "label": "allow", "category": "long_normal", "family": "schedule-next-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "내일도 방송 하시나요? 요일별 공지는 어디서 확인하면 되는지 알려주세요"}
+{"id": "hn-3271", "label": "allow", "category": "long_normal", "family": "schedule-next-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 방송은 언제쯤 켜실 예정이에요??"}
+{"id": "hn-3272", "label": "allow", "category": "long_normal", "family": "schedule-next-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말방송 시간 바뀐다던데 몇시부터인가요"}
+{"id": "hn-3273", "label": "allow", "category": "long_normal", "family": "schedule-next-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이번주 휴방일 있나요 미리 알아야 약속을 그날로 잡을 수 있어서요 ㅎㅎ"}
+{"id": "hn-3274", "label": "allow", "category": "long_normal", "family": "schedule-next-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "공지 탭에 이번 달 일정 올라온 거 맞죠?"}
+{"id": "hn-3275", "label": "allow", "category": "long_normal", "family": "schedule-end-time", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘은 몇 시까지 하실 생각이세요~"}
+{"id": "hn-3276", "label": "allow", "category": "long_normal", "family": "schedule-end-time", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "엔딩 보고 끄시는 거예요 아니면 중간에 끊어요?"}
+{"id": "hn-3277", "label": "allow", "category": "long_normal", "family": "schedule-end-time", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "벌써 마무리하시는 거 아니죠 ㅠㅠ 조금만 더"}
+{"id": "hn-3278", "label": "allow", "category": "long_normal", "family": "schedule-end-time", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 장방 각인가요 ㅋㅋ 그럼 편의점 가서 간식이랑 음료 넉넉하게 챙겨올게요"}
+{"id": "hn-3279", "label": "allow", "category": "long_normal", "family": "schedule-end-time", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "끝나기 전에 잡담 타임 조금만 해주세용"}
+{"id": "hn-3280", "label": "allow", "category": "long_normal", "family": "game-title-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지금 하시는 게임 이름이 뭐예요? 그래픽 예쁘네"}
+{"id": "hn-3281", "label": "allow", "category": "long_normal", "family": "game-title-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이거 인디게임인가요 처음 보는 분위기다"}
+{"id": "hn-3282", "label": "allow", "category": "long_normal", "family": "game-title-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 게임 모바일로도 나와있나요?"}
+{"id": "hn-3283", "label": "allow", "category": "long_normal", "family": "game-title-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "혹시 전작 안 해도 스토리 이해 되나요? 시리즈 처음이라 어디서부터 봐야 할지 모르겠어요"}
+{"id": "hn-3284", "label": "allow", "category": "long_normal", "family": "game-title-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 들어왔는데 무슨 장르예요 로그라이크?"}
+{"id": "hn-3285", "label": "allow", "category": "long_normal", "family": "game-settings-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마우스 감도 얼마로 쓰세요? 저랑 비슷한 듯"}
+{"id": "hn-3286", "label": "allow", "category": "long_normal", "family": "game-settings-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그래픽 옵션 최상으로 돌리시는 거예요?"}
+{"id": "hn-3287", "label": "allow", "category": "long_normal", "family": "game-settings-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "키설정 기본이에요 아니면 바꾸신거예요"}
+{"id": "hn-3288", "label": "allow", "category": "long_normal", "family": "game-settings-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자막 크기 조금만 키워주실 수 있나요 잘 안 보여요"}
+{"id": "hn-3289", "label": "allow", "category": "long_normal", "family": "game-settings-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "시야각 넓히고 화면 흔들림 끄면 멀미 훨씬 덜 나던데 옵션에서 한번 바꿔보세요"}
+{"id": "hn-3290", "label": "allow", "category": "long_normal", "family": "music-bgm-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지금 나오는 브금 제목 아시는 분 계세요?"}
+{"id": "hn-3291", "label": "allow", "category": "long_normal", "family": "music-bgm-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노래 선곡 좋네요 플레이리스트 공유 되나요"}
+{"id": "hn-3292", "label": "allow", "category": "long_normal", "family": "music-bgm-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 게임 OST 진짜 좋다 방송 끝나면 음원 사이트에서 따로 찾아 들어봐야지"}
+{"id": "hn-3293", "label": "allow", "category": "long_normal", "family": "music-bgm-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배경음악이 살짝 커서 목소리가 묻혀요"}
+{"id": "hn-3294", "label": "allow", "category": "long_normal", "family": "music-bgm-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "로비 음악 중독성 있다 ㅋㅋ 계속 흥얼거리게 됨"}
+{"id": "hn-3295", "label": "allow", "category": "long_normal", "family": "story-plot-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "헐 저 사람이 배신자였어?? 전혀 몰랐다"}
+{"id": "hn-3296", "label": "allow", "category": "long_normal", "family": "story-plot-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아 이 장면 너무 슬프다 ㅠㅠㅠ 눈물 나요"}
+{"id": "hn-3297", "label": "allow", "category": "long_normal", "family": "story-plot-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "와 반전 대박 복선이 처음부터 깔려 있었네 첫 챕터 대사 다시 생각해보니까 소름이다"}
+{"id": "hn-3298", "label": "allow", "category": "long_normal", "family": "story-plot-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "편지 내용 다시 읽어주세요 놓쳤어요"}
+{"id": "hn-3299", "label": "allow", "category": "long_normal", "family": "story-plot-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주인공 드디어 가족 만났네 감동이다 진짜"}
+{"id": "hn-3300", "label": "allow", "category": "long_normal", "family": "story-character-theory", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "제 생각엔 저 할아버지가 흑막 같아요 ㅋㅋ"}
+{"id": "hn-3301", "label": "allow", "category": "long_normal", "family": "story-character-theory", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아까 그 상인 대사 수상했는데 다시 나올 듯"}
+{"id": "hn-3302", "label": "allow", "category": "long_normal", "family": "story-character-theory", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "동료 중에 한 명 떠날 것 같은 느낌 쎄하다"}
+{"id": "hn-3303", "label": "allow", "category": "long_normal", "family": "story-character-theory", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 목걸이가 열쇠 아닐까요 컷신마다 계속 클로즈업으로 강조하던데 뭔가 있는 듯"}
+{"id": "hn-3304", "label": "allow", "category": "long_normal", "family": "story-character-theory", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "조연 캐릭터가 주인공보다 매력 있는 듯 ㅎㅎ"}
+{"id": "hn-3305", "label": "allow", "category": "long_normal", "family": "backseat-puzzle-hint", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "왼쪽 벽에 레버 있는 것 같아요 한번 보세요"}
+{"id": "hn-3306", "label": "allow", "category": "long_normal", "family": "backseat-puzzle-hint", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아 그 상자 밀어서 발판 만드는 거 아닐까요"}
+{"id": "hn-3307", "label": "allow", "category": "long_normal", "family": "backseat-puzzle-hint", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "힌트 원하시면 말씀하세요 정답은 말 안 하고 방향만 살짝 알려드릴게요 스포는 안 함"}
+{"id": "hn-3308", "label": "allow", "category": "long_normal", "family": "backseat-puzzle-hint", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그림 순서대로 버튼 누르는 거 같은데용"}
+{"id": "hn-3309", "label": "allow", "category": "long_normal", "family": "backseat-puzzle-hint", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아까 지나친 방에 열쇠 있었던 것 같아요"}
+{"id": "hn-3310", "label": "allow", "category": "long_normal", "family": "backseat-item-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "회복 물약 아껴두세요 다음 구간 길어요"}
+{"id": "hn-3311", "label": "allow", "category": "long_normal", "family": "backseat-item-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "상점에서 가방 확장 먼저 사는 거 추천해요 초반에 그거 없으면 재료 들고 다니기 힘들어요"}
+{"id": "hn-3312", "label": "allow", "category": "long_normal", "family": "backseat-item-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 장비 강화하면 나중에 엄청 편해집니다"}
+{"id": "hn-3313", "label": "allow", "category": "long_normal", "family": "backseat-item-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "인벤 꽉 찼어요 안 쓰는 재료 좀 파세요 ㅋㅋ"}
+{"id": "hn-3314", "label": "allow", "category": "long_normal", "family": "backseat-item-tip", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저장 한번 하고 가시는게 좋을것같아요"}
+{"id": "hn-3315", "label": "allow", "category": "long_normal", "family": "backseat-route-suggestion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오른쪽 길이 지름길이에요 사다리 타고 올라가면 됨"}
+{"id": "hn-3316", "label": "allow", "category": "long_normal", "family": "backseat-route-suggestion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지도 열어보시면 아직 안 간 곳 표시돼 있어요"}
+{"id": "hn-3317", "label": "allow", "category": "long_normal", "family": "backseat-route-suggestion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다리 건너기 전에 마을 먼저 들르세요 거기 상인한테 지도 사야 다음 지역이 편해요"}
+{"id": "hn-3318", "label": "allow", "category": "long_normal", "family": "backseat-route-suggestion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 동굴은 나중에 오는 곳이라 지금은 패스해도 돼요"}
+{"id": "hn-3319", "label": "allow", "category": "long_normal", "family": "backseat-route-suggestion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "북쪽 탑 먼저 가면 이동 포인트 열려요 ㄱㄱ"}
+{"id": "hn-3320", "label": "allow", "category": "long_normal", "family": "food-dinner-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저녁 뭐 드셨어요? 저는 냉장고 털어서 김치찌개 끓였는데 생각보다 맛있게 됐어요"}
+{"id": "hn-3321", "label": "allow", "category": "long_normal", "family": "food-dinner-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방송 보면서 라면 먹는 중 ㅎㅎ 행복하다"}
+{"id": "hn-3322", "label": "allow", "category": "long_normal", "family": "food-dinner-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 점심 회사 근처 국밥집 갔는데 맛있었음"}
+{"id": "hn-3323", "label": "allow", "category": "long_normal", "family": "food-dinner-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다들 야식 뭐 드세요? 치킨 시킬까 고민 중"}
+{"id": "hn-3324", "label": "allow", "category": "long_normal", "family": "food-dinner-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "떡볶이 먹으면서 보는 중인데 꿀조합이네요"}
+{"id": "hn-3325", "label": "allow", "category": "long_normal", "family": "food-recommendation", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마라탕 처음 드시면 단계 낮게 시키세요"}
+{"id": "hn-3326", "label": "allow", "category": "long_normal", "family": "food-recommendation", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "피자는 역시 고구마 피자가 최고 아닌가요"}
+{"id": "hn-3327", "label": "allow", "category": "long_normal", "family": "food-recommendation", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "요즘 편의점 신상 샌드위치 맛있더라구요 방송 보면서 간단하게 먹기 딱 좋아요"}
+{"id": "hn-3328", "label": "allow", "category": "long_normal", "family": "food-recommendation", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배달 오기 전에 한 판 더 하시죠 ㅋㅋ"}
+{"id": "hn-3329", "label": "allow", "category": "long_normal", "family": "food-recommendation", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "탕수육 찍먹 부먹 투표 한번 해주세요 ㅋㅋㅋ"}
+{"id": "hn-3330", "label": "allow", "category": "long_normal", "family": "weather-rain-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "여기 지금 비 엄청 와요 다들 우산 챙기셨나요"}
+{"id": "hn-3331", "label": "allow", "category": "long_normal", "family": "weather-rain-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "빗소리 들으면서 방송 보니까 분위기 좋다"}
+{"id": "hn-3332", "label": "allow", "category": "long_normal", "family": "weather-rain-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "퇴근길에 소나기 맞아서 홀딱 젖었어요 ㅠ"}
+{"id": "hn-3333", "label": "allow", "category": "long_normal", "family": "weather-rain-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "장마 언제 끝나나요 일주일째 빨래가 안 말라서 제습기를 하루 종일 돌리고 있어요"}
+{"id": "hn-3334", "label": "allow", "category": "long_normal", "family": "weather-rain-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "창문 열어놨더니 천둥 쳐서 깜짝 놀람"}
+{"id": "hn-3335", "label": "allow", "category": "long_normal", "family": "weather-cold-season", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 갑자기 추워졌네요 감기 조심하세요~"}
+{"id": "hn-3336", "label": "allow", "category": "long_normal", "family": "weather-cold-season", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "벌써 패딩 꺼냈어요 아침에 입김 나더라구요"}
+{"id": "hn-3337", "label": "allow", "category": "long_normal", "family": "weather-cold-season", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "난방 틀고 이불 덮고 방송 보는 게 최고"}
+{"id": "hn-3338", "label": "allow", "category": "long_normal", "family": "weather-cold-season", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 가을 하늘 너무 예뻐서 점심 먹고 공원 한 바퀴 산책하고 왔어요"}
+{"id": "hn-3339", "label": "allow", "category": "long_normal", "family": "weather-cold-season", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "환절기라 목 칼칼한데 다들 따뜻한 차 드세요"}
+{"id": "hn-3340", "label": "allow", "category": "long_normal", "family": "work-commute-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "출근길 지하철에서 다시보기 보는 중이에요"}
+{"id": "hn-3341", "label": "allow", "category": "long_normal", "family": "work-commute-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "버스에서 소리 없이 보는 중인데 자동 자막 기능 생기면 출퇴근길에 훨씬 편할 듯"}
+{"id": "hn-3342", "label": "allow", "category": "long_normal", "family": "work-commute-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 재택이라 일하면서 틀어놨어요 ㅎㅎ"}
+{"id": "hn-3343", "label": "allow", "category": "long_normal", "family": "work-commute-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "퇴근하고 바로 들어왔어요 하루 마무리 방송"}
+{"id": "hn-3344", "label": "allow", "category": "long_normal", "family": "work-commute-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "월요일 아침은 언제나 길게 느껴지네요"}
+{"id": "hn-3345", "label": "allow", "category": "long_normal", "family": "work-busy-day-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "야근 끝나고 집 오니까 방송 켜져 있어서 좋다"}
+{"id": "hn-3346", "label": "allow", "category": "long_normal", "family": "work-busy-day-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 회의만 다섯 개 했어요 머리가 띵하다"}
+{"id": "hn-3347", "label": "allow", "category": "long_normal", "family": "work-busy-day-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "내일 오전에 발표 있어서 자료 만들면서 틀어놨어요 목소리 들으니까 덜 긴장되네요"}
+{"id": "hn-3348", "label": "allow", "category": "long_normal", "family": "work-busy-day-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "월말이라 정산하느라 정신없었네요 ㅠㅠ"}
+{"id": "hn-3349", "label": "allow", "category": "long_normal", "family": "work-busy-day-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "드디어 금요일 퇴근!! 주말 동안 푹 쉬어야지"}
+{"id": "hn-3350", "label": "allow", "category": "long_normal", "family": "university-study-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "기말 끝나서 오랜만에 실시간으로 봐요 ㅎㅎ"}
+{"id": "hn-3351", "label": "allow", "category": "long_normal", "family": "university-study-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "조별과제 회의하다 왔는데 기운이 하나도 없다"}
+{"id": "hn-3352", "label": "allow", "category": "long_normal", "family": "university-study-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "도서관에서 이어폰 끼고 몰래 보는 중"}
+{"id": "hn-3353", "label": "allow", "category": "long_normal", "family": "university-study-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "졸업 논문 쓰다가 머리 식히러 왔어요 한 시간만 보고 다시 도서관 자리로 돌아갈게요"}
+{"id": "hn-3354", "label": "allow", "category": "long_normal", "family": "university-study-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자격증 시험 합격했어요!! 축하해주세요"}
+{"id": "hn-3355", "label": "allow", "category": "long_normal", "family": "greeting-other-viewers", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다들 안녕하세요 오늘도 채팅창 따뜻하네요"}
+{"id": "hn-3356", "label": "allow", "category": "long_normal", "family": "greeting-other-viewers", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "어 저분 지난번에도 계셨던 분 맞죠 반가워요"}
+{"id": "hn-3357", "label": "allow", "category": "long_normal", "family": "greeting-other-viewers", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오랜만이에요 여러분 다들 잘 지내셨죠?"}
+{"id": "hn-3358", "label": "allow", "category": "long_normal", "family": "greeting-other-viewers", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새로 오신 분들 환영해요~ 여기 다들 착하셔서 편하게 질문하고 노셔도 돼요"}
+{"id": "hn-3359", "label": "allow", "category": "long_normal", "family": "greeting-other-viewers", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "ㅎㅇㅎㅇ 오늘 채팅 분위기 좋다 다들 반가워요"}
+{"id": "hn-3360", "label": "allow", "category": "long_normal", "family": "greeting-arrival-late", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "늦었다 ㅠㅠ 지금 어디까지 진행됐어요?"}
+{"id": "hn-3361", "label": "allow", "category": "long_normal", "family": "greeting-arrival-late", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 왔어요 혹시 오프닝에 무슨 얘기 하셨는지 간단하게 알려주실 분 계신가요"}
+{"id": "hn-3362", "label": "allow", "category": "long_normal", "family": "greeting-arrival-late", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "앗 벌써 두 시간째네 처음부터 볼 걸"}
+{"id": "hn-3363", "label": "allow", "category": "long_normal", "family": "greeting-arrival-late", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "출석 체크하러 왔습니다 늦어서 죄송해요"}
+{"id": "hn-3364", "label": "allow", "category": "long_normal", "family": "greeting-arrival-late", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지각했어요 아까 퀴즈 하셨다던데 결과 어땠어요"}
+{"id": "hn-3365", "label": "allow", "category": "long_normal", "family": "greeting-leaving", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저 먼저 자러 갈게요 다들 좋은 밤 되세요"}
+{"id": "hn-3366", "label": "allow", "category": "long_normal", "family": "greeting-leaving", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이제 출근 준비해야 돼서 나갑니다 즐방하세요"}
+{"id": "hn-3367", "label": "allow", "category": "long_normal", "family": "greeting-leaving", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "밥 먹고 다시 올게요 그 전에 엔딩 보시면 안 돼요"}
+{"id": "hn-3368", "label": "allow", "category": "long_normal", "family": "greeting-leaving", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "내일 아침 일찍 일어나야 해서 오늘은 여기까지 볼게요 남은 건 다시보기로 챙겨볼게요"}
+{"id": "hn-3369", "label": "allow", "category": "long_normal", "family": "greeting-leaving", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "잠깐 씻고 올게요 자리 맡아둘게요 ㅋㅋ"}
+{"id": "hn-3370", "label": "allow", "category": "long_normal", "family": "donation-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "후원해주신 분 감사합니다 덕분에 오늘 목표 미션 성공했네요 다 같이 박수 쳐요"}
+{"id": "hn-3371", "label": "allow", "category": "long_normal", "family": "donation-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "와 큰 후원 감사해요 방송 분위기 확 살았다"}
+{"id": "hn-3372", "label": "allow", "category": "long_normal", "family": "donation-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "후원 메시지 너무 귀엽다 ㅋㅋㅋ 센스 굿"}
+{"id": "hn-3373", "label": "allow", "category": "long_normal", "family": "donation-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 후원하신 분 닉네임 센스 무엇 ㅋㅋ"}
+{"id": "hn-3374", "label": "allow", "category": "long_normal", "family": "donation-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "후원 읽어주실 때 목소리 연기 해주세요 ㅎㅎ"}
+{"id": "hn-3375", "label": "allow", "category": "long_normal", "family": "subscription-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "구독 일 년 됐어요 앞으로도 오래 볼게요"}
+{"id": "hn-3376", "label": "allow", "category": "long_normal", "family": "subscription-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "구독 선물 받으신 분들 축하드려요~"}
+{"id": "hn-3377", "label": "allow", "category": "long_normal", "family": "subscription-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "첫 구독했어요! 배지 너무 귀엽네요"}
+{"id": "hn-3378", "label": "allow", "category": "long_normal", "family": "subscription-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "구독 알림 소리 바뀌었네요 새로 만드신 거예요? 전보다 훨씬 경쾌해서 좋아요"}
+{"id": "hn-3379", "label": "allow", "category": "long_normal", "family": "subscription-thanks", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "구독 연장했어요 이번 달도 잘 부탁드립니다"}
+{"id": "hn-3380", "label": "allow", "category": "long_normal", "family": "poll-choice-numbered", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 게임 1번 공포게임 2번 힐링게임 중에 뭐 할지 채팅으로 투표해주세요"}
+{"id": "hn-3381", "label": "allow", "category": "long_normal", "family": "poll-choice-numbered", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 맵 1번 사막 2번 설원 투표 갑시다"}
+{"id": "hn-3382", "label": "allow", "category": "long_normal", "family": "poll-choice-numbered", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "1번 하드모드 2번 노멀 투표 올려주세요"}
+{"id": "hn-3383", "label": "allow", "category": "long_normal", "family": "poll-choice-numbered", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "캐릭터 이름 후보 1번 2번 다 좋은데 고민되네"}
+{"id": "hn-3384", "label": "allow", "category": "long_normal", "family": "poll-choice-numbered", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "엔딩 루트도 투표로 정하면 재밌을 것 같아요"}
+{"id": "hn-3385", "label": "allow", "category": "long_normal", "family": "poll-vote-response", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저는 2번이요 설원 브금이 좋아서 ㅎㅎ"}
+{"id": "hn-3386", "label": "allow", "category": "long_normal", "family": "poll-vote-response", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "1번에 한 표 던집니다 오랜만에 무서운 거 하면서 놀라는 리액션 보고 싶어요 ㅋㅋ"}
+{"id": "hn-3387", "label": "allow", "category": "long_normal", "family": "poll-vote-response", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "투표 결과 박빙이네요 ㅋㅋ 손에 땀 난다"}
+{"id": "hn-3388", "label": "allow", "category": "long_normal", "family": "poll-vote-response", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "투표 벌써 끝났어요? 아직 못 눌렀는데"}
+{"id": "hn-3389", "label": "allow", "category": "long_normal", "family": "poll-vote-response", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "2번 몰표 나왔네 ㅋㅋㅋ 다들 마음이 같구나"}
+{"id": "hn-3390", "label": "allow", "category": "long_normal", "family": "meme-chat-wave", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅창 파도타기 한번 해봐요 ~~~~~"}
+{"id": "hn-3391", "label": "allow", "category": "long_normal", "family": "meme-chat-wave", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자 다같이 박수 짝짝짝 👏👏"}
+{"id": "hn-3392", "label": "allow", "category": "long_normal", "family": "meme-chat-wave", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다들 응원 이모티콘 한 번씩 보내주세요 이번 판은 채팅 기운으로 깨봅시다"}
+{"id": "hn-3393", "label": "allow", "category": "long_normal", "family": "meme-chat-wave", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅창 하트로 물들여봅시다 ❤️❤️"}
+{"id": "hn-3394", "label": "allow", "category": "long_normal", "family": "meme-chat-wave", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 판 이기면 다 같이 축하 채팅 치기"}
+{"id": "hn-3395", "label": "allow", "category": "long_normal", "family": "meme-reaction-catchphrase", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이거 완전 국룰 아닌가요 ㅋㅋㅋ"}
+{"id": "hn-3396", "label": "allow", "category": "long_normal", "family": "meme-reaction-catchphrase", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘의 명장면 탄생 각이다 ㅋㅋ"}
+{"id": "hn-3397", "label": "allow", "category": "long_normal", "family": "meme-reaction-catchphrase", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 장면 박제해야 된다 ㄹㅇ 레전드"}
+{"id": "hn-3398", "label": "allow", "category": "long_normal", "family": "meme-reaction-catchphrase", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 그거 의도한 거죠? 안 믿기는데 ㅋㅋ"}
+{"id": "hn-3399", "label": "allow", "category": "long_normal", "family": "meme-reaction-catchphrase", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "역시 믿고 보는 방송 오늘도 레전드 갱신"}
+{"id": "hn-3400", "label": "allow", "category": "long_normal", "family": "compliment-drawing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그림 실력 진짜 늘었다 채색 색감 너무 예뻐요"}
+{"id": "hn-3401", "label": "allow", "category": "long_normal", "family": "compliment-drawing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "선 따는 거 보고만 있어도 마음이 편해지네요"}
+{"id": "hn-3402", "label": "allow", "category": "long_normal", "family": "compliment-drawing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배경 디테일 장난 아니다 나뭇잎 하나하나 다 그리신 거예요? 몇 시간 걸리셨어요"}
+{"id": "hn-3403", "label": "allow", "category": "long_normal", "family": "compliment-drawing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이번 일러 캐릭터 표정 너무 생생해요"}
+{"id": "hn-3404", "label": "allow", "category": "long_normal", "family": "compliment-drawing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "브러시 뭐 쓰세요? 질감이 수채화 같아요"}
+{"id": "hn-3405", "label": "allow", "category": "long_normal", "family": "compliment-singing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "고음 너무 시원하게 올라가네요 소름 돋았어요"}
+{"id": "hn-3406", "label": "allow", "category": "long_normal", "family": "compliment-singing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노래 한 곡만 더 불러주세요 ㅠㅠ 힐링된다"}
+{"id": "hn-3407", "label": "allow", "category": "long_normal", "family": "compliment-singing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "음색이 원곡이랑 또 다른 매력 있네요 이 노래는 이렇게 잔잔하게 부르는 버전이 더 좋다"}
+{"id": "hn-3408", "label": "allow", "category": "long_normal", "family": "compliment-singing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "라이브인데 음정 하나도 안 흔들리네 대단해요"}
+{"id": "hn-3409", "label": "allow", "category": "long_normal", "family": "compliment-singing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "발라드 부르실 때 목소리 진짜 따뜻해요"}
+{"id": "hn-3410", "label": "allow", "category": "long_normal", "family": "compliment-cooking", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "계란말이 모양 완벽하다 비결이 뭐예요?"}
+{"id": "hn-3411", "label": "allow", "category": "long_normal", "family": "compliment-cooking", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "칼질 소리 ASMR 같아요 듣기 좋네"}
+{"id": "hn-3412", "label": "allow", "category": "long_normal", "family": "compliment-cooking", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "레시피 메모해놨어요 이번 주말에 따라 해보고 성공하면 후기 남길게요 ㅎㅎ"}
+{"id": "hn-3413", "label": "allow", "category": "long_normal", "family": "compliment-cooking", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "플레이팅 식당 같아요 사진 찍어도 되겠다"}
+{"id": "hn-3414", "label": "allow", "category": "long_normal", "family": "compliment-cooking", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "간장 양념 냄새가 화면 너머로 나는 것 같음 ㅋㅋ"}
+{"id": "hn-3415", "label": "allow", "category": "long_normal", "family": "compliment-overlay-design", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방송 화면 레이아웃 바뀌었네요 채팅창이랑 게임 화면이 안 겹쳐서 훨씬 깔끔해요"}
+{"id": "hn-3416", "label": "allow", "category": "long_normal", "family": "compliment-overlay-design", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새 오버레이 색감이 방송 분위기랑 잘 맞아요"}
+{"id": "hn-3417", "label": "allow", "category": "long_normal", "family": "compliment-overlay-design", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "대기 화면 일러스트 너무 귀여워요 ^^"}
+{"id": "hn-3418", "label": "allow", "category": "long_normal", "family": "compliment-overlay-design", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "웹캠 프레임 꾸민 거 센스 있다 ㅎㅎ"}
+{"id": "hn-3419", "label": "allow", "category": "long_normal", "family": "compliment-overlay-design", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "알림창 애니메이션 부드러워서 보기 좋네요"}
+{"id": "hn-3420", "label": "allow", "category": "long_normal", "family": "tech-stream-buffering", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "화면 끊겨요 저만 그런가요?"}
+{"id": "hn-3421", "label": "allow", "category": "long_normal", "family": "tech-stream-buffering", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 화면 멈췄다가 다시 나오네요 지금은 괜찮아요"}
+{"id": "hn-3422", "label": "allow", "category": "long_normal", "family": "tech-stream-buffering", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "프레임 드랍 좀 있는 것 같아요 인터넷 확인해보세요"}
+{"id": "hn-3423", "label": "allow", "category": "long_normal", "family": "tech-stream-buffering", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저도 끊겼는데 새로고침 하니까 바로 괜찮아졌어요 화면 멈춘 분들 한번 해보세요"}
+{"id": "hn-3424", "label": "allow", "category": "long_normal", "family": "tech-stream-buffering", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "버퍼링 계속 걸리는데 화질 낮추니까 나아졌어요"}
+{"id": "hn-3425", "label": "allow", "category": "long_normal", "family": "tech-audio-issue", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "게임 소리가 안 들려요 음소거 되신 것 같아요"}
+{"id": "hn-3426", "label": "allow", "category": "long_normal", "family": "tech-audio-issue", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "목소리랑 화면 싱크가 조금 안 맞아요 입 모양보다 소리가 반 박자 늦게 들려요"}
+{"id": "hn-3427", "label": "allow", "category": "long_normal", "family": "tech-audio-issue", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소리가 한쪽 귀에서만 나와요 저만 그래요?"}
+{"id": "hn-3428", "label": "allow", "category": "long_normal", "family": "tech-audio-issue", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지직거리는 잡음이 계속 나요 케이블 확인해보세요"}
+{"id": "hn-3429", "label": "allow", "category": "long_normal", "family": "tech-audio-issue", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "음악이 두 번 겹쳐서 들리는 것 같아요"}
+{"id": "hn-3430", "label": "allow", "category": "long_normal", "family": "tech-mic-volume", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마이크 소리가 너무 작아요 조금만 키워주세요"}
+{"id": "hn-3431", "label": "allow", "category": "long_normal", "family": "tech-mic-volume", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "목소리 갑자기 커져서 깜짝 놀랐어요 ㅋㅋ"}
+{"id": "hn-3432", "label": "allow", "category": "long_normal", "family": "tech-mic-volume", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마이크 꺼져 있어요!! 입만 뻥긋하고 계세요"}
+{"id": "hn-3433", "label": "allow", "category": "long_normal", "family": "tech-mic-volume", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "키보드 소리가 마이크에 많이 들어가요 노이즈 억제 필터 켜면 좀 나아질 것 같아요"}
+{"id": "hn-3434", "label": "allow", "category": "long_normal", "family": "tech-mic-volume", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새 마이크 쓰시나요? 음질 훨씬 좋아졌네요"}
+{"id": "hn-3435", "label": "allow", "category": "long_normal", "family": "tech-video-quality", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 화질 왜 이렇게 좋아요 설정 바꾸셨나요"}
+{"id": "hn-3436", "label": "allow", "category": "long_normal", "family": "tech-video-quality", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "고화질 선택이 안 돼요 원본만 뜨네요"}
+{"id": "hn-3437", "label": "allow", "category": "long_normal", "family": "tech-video-quality", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "화면이 약간 어둡게 보이는데 밝기 조절 되나요"}
+{"id": "hn-3438", "label": "allow", "category": "long_normal", "family": "tech-video-quality", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "캠 화면이 게임 자막을 가려요 오른쪽 위로 살짝만 옮겨주시면 잘 보일 것 같아요"}
+{"id": "hn-3439", "label": "allow", "category": "long_normal", "family": "tech-video-quality", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "모바일 앱에선 화질 옵션이 어디 있어요?"}
+{"id": "hn-3440", "label": "allow", "category": "long_normal", "family": "recommend-game", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이거 끝나면 비슷한 분위기 게임 하나 추천드려요"}
+{"id": "hn-3441", "label": "allow", "category": "long_normal", "family": "recommend-game", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "협동 좋아하시면 둘이서 하는 퍼즐게임 꼭 해보세요 합방 콘텐츠로도 딱이에요"}
+{"id": "hn-3442", "label": "allow", "category": "long_normal", "family": "recommend-game", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "도트 그래픽 좋아하시면 농장 게임 추천해요 힐링됨"}
+{"id": "hn-3443", "label": "allow", "category": "long_normal", "family": "recommend-game", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음엔 탐정 추리게임 해주시면 좋겠어요"}
+{"id": "hn-3444", "label": "allow", "category": "long_normal", "family": "recommend-game", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "공포 잘 맞으시면 잠입 게임도 재밌을 듯"}
+{"id": "hn-3445", "label": "allow", "category": "long_normal", "family": "recommend-song", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 노래로 잔잔한 어쿠스틱 곡 추천해요"}
+{"id": "hn-3446", "label": "allow", "category": "long_normal", "family": "recommend-song", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 가수 다른 노래도 좋아요 겨울 노래 꼭 들어보세요"}
+{"id": "hn-3447", "label": "allow", "category": "long_normal", "family": "recommend-song", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "신청곡 받으시면 시티팝 하나 부탁드려요"}
+{"id": "hn-3448", "label": "allow", "category": "long_normal", "family": "recommend-song", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "비 오는 날엔 재즈 틀어놓고 잡담 방송 해주시면 분위기 최고일 것 같아요"}
+{"id": "hn-3449", "label": "allow", "category": "long_normal", "family": "recommend-song", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "작업할 때 듣는 플레이리스트 따로 있으세요?"}
+{"id": "hn-3450", "label": "allow", "category": "long_normal", "family": "recommend-movie-drama", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "요즘 보는 드라마 있으세요? 추천 받고 싶어요"}
+{"id": "hn-3451", "label": "allow", "category": "long_normal", "family": "recommend-movie-drama", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 영화 저도 봤는데 결말 해석이 사람마다 다르더라구요 같이 얘기해보고 싶어요"}
+{"id": "hn-3452", "label": "allow", "category": "long_normal", "family": "recommend-movie-drama", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "애니 정주행 중인데 이번 분기 뭐가 재밌어요"}
+{"id": "hn-3453", "label": "allow", "category": "long_normal", "family": "recommend-movie-drama", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "같이보기 방송 하면 무슨 영화 할지 궁금하다"}
+{"id": "hn-3454", "label": "allow", "category": "long_normal", "family": "recommend-movie-drama", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말에 볼 만한 다큐 있으면 알려주세요"}
+{"id": "hn-3455", "label": "allow", "category": "long_normal", "family": "game-complaint-difficulty", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 구간 난이도 진짜 너무한 거 아닌가요 ㅋㅋ"}
+{"id": "hn-3456", "label": "allow", "category": "long_normal", "family": "game-complaint-difficulty", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "점프 판정 너무 빡빡하다 이거 나도 못 깼음"}
+{"id": "hn-3457", "label": "allow", "category": "long_normal", "family": "game-complaint-difficulty", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "보스 패턴 너무 빨라요 사람이 피할 수 있는 건가"}
+{"id": "hn-3458", "label": "allow", "category": "long_normal", "family": "game-complaint-difficulty", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "체크포인트가 너무 멀어요 한 번 실수하면 처음부터라니 이건 게임 탓입니다 ㅋㅋ"}
+{"id": "hn-3459", "label": "allow", "category": "long_normal", "family": "game-complaint-difficulty", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "튜토리얼 없이 바로 던져놓는 거 너무하네"}
+{"id": "hn-3460", "label": "allow", "category": "long_normal", "family": "game-complaint-gacha", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "뽑기 확률 너무 짜다 이번에도 꽝이네 ㅠㅠ"}
+{"id": "hn-3461", "label": "allow", "category": "long_normal", "family": "game-complaint-gacha", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "천장까지 가야 하나요 확률 진짜 야박하다"}
+{"id": "hn-3462", "label": "allow", "category": "long_normal", "family": "game-complaint-gacha", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "연차 돌렸는데 하나도 안 나오는 게 말이 되나 ㅋㅋ"}
+{"id": "hn-3463", "label": "allow", "category": "long_normal", "family": "game-complaint-gacha", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "강화 실패 세 번 연속이면 운이 너무 없는 듯"}
+{"id": "hn-3464", "label": "allow", "category": "long_normal", "family": "game-complaint-gacha", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "드랍률 너무 낮아서 파밍이 끝이 없네요 재료 하나 모으는 데 한 시간 걸리는 듯"}
+{"id": "hn-3465", "label": "allow", "category": "long_normal", "family": "game-complaint-bug", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "캐릭터 벽에 끼었다 ㅋㅋㅋ 버그 너무 웃겨"}
+{"id": "hn-3466", "label": "allow", "category": "long_normal", "family": "game-complaint-bug", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "NPC가 하늘로 날아갔어요 물리엔진 고장 ㅋㅋ"}
+{"id": "hn-3467", "label": "allow", "category": "long_normal", "family": "game-complaint-bug", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "퀘스트 마커가 이상한 데 찍혀 있네 패치 필요하다"}
+{"id": "hn-3468", "label": "allow", "category": "long_normal", "family": "game-complaint-bug", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "로딩이 너무 길어요 맵 이동할 때마다 이러면 최적화 패치 좀 해줬으면 좋겠다"}
+{"id": "hn-3469", "label": "allow", "category": "long_normal", "family": "game-complaint-bug", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저장 안 되는 버그 있다던데 수동 저장 꼭 하세요"}
+{"id": "hn-3470", "label": "allow", "category": "long_normal", "family": "pet-appearance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "고양이 등장!! 오늘도 키보드 위에 앉았네 ㅋㅋ"}
+{"id": "hn-3471", "label": "allow", "category": "long_normal", "family": "pet-appearance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "강아지 짖는 소리 들려요 산책 갈 시간 됐다고 알려주는 건가 봐요 ㅋㅋ 귀여워라"}
+{"id": "hn-3472", "label": "allow", "category": "long_normal", "family": "pet-appearance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "냥이 꼬리만 화면에 보이는 거 너무 귀엽다"}
+{"id": "hn-3473", "label": "allow", "category": "long_normal", "family": "pet-appearance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "반려동물 이름 뭐예요? 처음 봐서 궁금해요"}
+{"id": "hn-3474", "label": "allow", "category": "long_normal", "family": "pet-appearance", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "냥이가 마우스 건드려서 방향 바뀐 거 아니에요? ㅋㅋ"}
+{"id": "hn-3475", "label": "allow", "category": "long_normal", "family": "health-reminder", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "물 한 잔 드시고 하세요 목 쉬겠어요"}
+{"id": "hn-3476", "label": "allow", "category": "long_normal", "family": "health-reminder", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "벌써 두 시간 넘었는데 스트레칭 한번 하고 가요 저도 같이 어깨 돌리고 있어요"}
+{"id": "hn-3477", "label": "allow", "category": "long_normal", "family": "health-reminder", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "눈 좀 쉬어주세요 화면 오래 보면 피곤해요"}
+{"id": "hn-3478", "label": "allow", "category": "long_normal", "family": "health-reminder", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "허리 펴세요~ 자세 구부정해지셨어요 ㅎㅎ"}
+{"id": "hn-3479", "label": "allow", "category": "long_normal", "family": "health-reminder", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "밥은 챙겨 드시고 방송하시는 거죠?"}
+{"id": "hn-3480", "label": "allow", "category": "long_normal", "family": "clip-highlight-request", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 장면 클립 따주실 분 계신가요 ㅋㅋ"}
+{"id": "hn-3481", "label": "allow", "category": "long_normal", "family": "clip-highlight-request", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "하이라이트 영상 올라오면 꼭 볼게요"}
+{"id": "hn-3482", "label": "allow", "category": "long_normal", "family": "clip-highlight-request", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "편집자님 오늘 장면 놓치지 마세요 ㅋㅋㅋ"}
+{"id": "hn-3483", "label": "allow", "category": "long_normal", "family": "clip-highlight-request", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "클립 올렸어요 제목 센스 있게 지어봤어요"}
+{"id": "hn-3484", "label": "allow", "category": "long_normal", "family": "clip-highlight-request", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이번 주 베스트 클립 뽑기 하면 재밌겠다 시청자들이 투표해서 일등 정하는 걸로요"}
+{"id": "hn-3485", "label": "allow", "category": "long_normal", "family": "vod-replay-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다시보기는 언제까지 남아 있나요?"}
+{"id": "hn-3486", "label": "allow", "category": "long_normal", "family": "vod-replay-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "어제 방송 못 봤는데 다시보기 올라왔나요"}
+{"id": "hn-3487", "label": "allow", "category": "long_normal", "family": "vod-replay-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "유튜브 편집본도 따로 올리시는 거예요?"}
+{"id": "hn-3488", "label": "allow", "category": "long_normal", "family": "vod-replay-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다시보기에 노래 부른 부분은 잘리나요? 저작권 때문에 음소거될까 봐 궁금해서요"}
+{"id": "hn-3489", "label": "allow", "category": "long_normal", "family": "vod-replay-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지난주 엔딩 장면 다시보기로 봤는데 울었어요"}
+{"id": "hn-3490", "label": "allow", "category": "long_normal", "family": "collab-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음에 합방 계획 있으세요? 같이 하면 재밌을 듯"}
+{"id": "hn-3491", "label": "allow", "category": "long_normal", "family": "collab-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "멀티 게임은 친구분들이랑 하시는 거예요?"}
+{"id": "hn-3492", "label": "allow", "category": "long_normal", "family": "collab-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "합방 때 웃음소리 크게 나던 분 누구예요 ㅋㅋ"}
+{"id": "hn-3493", "label": "allow", "category": "long_normal", "family": "collab-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "단체 대회 나가시면 채팅으로 꼭 응원하러 갈게요 연습 방송도 해주시면 좋겠어요"}
+{"id": "hn-3494", "label": "allow", "category": "long_normal", "family": "collab-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "같이 하는 협동 게임 또 해주세요 저번에 꿀잼"}
+{"id": "hn-3495", "label": "allow", "category": "long_normal", "family": "chat-rule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "혹시 채팅에 스포 금지 규칙 있나요?"}
+{"id": "hn-3496", "label": "allow", "category": "long_normal", "family": "chat-rule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "매니저님 링크 올리는 건 안 되는 거죠?"}
+{"id": "hn-3497", "label": "allow", "category": "long_normal", "family": "chat-rule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "백섭은 원하실 때만 하라고 하셨던 거 맞죠"}
+{"id": "hn-3498", "label": "allow", "category": "long_normal", "family": "chat-rule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅 규칙 공지 어디서 볼 수 있어요?"}
+{"id": "hn-3499", "label": "allow", "category": "long_normal", "family": "chat-rule-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "도배 기준이 몇 줄부터인지 궁금해요 응원 이모티콘 연달아 보내는 것도 포함되나요?"}
+{"id": "hn-3500", "label": "allow", "category": "long_normal", "family": "emote-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새 이모티콘 언제 나와요? 시안 공개됐을 때부터 너무 기대돼서 기다리는 중이에요"}
+{"id": "hn-3501", "label": "allow", "category": "long_normal", "family": "emote-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이번 이모티콘 표정 너무 찰떡이다 ㅋㅋ"}
+{"id": "hn-3502", "label": "allow", "category": "long_normal", "family": "emote-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "구독 이모티콘 중에 하트 들고 있는 거 최애"}
+{"id": "hn-3503", "label": "allow", "category": "long_normal", "family": "emote-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이모티콘 그리신 작가님 그림체 너무 좋다"}
+{"id": "hn-3504", "label": "allow", "category": "long_normal", "family": "emote-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "울고 있는 이모티콘 여기서 써야 함 ㅠㅠ"}
+{"id": "hn-3505", "label": "allow", "category": "long_normal", "family": "first-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "처음 왔는데 분위기 좋아서 팔로우 했어요"}
+{"id": "hn-3506", "label": "allow", "category": "long_normal", "family": "first-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "추천 탭 보고 들어왔어요 반갑습니다"}
+{"id": "hn-3507", "label": "allow", "category": "long_normal", "family": "first-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "첫 방문인데 다들 친절하시네요 ㅎㅎ"}
+{"id": "hn-3508", "label": "allow", "category": "long_normal", "family": "first-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "알고리즘이 여기로 데려왔네요 정착합니다"}
+{"id": "hn-3509", "label": "allow", "category": "long_normal", "family": "first-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "처음이라 잘 모르는데 보통 무슨 게임 하세요? 주로 하는 장르 알려주시면 또 올게요"}
+{"id": "hn-3510", "label": "allow", "category": "long_normal", "family": "long-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "초창기부터 봤는데 벌써 이만큼 컸네요 뿌듯"}
+{"id": "hn-3511", "label": "allow", "category": "long_normal", "family": "long-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방송 시작한 지 2주년이죠? 축하드려요 ㅊㅋㅊㅋ"}
+{"id": "hn-3512", "label": "allow", "category": "long_normal", "family": "long-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "예전 방송 생각난다 그때는 시청자 열 명이라 채팅 하나하나 다 읽어주셨는데"}
+{"id": "hn-3513", "label": "allow", "category": "long_normal", "family": "long-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오래 봤지만 오늘이 제일 웃겼던 듯 ㅋㅋ"}
+{"id": "hn-3514", "label": "allow", "category": "long_normal", "family": "long-time-viewer", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "기념일 이벤트 하시면 꼭 참여할게요"}
+{"id": "hn-3515", "label": "allow", "category": "long_normal", "family": "sports-match-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 축구 국가대표 경기 있는데 다들 보시나요"}
+{"id": "hn-3516", "label": "allow", "category": "long_normal", "family": "sports-match-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "야구 보다가 왔는데 우리 팀 역전했어요!"}
+{"id": "hn-3517", "label": "allow", "category": "long_normal", "family": "sports-match-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "월드컵 시즌이라 경기랑 방송 시간 겹치면 어느 쪽 볼지 진짜 고민될 것 같아요"}
+{"id": "hn-3518", "label": "allow", "category": "long_normal", "family": "sports-match-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "배구 경기 하이라이트 보셨어요? 랠리 대단했음"}
+{"id": "hn-3519", "label": "allow", "category": "long_normal", "family": "sports-match-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마라톤 대회 나가는 분 계세요? 저 다음 주에 뛰어요"}
+{"id": "hn-3520", "label": "allow", "category": "long_normal", "family": "hobby-weekend", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말에 등산 다녀왔는데 다리가 후들거려요"}
+{"id": "hn-3521", "label": "allow", "category": "long_normal", "family": "hobby-weekend", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "요즘 뜨개질 하는데 방송 틀어놓으면 시간 순삭"}
+{"id": "hn-3522", "label": "allow", "category": "long_normal", "family": "hobby-weekend", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "레고 조립하면서 보는 중이에요 손이 바쁘다"}
+{"id": "hn-3523", "label": "allow", "category": "long_normal", "family": "hobby-weekend", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "캠핑 갔다가 와이파이 안 터져서 못 봤어요 ㅠ"}
+{"id": "hn-3524", "label": "allow", "category": "long_normal", "family": "hobby-weekend", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말에 베이킹 했는데 빵이 돌처럼 딱딱하게 나왔어요 발효를 덜 시킨 것 같아요 ㅠ"}
+{"id": "hn-3525", "label": "allow", "category": "long_normal", "family": "pc-spec-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "컴퓨터 사양 어떻게 되세요? 렉이 하나도 없네"}
+{"id": "hn-3526", "label": "allow", "category": "long_normal", "family": "pc-spec-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그래픽카드 바꾸셨다더니 확실히 부드럽네요"}
+{"id": "hn-3527", "label": "allow", "category": "long_normal", "family": "pc-spec-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방송용 컴 따로 쓰시는 거예요 아니면 한 대로 게임이랑 송출 같이 하시는 거예요?"}
+{"id": "hn-3528", "label": "allow", "category": "long_normal", "family": "pc-spec-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노트북으로도 이 게임 돌아갈까요?"}
+{"id": "hn-3529", "label": "allow", "category": "long_normal", "family": "pc-spec-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "모니터 몇 인치 쓰세요 화면 시원해 보여요"}
+{"id": "hn-3530", "label": "allow", "category": "long_normal", "family": "gear-desk-setup", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "키보드 타건감 좋아 보여요 축 뭐예요? 저도 바꾸려고 알아보는 중이라 궁금해요"}
+{"id": "hn-3531", "label": "allow", "category": "long_normal", "family": "gear-desk-setup", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "무선 마우스 쓰시나요? 선이 안 보이네"}
+{"id": "hn-3532", "label": "allow", "category": "long_normal", "family": "gear-desk-setup", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "패드로 하시는 거예요 키마로 하시는 거예요"}
+{"id": "hn-3533", "label": "allow", "category": "long_normal", "family": "gear-desk-setup", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "헤드셋 새로 사셨네요 색깔 예쁘다"}
+{"id": "hn-3534", "label": "allow", "category": "long_normal", "family": "gear-desk-setup", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "의자 바꾸셨어요? 등받이 편해 보여요"}
+{"id": "hn-3535", "label": "allow", "category": "long_normal", "family": "late-night-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새벽 방송 감사해요 잠 안 와서 들어왔어요"}
+{"id": "hn-3536", "label": "allow", "category": "long_normal", "family": "late-night-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다들 이 시간에 안 주무시고 뭐 하세요 ㅋㅋ"}
+{"id": "hn-3537", "label": "allow", "category": "long_normal", "family": "late-night-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "밤샘 방송이면 저도 끝까지 같이 있을게요 커피 한 잔 타왔어요 ㅎㅎ"}
+{"id": "hn-3538", "label": "allow", "category": "long_normal", "family": "late-night-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새벽 감성 브금 너무 좋다 잔잔해요"}
+{"id": "hn-3539", "label": "allow", "category": "long_normal", "family": "late-night-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "늦은 시간이라 목소리 낮춰서 하시는 거 배려 좋네요"}
+{"id": "hn-3540", "label": "allow", "category": "long_normal", "family": "morning-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아침 방송 신선하네요 출근 전에 잠깐 봐요"}
+{"id": "hn-3541", "label": "allow", "category": "long_normal", "family": "morning-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "모닝커피 마시면서 보는 중 상쾌하다"}
+{"id": "hn-3542", "label": "allow", "category": "long_normal", "family": "morning-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아침에 켜주시니 하루 시작이 좋아요"}
+{"id": "hn-3543", "label": "allow", "category": "long_normal", "family": "morning-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이른 시간인데 텐션 높으시네요 부러워요 ㅋㅋ"}
+{"id": "hn-3544", "label": "allow", "category": "long_normal", "family": "morning-stream", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말 아침 방송 자주 해주세요 늦잠 자고 일어나서 누워서 보기 딱 좋아요"}
+{"id": "hn-3545", "label": "allow", "category": "long_normal", "family": "building-game-compliment", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "집 지은 거 너무 예쁘다 지붕 색 조합 좋네요"}
+{"id": "hn-3546", "label": "allow", "category": "long_normal", "family": "building-game-compliment", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "마을 배치 감각 있으시네요 길 정리 깔끔해요"}
+{"id": "hn-3547", "label": "allow", "category": "long_normal", "family": "building-game-compliment", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "창문 위치만 한 칸씩 옆으로 옮기면 집 앞모습이 더 균형 있어 보일 것 같아요"}
+{"id": "hn-3548", "label": "allow", "category": "long_normal", "family": "building-game-compliment", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "농장 완성되면 투어 시켜주세요 ㅎㅎ"}
+{"id": "hn-3549", "label": "allow", "category": "long_normal", "family": "building-game-compliment", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "정원 꾸민 거 보니까 저도 하고 싶어졌어요"}
+{"id": "hn-3550", "label": "allow", "category": "long_normal", "family": "strategy-discussion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자원 먼저 모으고 확장하는 게 나을 것 같아요"}
+{"id": "hn-3551", "label": "allow", "category": "long_normal", "family": "strategy-discussion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "초반엔 방어 건물 위주로 짓는 게 안정적이에요"}
+{"id": "hn-3552", "label": "allow", "category": "long_normal", "family": "strategy-discussion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "덱 구성에서 비용 낮은 카드 좀 더 넣어보세요 초반 손패가 자꾸 막히는 것 같아요"}
+{"id": "hn-3553", "label": "allow", "category": "long_normal", "family": "strategy-discussion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이번 시즌 메타는 속도 빌드가 대세라던데"}
+{"id": "hn-3554", "label": "allow", "category": "long_normal", "family": "strategy-discussion", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "테크 트리 오른쪽부터 올리면 중반이 편해요"}
+{"id": "hn-3555", "label": "allow", "category": "long_normal", "family": "character-customization", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "커마 너무 정성스럽게 하셨다 머리색 찰떡"}
+{"id": "hn-3556", "label": "allow", "category": "long_normal", "family": "character-customization", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "캐릭터 이름 짓는 데 십 분 걸리는 거 공감 ㅋㅋ"}
+{"id": "hn-3557", "label": "allow", "category": "long_normal", "family": "character-customization", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "의상 염색 기능 있으면 파란색 해보세요 방송 테마 색이랑 맞추면 예쁠 것 같아요"}
+{"id": "hn-3558", "label": "allow", "category": "long_normal", "family": "character-customization", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "커마만 한 시간째 ㅋㅋㅋ 그래도 보는 재미 있어요"}
+{"id": "hn-3559", "label": "allow", "category": "long_normal", "family": "character-customization", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "목소리 타입도 고를 수 있네 세 번째 거 좋아요"}
+{"id": "hn-3560", "label": "allow", "category": "long_normal", "family": "boss-fight-tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "보스전 브금 웅장하다 긴장된다 ㅠㅠ"}
+{"id": "hn-3561", "label": "allow", "category": "long_normal", "family": "boss-fight-tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이번엔 꼭 깨실 것 같아요 패턴 다 외우셨잖아요"}
+{"id": "hn-3562", "label": "allow", "category": "long_normal", "family": "boss-fight-tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "조금만 더 버티면 돼요 집중 집중!!"}
+{"id": "hn-3563", "label": "allow", "category": "long_normal", "family": "boss-fight-tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "드디어 클리어!! 몇 번째 도전이었죠 ㅋㅋ"}
+{"id": "hn-3564", "label": "allow", "category": "long_normal", "family": "boss-fight-tension", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "페이즈 바뀌면 바닥 장판 깔리니까 조심하세요 가장자리로 빠지면 안전해요"}
+{"id": "hn-3565", "label": "allow", "category": "long_normal", "family": "speedrun-record", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 기록 갱신 가능할까요 구간 기록 좋네요"}
+{"id": "hn-3566", "label": "allow", "category": "long_normal", "family": "speedrun-record", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 스킵 루트 연습 많이 하셨나 봐요 깔끔"}
+{"id": "hn-3567", "label": "allow", "category": "long_normal", "family": "speedrun-record", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "타이머 보니까 개인 기록보다 앞서고 있어요!"}
+{"id": "hn-3568", "label": "allow", "category": "long_normal", "family": "speedrun-record", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "한 번 실수했지만 아직 만회 가능해요 화이팅"}
+{"id": "hn-3569", "label": "allow", "category": "long_normal", "family": "speedrun-record", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "세계 기록 영상이랑 화면 나란히 띄워서 비교해보면 어디서 차이 나는지 보일 듯"}
+{"id": "hn-3570", "label": "allow", "category": "long_normal", "family": "horror-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아 깜짝이야 저도 같이 놀랐어요 ㅠㅠ"}
+{"id": "hn-3571", "label": "allow", "category": "long_normal", "family": "horror-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "불 끄고 보고 있었는데 너무 무서워서 방 불 다시 켜고 이불 덮고 보는 중이에요"}
+{"id": "hn-3572", "label": "allow", "category": "long_normal", "family": "horror-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "문 열지 마세요 문 열지 마세요 제발 ㅋㅋㅋ"}
+{"id": "hn-3573", "label": "allow", "category": "long_normal", "family": "horror-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "공포게임인데 리액션 때문에 하나도 안 무서워요 ㅋㅋ"}
+{"id": "hn-3574", "label": "allow", "category": "long_normal", "family": "horror-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "소리만 들어도 오싹하다 사운드 디자인 잘했네"}
+{"id": "hn-3575", "label": "allow", "category": "long_normal", "family": "rhythm-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "풀콤보 축하드려요!! 손가락 안 아프세요?"}
+{"id": "hn-3576", "label": "allow", "category": "long_normal", "family": "rhythm-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "이 곡 최고 난이도인데 퍼펙트 판정이 이렇게 많이 나오다니 연습 많이 하셨나 봐요"}
+{"id": "hn-3577", "label": "allow", "category": "long_normal", "family": "rhythm-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "박자 감각 진짜 좋으시다 리듬 게임 체질"}
+{"id": "hn-3578", "label": "allow", "category": "long_normal", "family": "rhythm-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 곡은 신나는 거로 골라주세요~"}
+{"id": "hn-3579", "label": "allow", "category": "long_normal", "family": "rhythm-game-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "노트 내려오는 속도 보기만 해도 어지러워요 ㅋㅋ"}
+{"id": "hn-3580", "label": "allow", "category": "long_normal", "family": "puzzle-solved-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "와 그걸 혼자 푸셨네 박수 드립니다 👏"}
+{"id": "hn-3581", "label": "allow", "category": "long_normal", "family": "puzzle-solved-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅이 힌트 안 줬는데 바로 맞히셨다 ㄷㄷ"}
+{"id": "hn-3582", "label": "allow", "category": "long_normal", "family": "puzzle-solved-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아하 그래서 아까 시계가 거꾸로 돌아갔던 거구나 이제야 앞뒤가 맞네요"}
+{"id": "hn-3583", "label": "allow", "category": "long_normal", "family": "puzzle-solved-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "드디어 문 열렸다 삼십 분 고민한 보람 있네요"}
+{"id": "hn-3584", "label": "allow", "category": "long_normal", "family": "puzzle-solved-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "풀이 과정 설명 들으니까 이해됐어요 똑똑하시다"}
+{"id": "hn-3585", "label": "allow", "category": "long_normal", "family": "ending-credits-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "엔딩 크레딧 끝까지 보세요 쿠키 영상 있대요"}
+{"id": "hn-3586", "label": "allow", "category": "long_normal", "family": "ending-credits-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "드디어 완주!! 긴 여정 수고 많으셨어요"}
+{"id": "hn-3587", "label": "allow", "category": "long_normal", "family": "ending-credits-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "엔딩 여운이 너무 길다 오늘 잠들기 전까지 계속 마지막 장면 생각날 것 같아요"}
+{"id": "hn-3588", "label": "allow", "category": "long_normal", "family": "ending-credits-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다회차 하면 숨겨진 엔딩 나온다던데 하실 거예요?"}
+{"id": "hn-3589", "label": "allow", "category": "long_normal", "family": "ending-credits-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "스태프롤 브금까지 완벽하네 명작 인정"}
+{"id": "hn-3590", "label": "allow", "category": "long_normal", "family": "holiday-plans", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "추석 연휴에도 방송하세요? 고향 가시나요"}
+{"id": "hn-3591", "label": "allow", "category": "long_normal", "family": "holiday-plans", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "연휴 동안 시간 많으니까 장편 게임 정주행 어때요"}
+{"id": "hn-3592", "label": "allow", "category": "long_normal", "family": "holiday-plans", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "명절에 전 부치다가 방송 들어왔어요 ㅎㅎ"}
+{"id": "hn-3593", "label": "allow", "category": "long_normal", "family": "holiday-plans", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "크리스마스 특집 방송 기대해도 될까요"}
+{"id": "hn-3594", "label": "allow", "category": "long_normal", "family": "holiday-plans", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새해 첫 방송 때 채팅으로 올해 소원 하나씩 말해보는 시간 있으면 좋겠어요"}
+{"id": "hn-3595", "label": "allow", "category": "long_normal", "family": "travel-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 주에 제주도 여행 가는데 맛집 추천 받아요"}
+{"id": "hn-3596", "label": "allow", "category": "long_normal", "family": "travel-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "여행 와서 숙소에서 보는 중이에요 와이파이 굿"}
+{"id": "hn-3597", "label": "allow", "category": "long_normal", "family": "travel-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "주말에 바다 보고 왔더니 마음이 뻥 뚫렸어요 파도 소리 녹음해 온 거 계속 듣는 중"}
+{"id": "hn-3598", "label": "allow", "category": "long_normal", "family": "travel-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "기차 타고 가면서 보는데 터널에서만 끊기네요 ㅋㅋ"}
+{"id": "hn-3599", "label": "allow", "category": "long_normal", "family": "travel-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "해외여행 가면 시차 때문에 방송 못 볼 듯 ㅠ"}
+{"id": "hn-3600", "label": "allow", "category": "long_normal", "family": "exercise-gym-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "헬스장 러닝머신 뛰면서 보고 있어요 ㅋㅋ"}
+{"id": "hn-3601", "label": "allow", "category": "long_normal", "family": "exercise-gym-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 하체 운동해서 계단 못 내려가겠어요"}
+{"id": "hn-3602", "label": "allow", "category": "long_normal", "family": "exercise-gym-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "운동 끝나고 단백질 셰이크 마시면서 시청 중"}
+{"id": "hn-3603", "label": "allow", "category": "long_normal", "family": "exercise-gym-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "요가 시작했는데 몸이 너무 뻣뻣해서 선생님이 웃으셨어요 그래도 꾸준히 해보려고요"}
+{"id": "hn-3604", "label": "allow", "category": "long_normal", "family": "exercise-gym-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자전거 타고 한강 한 바퀴 돌고 왔습니다"}
+{"id": "hn-3605", "label": "allow", "category": "long_normal", "family": "coffee-cafe-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "카페에서 과제하면서 이어폰으로 듣는 중이에요"}
+{"id": "hn-3606", "label": "allow", "category": "long_normal", "family": "coffee-cafe-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 세 번째 아이스 아메리카노 마시는 중"}
+{"id": "hn-3607", "label": "allow", "category": "long_normal", "family": "coffee-cafe-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "디카페인으로 바꿨더니 밤에 잠이 잘 와요"}
+{"id": "hn-3608", "label": "allow", "category": "long_normal", "family": "coffee-cafe-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "새로 생긴 카페 케이크가 너무 맛있었어요"}
+{"id": "hn-3609", "label": "allow", "category": "long_normal", "family": "coffee-cafe-chat", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "라떼 아트 배워보고 싶다 영상 보고 하트 그려봤는데 계속 구름 모양만 나와요"}
+{"id": "hn-3610", "label": "allow", "category": "long_normal", "family": "game-sale-shopping", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "지금 스팀 세일 중인데 이 게임 반값이에요"}
+{"id": "hn-3611", "label": "allow", "category": "long_normal", "family": "game-sale-shopping", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "장바구니에 세일 게임만 쌓여가고 정작 할 시간이 없어서 방송으로 대리만족 중이에요"}
+{"id": "hn-3612", "label": "allow", "category": "long_normal", "family": "game-sale-shopping", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "번들로 사면 DLC까지 싸게 살 수 있어요"}
+{"id": "hn-3613", "label": "allow", "category": "long_normal", "family": "game-sale-shopping", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "블프 때 모니터 바꿀까 고민 중이에요"}
+{"id": "hn-3614", "label": "allow", "category": "long_normal", "family": "game-sale-shopping", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "한정판 패키지 예약하셨어요? 구성품 예쁘던데"}
+{"id": "hn-3615", "label": "allow", "category": "long_normal", "family": "streamer-condition-care", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "감기 기운 있으시면 오늘은 짧게 하셔도 돼요"}
+{"id": "hn-3616", "label": "allow", "category": "long_normal", "family": "streamer-condition-care", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "어제 늦게 주무셨나 봐요 많이 졸려 보이세요 ㅎㅎ"}
+{"id": "hn-3617", "label": "allow", "category": "long_normal", "family": "streamer-condition-care", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "무리하지 마시고 컨디션 우선으로 하세요 하루 쉬어도 다들 기다릴 테니까요"}
+{"id": "hn-3618", "label": "allow", "category": "long_normal", "family": "streamer-condition-care", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "푹 쉬고 오셨더니 텐션 확실히 좋아졌네요"}
+{"id": "hn-3619", "label": "allow", "category": "long_normal", "family": "viewer-own-gameplay", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저도 이 게임 했는데 저 구간에서 한참 헤맸어요"}
+{"id": "hn-3620", "label": "allow", "category": "long_normal", "family": "viewer-own-gameplay", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "제가 할 땐 다른 선택지 골랐는데 전개가 완전히 다르네요 이쪽 루트도 재밌어 보여요"}
+{"id": "hn-3621", "label": "allow", "category": "long_normal", "family": "viewer-own-gameplay", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "저는 이 게임 엔딩 보고 일주일 동안 여운 남았어요"}
+{"id": "hn-3622", "label": "allow", "category": "long_normal", "family": "viewer-own-gameplay", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "보다 보니까 저도 하고 싶어져서 방금 샀어요"}
+{"id": "hn-3623", "label": "allow", "category": "long_normal", "family": "viewer-own-gameplay", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "제 세이브 파일이랑 진행도 거의 비슷하네요 ㅎㅎ"}
+{"id": "hn-3624", "label": "allow", "category": "long_normal", "family": "quiz-trivia", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "퀴즈 정답 3번 아닌가요? 헷갈리네"}
+{"id": "hn-3625", "label": "allow", "category": "long_normal", "family": "quiz-trivia", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "넌센스 퀴즈 하나 더 내주세요 재밌어요"}
+{"id": "hn-3626", "label": "allow", "category": "long_normal", "family": "quiz-trivia", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "정답자한테 칭찬 스티커 주세요 ㅋㅋㅋ"}
+{"id": "hn-3627", "label": "allow", "category": "long_normal", "family": "quiz-trivia", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 문제 너무 어려웠다 힌트 하나만요"}
+{"id": "hn-3628", "label": "allow", "category": "long_normal", "family": "quiz-trivia", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "상식 퀴즈에서 역사 문제 나오면 자신 있음 다음 문제는 꼭 제가 맞혀볼게요"}
+{"id": "hn-3629", "label": "allow", "category": "long_normal", "family": "merch-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "굿즈 나오면 무조건 살게요 아크릴 스탠드 원해요"}
+{"id": "hn-3630", "label": "allow", "category": "long_normal", "family": "merch-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "머그컵 굿즈 나오면 회사 책상에 두고 쓰고 싶어요 볼 때마다 기분 좋을 듯"}
+{"id": "hn-3631", "label": "allow", "category": "long_normal", "family": "merch-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "굿즈 디자인 투표 하면 참여하고 싶어요"}
+{"id": "hn-3632", "label": "allow", "category": "long_normal", "family": "merch-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "키링 받았어요 실물이 더 귀엽네요 ㅎㅎ"}
+{"id": "hn-3633", "label": "allow", "category": "long_normal", "family": "merch-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "달력 굿즈 내년에도 나오나요?"}
+{"id": "hn-3634", "label": "allow", "category": "long_normal", "family": "fan-art-sharing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "팬아트 그려봤는데 팬카페에 올려도 될까요?"}
+{"id": "hn-3635", "label": "allow", "category": "long_normal", "family": "fan-art-sharing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "팬아트 게시판에 올라온 그림들 퀄리티 대박"}
+{"id": "hn-3636", "label": "allow", "category": "long_normal", "family": "fan-art-sharing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다음 방송 썸네일에 팬아트 써주시면 좋겠다"}
+{"id": "hn-3637", "label": "allow", "category": "long_normal", "family": "fan-art-sharing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "팬아트 리액션 방송 해주세요 다들 기다려요"}
+{"id": "hn-3638", "label": "allow", "category": "long_normal", "family": "fan-art-sharing", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그림 잘 못 그리는데 낙서처럼 그려서 올려도 괜찮나요? 마음만 담아봤어요 ㅎㅎ"}
+{"id": "hn-3639", "label": "allow", "category": "long_normal", "family": "chat-speed-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅 너무 빨라서 읽을 수가 없어요 ㅋㅋㅋ"}
+{"id": "hn-3640", "label": "allow", "category": "long_normal", "family": "chat-speed-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 시청자 많다 채팅 폭주 중"}
+{"id": "hn-3641", "label": "allow", "category": "long_normal", "family": "chat-speed-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅창 조용하네요 다들 집중하고 있나 봐요"}
+{"id": "hn-3642", "label": "allow", "category": "long_normal", "family": "chat-speed-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "제 채팅 읽어주셨다 ㅎㅎ 오늘 운 좋다"}
+{"id": "hn-3643", "label": "allow", "category": "long_normal", "family": "chat-speed-reaction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "채팅 묻혀서 다시 남겨요 저번 게임 이름이 뭐였죠"}
+{"id": "hn-3644", "label": "allow", "category": "long_normal", "family": "stream-start-waiting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "대기 화면 보면서 기다리는 중 곧 시작하나요"}
+{"id": "hn-3645", "label": "allow", "category": "long_normal", "family": "stream-start-waiting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "알림 받고 바로 들어왔어요 오늘 일찍 켜셨네요"}
+{"id": "hn-3646", "label": "allow", "category": "long_normal", "family": "stream-start-waiting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방송 켜지자마자 들어온 사람 손 ㅋㅋ"}
+{"id": "hn-3647", "label": "allow", "category": "long_normal", "family": "stream-start-waiting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 평소보다 늦게 켜신다고 해서 저녁 먹고 설거지까지 끝내고 왔어요"}
+{"id": "hn-3648", "label": "allow", "category": "long_normal", "family": "stream-start-waiting", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "준비중 화면 노래도 좋다 이것도 제목 궁금해요"}
+{"id": "hn-3649", "label": "allow", "category": "long_normal", "family": "raid-host-welcome", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "다른 방송에서 넘어왔어요 반갑습니다~"}
+{"id": "hn-3650", "label": "allow", "category": "long_normal", "family": "raid-host-welcome", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "호스팅 타고 왔는데 여기도 분위기 좋네요"}
+{"id": "hn-3651", "label": "allow", "category": "long_normal", "family": "raid-host-welcome", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "같이 넘어온 분들 많네요 다 같이 인사해요 여기 채팅 규칙 먼저 읽어보시면 좋아요"}
+{"id": "hn-3652", "label": "allow", "category": "long_normal", "family": "raid-host-welcome", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "넘어오자마자 보스전이라 긴장감 최고"}
+{"id": "hn-3653", "label": "allow", "category": "long_normal", "family": "raid-host-welcome", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "처음 보는데 진행 깔끔하시네요 구경할게요"}
+{"id": "hn-3654", "label": "allow", "category": "long_normal", "family": "typo-correction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "아 오타 났다 무시해주세요 ㅋㅋ"}
+{"id": "hn-3655", "label": "allow", "category": "long_normal", "family": "typo-correction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "방금 말한 거 반대로 썼어요 왼쪽 아니고 오른쪽!"}
+{"id": "hn-3656", "label": "allow", "category": "long_normal", "family": "typo-correction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "자동완성 때문에 엉뚱한 단어 들어갔네 ㅈㅅ"}
+{"id": "hn-3657", "label": "allow", "category": "long_normal", "family": "typo-correction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "손가락이 미끄러져서 엔터 먼저 눌렀어요"}
+{"id": "hn-3658", "label": "allow", "category": "long_normal", "family": "typo-correction", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "한영키 안 바꾸고 쳐서 외계어 됐다 ㅋㅋㅋ"}
+{"id": "hn-3659", "label": "allow", "category": "long_normal", "family": "cooking-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "그 소스는 직접 만드신 거예요 아니면 사 오신 거예요? 색이 너무 예뻐서 궁금해요"}
+{"id": "hn-3660", "label": "allow", "category": "long_normal", "family": "cooking-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "불 세기는 중불로 하시는 거죠?"}
+{"id": "hn-3661", "label": "allow", "category": "long_normal", "family": "cooking-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘 요리 방송 메뉴 뭐예요? 기대돼요"}
+{"id": "hn-3662", "label": "allow", "category": "long_normal", "family": "cooking-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "재료 손질하는 거 보니까 손이 엄청 빠르시네요"}
+{"id": "hn-3663", "label": "allow", "category": "long_normal", "family": "cooking-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "남은 반찬 내일 도시락으로 싸가세요 ㅎㅎ"}
+{"id": "hn-3664", "label": "allow", "category": "long_normal", "family": "drawing-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "어떤 태블릿 쓰세요? 필압 좋아 보여요"}
+{"id": "hn-3665", "label": "allow", "category": "long_normal", "family": "drawing-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "스케치부터 채색 완성까지 보통 얼마나 걸려요? 오늘 안에 끝나는지 궁금해서요"}
+{"id": "hn-3666", "label": "allow", "category": "long_normal", "family": "drawing-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "레이어 몇 개나 쓰세요? 엄청 많아 보여요"}
+{"id": "hn-3667", "label": "allow", "category": "long_normal", "family": "drawing-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "오늘은 커미션 작업이에요 개인 작업이에요?"}
+{"id": "hn-3668", "label": "allow", "category": "long_normal", "family": "drawing-stream-question", "author": "claude-opus-5.5", "reviewer": "gpt-5.6-sol", "text": "색 고를 때 팔레트 따로 만들어두시나요"}
