@@ -60,11 +60,11 @@ sudo pmset -a autorestart 1           # 정전 뒤 전기가 들어오면 켜지
 - 재시작: `launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server`
 
 ## 8. 로그
-- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`.
+- 위치: `~/Library/Logs/zzirit-guard/server.log`·`server.err.log`. AI 워커를 켜면(19장) `stage1-worker.log`·`stage1-worker.err.log`와 2차의 같은 이름 파일이 더 생긴다. 워커 로그에는 건수·지연·오류만 남고 채팅 원문은 남지 않는다.
 - 남지 않는 것: 채팅 원문, 토큰, 채팅 세션 키(sessionKey). 치지직 오류는 주소의 쿼리(`?` 뒤)를 떼고 경로만 남긴다.
 - 남는 식별자: 매니저 채널 ID(역할 재확인 실패 등). 저장된 채널이 `ZG_CHANNEL_ID`와 다를 때는 스트리머 채널 ID도 함께 남는다. **그래서 소유자만 읽을 수 있게(폴더 700, 파일 600) 둔다.**
 - **newsyslog 같은 자동 회전은 쓰지 않는다.** launchd는 로그 파일을 서버를 띄울 때 한 번만 열고 서버도 파일을 다시 열지 않는다. 그래서 회전 도구가 파일을 옮기면 서버는 옮겨진 옛 파일에 계속 쓰고, 압축 회전이 옛 파일을 지우면 그 뒤 로그가 사라진다.
-- **한 달에 한 번은 크기와 상관없이 지금 쓰는 로그도 옮긴다.** 지금 쓰는 `server.log`·`server.err.log`는 이름에 날짜가 없어 아래 30일 삭제에 걸리지 않는다. 옮기지 않으면 옛 매니저 채널 ID가 몇 달씩 남는다. 그 사이에 커졌으면(`ls -lh ~/Library/Logs/zzirit-guard`) 더 일찍 옮긴다.
+- **한 달에 한 번은 크기와 상관없이 지금 쓰는 로그도 옮긴다.** 지금 쓰는 로그(`server.log`·`server.err.log`, 워커 로그)는 이름에 날짜가 없어 아래 30일 삭제에 걸리지 않는다. 옮기지 않으면 옛 매니저 채널 ID가 몇 달씩 남는다. 그 사이에 커졌으면(`ls -lh ~/Library/Logs/zzirit-guard`) 더 일찍 옮긴다.
 - 옮기는 방법: 서버를 멈추고, 이름에 날짜와 시각을 붙여 옮긴 뒤, 다시 띄운다. `mv -n`은 같은 이름의 파일이 있으면 덮어쓰지 않는다. 그래서 같은 날 두 번 옮겨도 앞의 파일이 남는다.
 ```bash
 launchctl bootout gui/$(id -u)/com.zzirit-guard.server
@@ -72,11 +72,24 @@ cd ~/Library/Logs/zzirit-guard && stamp=$(date +%Y%m%d-%H%M%S) && for name in se
 chmod 600 server*.log   # 옮긴 파일도 소유자만 읽게(새 파일은 install-launchd.sh가 600으로 만든다)
 <설치 경로>/ops/scripts/install-launchd.sh
 ```
+- AI 워커를 켰다면 이어서 워커 로그도 옮긴다. 워커도 로그 파일을 시작할 때 한 번만 연다. 설치된 plist를 그대로 다시 올리므로 모델 경로는 바뀌지 않는다.
+```bash
+for worker in stage1-worker stage2-worker; do
+  launchctl bootout gui/$(id -u)/com.zzirit-guard.$worker
+  for name in $worker $worker.err; do [[ -f $name.log ]] && mv -n $name.log $name-$stamp.log; done
+  (umask 077; touch $worker.log $worker.err.log)   # launchd가 만들면 644가 되므로 600으로 미리 만든다
+  # 내린 직후에는 작업이 아직 남아 올리기가 실패할 수 있어, 3초 뒤 한 번 더 시도한다(install-launchd.sh와 같다)
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zzirit-guard.$worker.plist || { sleep 3; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zzirit-guard.$worker.plist; }
+done
+chmod 600 *-worker*.log
+launchctl print gui/$(id -u)/com.zzirit-guard.stage1-worker | grep state   # 두 워커가 다시 떴는지 본다(stage2도)
+```
 - **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 로그를 옮길 때마다(한 달에 한 번 이상) 아래 한 줄도 실행한다.
 - 30일은 파일을 마지막으로 쓴 날부터 센다. 그래서 로그 한 줄이 남는 기간은 길어야 약 두 달이다(옮기기 전 한 달, 옮긴 뒤 30일).
 ```bash
-find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
+find ~/Library/Logs/zzirit-guard -name '*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].log' -mtime +30 -print -delete
 ```
+- 이름 끝의 날짜·시각(옮길 때 붙인 것)으로 고른다. `stage1-worker.log`처럼 이름에 `-`가 든 지금 쓰는 워커 로그는 지우지 않는다.
 - 운영을 끝내면 운영 합의서 종료 조항에서 정한 기간(기본 7일) 안에 DB·백업과 함께 이 폴더의 로그를 모두 지운다.
 
 ## 9. 첫 연결(스트리머)
@@ -99,6 +112,7 @@ find ~/Library/Logs/zzirit-guard -name 'server*-*.log' -mtime +30 -print -delete
 - 이 표는 15초마다 서버에서 다시 읽는다.
 - 채널: (채널 이름) / 치지직 채팅 연결: 연결됨 / 숨김·제재 가능: 가능 / 마지막 채팅 수신: 채팅이 오고 있으면 방금 / 처리 대기 중인 조치: 0건 근처
 - 하나라도 아니면 12장.
+- AI를 켰으면(19장) AI 1차·2차 워커가 정상이고 AI 2차 대기열이 0건 근처인지도 본다.
 
 ## 12. 장애 대응
 | 증상 | 조치 |
@@ -140,8 +154,16 @@ git pull --ff-only
 npm ci
 npm run build -w @zzirit-guard/server
 npm run build -w @zzirit-guard/web
+# AI 워커를 켰다면(19장): 워커 환경을 잠금 파일대로 맞추고 워커를 먼저 다시 띄운다
+(cd workers/stage1 && uv sync --locked) && (cd workers/stage2 && uv sync --locked)
+launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.stage1-worker
+launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.stage2-worker
+# 서버
 launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server
 ```
+- **AI 워커는 서버만 다시 띄우면 옛 코드로 계속 돈다.** 파이썬 워커는 시작할 때 코드를 읽는다. 그대로 두면 나중에 워커가 다시 뜰 때 새 코드가 옛 환경(`.venv`)에서 돌다 실패할 수 있다. 그래서 `uv sync`와 워커 재시작을 함께 한다.
+  - 워커를 서버보다 먼저 띄우는 것은, 계약이 바뀐 업데이트에서 새 서버가 옛 워커를 부르지 않게 하려는 것이다. 2차는 모델을 불러오는 약 10초 동안 '연결 안 됨'이고, 그 사이 채팅은 AI 미검사로 센다.
+  - plist 서식(`ops/launchd/*.plist.template`)이 바뀐 업데이트면 kickstart 대신 `install-launchd.sh stage1-worker <모델 디렉터리>`(2차도 같다)로 다시 설치한다. 지금 모델 디렉터리는 `plutil -extract ProgramArguments.4 raw -o - ~/Library/LaunchAgents/com.zzirit-guard.stage1-worker.plist`로 본다.
 - **웹만 다시 빌드해도 서버를 재시작해야 한다.** 서버는 시작할 때 `dist`의 파일 목록으로 경로를 만든다(@fastify/static `wildcard: false`, 문서 기준이며 실행해 보지는 않았다). 새 빌드의 파일 이름(해시)이 재시작 전까지 없는 경로가 되어 화면이 비어 보일 수 있다.
 
 ## 15. 자동 숨김을 켜기 전에(로드맵 3단계)
@@ -165,3 +187,43 @@ launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server
 - 로그인한 스트리머(소유자 세션)는 시작·콜백 한도를 받지 않아 재연결이 막히지 않는다. 다른 로그인 세션은 전체 상한(120)만 건너뛴다.
 - 누군가 로그인 주소를 계속 부르는 동안에는 세션 없는 새 로그인이 막힐 수 있고, 멈추면 수 초 안에 회복한다.
 - 한도를 넘으면 `/?loginError=`로 돌아가 "요청이 너무 많습니다…" 문구가 보인다.
+
+## 19. AI 워커(로드맵 2단계)
+AI는 규칙이 판정하지 않은 채팅을 1차(KcELECTRA, CPU)·2차(kanana-safeguard, GPU) 워커로 보내 **후보**와 **'도움 필요'**를 올린다. 자동 숨김은 하지 않는다(스펙 5.2 ⑤).
+- 기본은 꺼짐이다(`ZG_AI_ENABLED=0`). 워커를 설치하지 않은 배포는 규칙만 돈다.
+- 실채팅으로 학습하거나 임계값을 맞추지 않는다(스펙 9장). 아래 숫자는 합성 평가셋 기준이다.
+
+### 켜기 전 준비
+1. **워커 환경**: `(cd workers/stage1 && uv sync)`, `(cd workers/stage2 && uv sync)`. 의존성은 `uv.lock`에 고정돼 있다.
+2. **1차 모델**: `workers/stage1/README.md`대로 학습한다(미세조정 가중치는 배포하지 않으므로 운영자가 직접 학습한다).
+   - 학습 결과 디렉터리에 `inference.json`이 있어야 워커가 시작한다.
+3. **1차 임계값 정하기**: 개발셋으로 정하고, 보류셋은 설정을 고정한 뒤 한 번만 본다(`workers/stage1/README.md`의 "채팅 평가셋과 2차 용량").
+   - 모델마다 맞는 값이 다르다. 재학습한 모델은 0.003~0.03 근처였다(`docs/ml/2026-10-14-stage1-retrain-results.md`).
+4. **2차 모델**: `workers/stage2/README.md`대로 공식 가중치를 받아 4비트로 변환한다(약 5GB).
+5. **데이터 디렉터리 경로 길이**: 워커 소켓 `$ZG_DATA_DIR/run/stage1.sock` 경로가 103바이트를 넘으면 워커가 시작하지 않는다. 기본 위치(`~/Library/Application Support/zzirit-guard`)는 보통 괜찮다.
+
+### 설치와 켜기
+```bash
+ops/scripts/install-launchd.sh stage1-worker "$HOME/Library/Application Support/zzirit-guard/ml/stage1/<학습 결과>"
+ops/scripts/install-launchd.sh stage2-worker "$HOME/Library/Application Support/zzirit-guard/ml/stage2/kanana-safeguard-8b-mlx-4bit"
+# .env에 ZG_AI_ENABLED=1을 넣고 서버를 다시 시작한다(7장)
+launchctl kickstart -k gui/$(id -u)/com.zzirit-guard.server
+```
+- 설치 스크립트는 먼저 `ZG_INSTALL_DRY_RUN=1`로 시험할 수 있다(OS 임시 폴더에 plist만 만들어 검사하고, LaunchAgents·로그 폴더와 launchd는 건드리지 않는다).
+- 설치 스크립트는 `.env`의 `ZG_DATA_DIR` 한 줄을 읽어 워커에 그대로 넘긴다. 서버와 워커가 같은 소켓 디렉터리를 봐야 하기 때문이다. 그래서 워커보다 `.env`(6장)를 먼저 만들고, `ZG_DATA_DIR`을 바꾸면 워커도 다시 설치한다. 값은 `/`로 시작해야 하고 줄 끝 주석을 붙이지 않는다.
+- 워커는 모델을 다 불러온 뒤에 소켓을 만든다. 1차는 수 초, 2차는 약 10초 걸린다.
+- 워커 로그는 `~/Library/Logs/zzirit-guard/stage1-worker.log`·`stage1-worker.err.log`(2차도 같은 이름)이다. 진단은 주로 `*.err.log`에 남는다. 건수·지연·오류만 남고 채팅 원문은 남지 않는다. 옮기기·지우기는 8장을 따른다.
+- 설정 화면(기록·설정 → 한도·보관 기간)에서 **AI 1차 임계값**을 3에서 정한 값으로 바꾼다. 후보(0.5)·확실(0.99) 임계값은 스펙 값 그대로 둔다.
+
+### 확인(방송 전 점검에 더하기)
+- 상태 점검의 **AI 1차 워커·AI 2차 워커**가 "정상"이고 모델 이름(`<디렉터리>@<해시>`)이 맞는지 본다.
+- **AI 2차 대기열**은 평소 0건 근처다. 계속 쌓이거나 "최근 1분 AI 미검사(과부하)"가 늘면 1차 임계값이 너무 낮은 것이다. 임계값을 올리거나 키워드 경로를 줄인다.
+- 통계(최근 1시간)의 AI 항목: 2차로 보낸 채팅, 2차 판정, 미검사(과부하·장애·너무 긴 문장).
+
+### 장애
+| 증상 | 조치 |
+|---|---|
+| 상태 배너 "AI 중지(1차/2차 워커 응답 없음)" | `launchctl print gui/$(id -u)/com.zzirit-guard.stage1-worker`(또는 stage2)로 떠 있는지 보고, `*.err.log`를 본다. 규칙은 계속 동작한다 |
+| 워커가 계속 재시작됨 | 종료 코드 2는 설정 오류다(모델 경로, `inference.json` 없음, 소켓 경로 길이, 다른 인스턴스). `*.err.log`의 "오류:" 줄을 보고 고친다. 종료 코드 70은 추론이 10초 넘게 멈춘 경우다(launchd가 다시 띄운다) |
+| "최근 1분 AI 미검사(장애·너무 긴 문장)"만 늘어남 | 2차는 384토큰(한국어 약 300자)이 넘는 채팅을 판정하지 않는다. 긴 도배가 많으면 정상이다 |
+| AI를 끄고 싶음 | `.env`의 `ZG_AI_ENABLED=0` 뒤 서버 재시작. 워커를 내리려면 `launchctl bootout gui/$(id -u)/com.zzirit-guard.stage1-worker`(stage2도 같다) |

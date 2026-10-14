@@ -54,7 +54,7 @@
 ```
 치지직 ──채팅 이벤트(Socket.IO)──▶ [채팅 수신] ──▶ [판정 파이프라인] ──자동 숨김──▶ [실행기] ──쓰기 API──▶ 치지직
                                                    │        ▲                  ▲
-                                         HTTP(127.0.0.1)    │                  │
+                                   HTTP(유닉스 소켓)        │                  │
                                          [1차 분류기 워커]   │       매니저 조치(숨김·제한·저속 모드)
                                          [2차 분류기 워커]   │                  │
                                                    └─후보─▶ [매니저 연결] ◀──WebSocket·REST──▶ 매니저 PWA
@@ -66,8 +66,8 @@
 | 프로세스 | 언어·런타임 | 역할 |
 |---|---|---|
 | `server` | Node.js 22 + TypeScript | 연결 관리, 채팅 수신, 판정 파이프라인(규칙·건너뛰기·대기열), 실행기, 매니저 연결(REST·WebSocket), 기록, PWA 정적 파일 제공 |
-| `stage1-worker` | Python 3.12 + PyTorch(CPU) | KcELECTRA 1차 점수. GPU를 쓰지 않아 2차와 다투지 않는다 |
-| `stage2-worker` | Python 3.12 + mlx-lm(GPU) | kanana-safeguard-8b 4비트 판정. 접두 KV 캐시를 쓴다 |
+| `stage1-worker` | Python 3.12 + PyTorch(CPU) | KcELECTRA 1차 점수. GPU를 쓰지 않아 2차와 다투지 않는다. 유닉스 소켓 `$ZG_DATA_DIR/run/stage1.sock` |
+| `stage2-worker` | Python 3.12 + mlx-lm(GPU) | kanana-safeguard-8b 4비트 판정. 접두 KV 캐시를 쓴다. 유닉스 소켓 `$ZG_DATA_DIR/run/stage2.sock` |
 
 **서버 구성 요소**
 
@@ -133,7 +133,7 @@ PWA를 React로 하는 이유는, 채팅 텍스트를 기본으로 이스케이�
 | 개인 도배 | 한 사람이 10초 안에 5건 이상 | `candidate` |
 | 협박 표현 | 협박 표현 목록(예: 찾아간다, 집 앞, 칼 들고, 알아냈다) | `candidate` |
 | 주소·실명 | 주소 패턴(○○동·아파트·호수) | `candidate` |
-| 요주의 사용자 | 최근 180일 감사 기록에 조치 이력이 있음 | `candidate`(AI 단계에서도 우선순위를 올림) |
+| 요주의 사용자 | 최근 180일 감사 기록에 조치 이력이 있음 | `candidate`. 규칙 판정으로 끝나 AI 단계로 보내지 않는다(5.4) |
 | 채널 허용어 | 정규화한 메시지 **전체**가 채널이 등록한 표현과 같을 때만(예: "적팀죽여버려"). 부분 일치로 통과시키면 "스트리머 죽여버려"까지 통과하기 때문이다 | 금칙어 약·협박 표현·AI 판정보다 우선해서 `pass`(금칙어 강·광고·전화번호보다는 후순위) |
 
 한글 주소를 자동 숨김하지 않는 이유(판단 U2): "좋아요.me", "가자.한국!"처럼 한글 낱말 뒤에 마침표와 흔한 영문 낱말이 오는 정상 채팅과 모양이 같다. 그래서 "무료쿠폰.kr" 같은 실제 스팸 주소도 단서가 없으면 후보에 머문다. 자동 숨김은 되돌릴 수 없어 확실할 때만 쓰고, 이런 주소는 매니저가 후보로 보고 처리한다. 도박 키워드가 함께 있으면 연락 수단으로 보고 자동 숨김을 유지한다. 한글 라벨이 영문 도메인의 하위 주소일 뿐이면(예: 좋아.evil.com, 등록 도메인 evil.com) 한글 주소로 보지 않고 광고 링크로 숨긴다. 같은 메시지의 다른 영문 링크도 그대로 광고 링크로 숨긴다.
@@ -146,10 +146,14 @@ PWA를 React로 하는 이유는, 채팅 텍스트를 기본으로 이스케이�
 
 **③ 건너뛰기·중복**
 - 정규화한 문장이 ㅋ·ㅎ·ㄷ·ㅠ·ㅜ·문장부호·이모티콘으로만 되어 있으면 AI 단계를 건너뛰고 `pass`한다.
-- 같은 정규화 문장의 AI 판정은 10분 동안 재사용한다(최대 1만 건 LRU).
+- 같은 원문의 AI 원값(1차 점수, 2차 확률·범주)은 10분 동안 재사용한다(최대 1만 건). 쓸 때마다 지금 임계값을 다시 적용하고, 워커의 모델이 바뀌면 비운다.
+  - 정규화 문장이 아니라 원문으로 묶는다. 공백·문장부호를 지운 키는 서로 다른 입력이 한 결과를 나눠 쓰게 하기 때문이다(2단계 계획 R16).
 
 **④ 1차 분류기**(KcELECTRA, CPU, 최대 16건씩 묶음)
-- 점수가 **0.05 이상**이거나 **키워드 경로**에 걸리면 2차로 보낸다. 그 밖에는 `pass`다.
+- 서버가 25ms 동안 모으거나 16건이 차면 한 요청으로 보낸다. 요청 본문이 60,000바이트를 넘지 않게 나눈다(워커 상한 65,536바이트). 1차에 보내려고 기다리는 채팅은 512건까지이고, 넘치면 AI 미검사로 센다.
+- 점수가 **1차 임계값(기본 0.05) 이상**이거나 **키워드 경로**에 걸리면 2차로 보낸다. 그 밖에는 `pass`다.
+  - 키워드 경로는 1차를 거치지 않고 2차로 간다. 1차 워커가 멈춰도 간다.
+  - 1차 임계값은 모델마다 맞는 값이 달라 채널 설정에서 운영자가 정한다(재학습한 모델은 0.003~0.03 근처, docs/ml/2026-10-14-stage1-retrain-results.md).
 - 키워드 경로는 1차 분류기가 못 잡는 범주(성희롱·자해·협박·신상·미성년 대상)의 단어를 넓게 모은 목록이다. 넓게 잡아도 최종 판정은 2차가 한다.
   - 기본 목록에는 자해·협박·신상·성희롱 낱말만 넣는다. 미성년 대상 목록은 공개 저장소에 두지 않고 운영자가 채널에서 넣는다.
   - 목록은 채팅 개발셋으로 다듬고 보류셋으로 확인한다(docs/ml/2026-10-14-model-strengthening-plan.md).
@@ -157,28 +161,44 @@ PWA를 React로 하는 이유는, 채팅 텍스트를 기본으로 이스케이�
 **⑤ 2차 분류기**(kanana-safeguard-8b 4비트, GPU, 직렬, 접두 KV 캐시)
 - 유해 확률(UNSAFE 토큰 확률 합)이 0.5 이상이면 `candidate`, 0.99 이상이면 '확실' 배지를 붙인다.
 - 유해 확률이 0.5 이상이고 가장 높은 범주가 S6(자살·자해)이면 `needs_care`다.
+- '확실'은 결과가 나온 때의 임계값으로 정해 판정에 저장한다(나중에 임계값을 바꿔도 이미 올린 배지는 바뀌지 않는다).
+- 채팅 내용이 384토큰을 넘으면 판정하지 않는다(프롬프트 처리 초당 약 350~400토큰이라 2초 제한을 넘는다). 자르지 않고 "AI 미검사"로 센다.
+- AI 결과는 늦게 온다. 그 사이 같은 메시지에 판정이 생겼으면(떼도배 소급 숨김 등) 후보는 만들지 않고, '도움 필요'는 그래도 남긴다.
 - AI 판정은 **절대 `auto_hide`가 되지 않는다.** 경계 판정이 설정에 따라 뒤집히는 것을 스파이크에서 확인했다. AI 자동 숨김은 섀도 데이터를 보고 나중에 다시 결정한다.
 - kanana는 문맥을 지원하지 않으므로 메시지 하나만 넘긴다. 같은 사람의 이전 메시지는 매니저 화면에서 사용자 단위로 묶어 보여 준다(6장).
 
 ### 5.3 분류기 인터페이스(바꿔 끼울 수 있게)
 
-서버는 두 워커를 같은 형태로 부른다. 모델을 바꿔도 서버는 그대로 둔다.
+서버는 두 워커를 같은 형태로 부른다. 모델을 바꿔도 서버는 그대로 둔다. 정본은 [워커 계약 v1](../../../workers/contract/README.md)이다.
 
 ```
-POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
+POST /classify   (유닉스 소켓 $ZG_DATA_DIR/run/stage1.sock, 2차는 stage2.sock)
 요청: { "items": [ { "id": "msg-123", "text": "..." } ] }
-응답: { "model": "kanana-safeguard-8b@mlx-4bit", "items": [ { "id": "msg-123", "unsafe_probability": 0.97, "category": "S2" } ] }
+응답: { "contract": 1, "model": "kanana-safeguard-8b-mlx-4bit@0123456789ab", "items": [ { "id": "msg-123", "unsafe_probability": 0.97, "category": "S2" } ] }
 ```
 
-- 1차 워커는 `category`를 `null`로 준다.
-- 요청에는 실행할 때 만든 비밀값 헤더를 붙인다. 같은 맥의 다른 프로세스가 마음대로 부르지 못하게 하기 위해서다.
+- 1차 워커는 `category`를 `null`로 준다. 한 요청은 1차 1~32건, 2차 1건이다.
+- **워커는 TCP 포트 대신 이 사용자만 들어갈 수 있는 0700 디렉터리의 유닉스 소켓에서 듣는다.**
+  - TCP 포트는 다른 사용자도 바인딩할 수 있다. 워커가 꺼진 사이 다른 사용자 프로세스가 그 주소로 기다리면, 채팅 원문을 받거나 가짜 판정을 돌려줄 수 있다.
+  - 서버는 보내기 전에 디렉터리(종류·소유자·권한 0700)와 소켓(종류·소유자)을 확인한다. 소켓은 워커가 0600으로 만든다. 서버가 소켓 권한까지 보지 않는 것은, 다른 사용자를 막는 경계가 0700 디렉터리이기 때문이다.
+- 워커는 **잠금 → 남은 소켓 지우기 → 모델 불러오기 → 소켓 만들기** 순서로 시작한다. 잠금(flock)을 못 잡으면 다른 인스턴스가 떠 있는 것이라 끝낸다. 겹쳐 띄운 워커가 살아 있는 워커의 소켓을 지우고 빼앗지 못하게 하려는 것이다. 소켓이 있으면 받을 준비가 된 것이다.
+- 시간 제한은 두 겹이다.
+  - 서버 클라이언트: 요청마다 2초. 넘으면 그 메시지는 AI 미검사이고 워커를 '응답 없음'으로 본다(10장).
+  - 워커: 요청을 연결한 때부터 5초 안에 다 받지 못하면 응답 없이 닫고, 추론이 5초 안에 끝나지 않으면 503(`busy`)이다. 서버가 끊어도 워커가 붙잡혀 있지 않게 하는 상한이다.
+  - 추론 스레드가 10초 넘게 멈추면 감시자가 프로세스를 종료 코드 70으로 끝내고 launchd가 다시 띄운다.
+  - 같은 사용자의 다른 프로세스는 막지 않는다. 그 프로세스는 이미 데이터 디렉터리를 읽을 수 있다. 처음 설계의 비밀값 헤더도 이 경우는 막지 못해, 소켓 권한으로 바꿨다(2단계 계획의 위협 모델).
 - 채팅은 모델 프롬프트에 **데이터로만** 넣는다. 지시문 공격 2건을 kanana가 정상 판정한 것을 스파이크에서 확인했다. 조작에 성공해도 결과는 후보 추가에 그친다.
 
 ### 5.4 과부하 정책
 
 - 2차 대기열은 최대 300건이다. 15초가 지난 항목은 버린다. 그때쯤이면 채팅이 이미 지나갔기 때문이다.
-- 우선순위는 키워드 경로, 요주의 사용자, 첫 채팅 사용자(서버가 이번 방송에 연결한 뒤 처음 본 사용자), 1차 점수 순이다.
-- 버린 건수는 분당 통계("AI 미검사")로 세고, 매니저 화면에 표시한다.
+- 우선순위는 키워드 경로, 첫 채팅 사용자(채팅 수신을 시작한 뒤 처음 본 사용자), 1차 점수 순이다(같으면 먼저 온 것).
+  - 요주의 사용자는 규칙(`rule:watch_user`)이 먼저 후보로 판정하므로 AI 단계에 오지 않는다.
+  - 높은 우선순위가 계속 들어오면 낮은 항목은 15초 뒤에 버려진다(과부하 때 덜 중요한 것부터 포기한다).
+  - 원문이 같은 메시지는 한 항목에 묶어 2차를 한 번만 부른다.
+- AI가 보지 못한 건수를 분당 통계로 세고 매니저 화면("AI 미검사")에 표시한다. 두 종류로 나눈다.
+  - `stage2_dropped`: 과부하. 대기열 넘침과 15초 경과다.
+  - `ai_unchecked`: 장애. 워커 중지·시간 초과, 1차 대기 넘침, 너무 긴 문장, 세션 종료 때 버린 것이다.
 
 ### 5.5 자동 숨김 스위치와 안전장치
 
@@ -229,7 +249,7 @@ POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
 - **갱신**: 한 번에 하나만 실행한다. 새 토큰을 트랜잭션으로 저장한 뒤에 사용한다.
 - **세션**: HttpOnly·Secure·SameSite=Lax 쿠키를 쓰고 12시간 뒤 만료한다. WebSocket은 REST로 받은 30초짜리 일회용 티켓으로 인증하고, Origin을 검사한다.
 - **채팅은 공격자가 쓴 입력이다**: 화면에는 텍스트로만 렌더링한다(`dangerouslySetInnerHTML` 금지, CSP 적용). 앱 로그에는 채팅 원문을 남기지 않고 식별자만 남긴다.
-- **네트워크**: 서버(8710)와 워커(8711·8712)는 127.0.0.1에만 바인딩한다. 외부에서는 Funnel → 8710으로만 들어온다(12장).
+- **네트워크**: 서버(8710)는 127.0.0.1에만 바인딩한다. 워커는 TCP를 쓰지 않고 0700 디렉터리의 유닉스 소켓에서만 듣는다(5.3). 외부에서는 Funnel → 8710으로만 들어온다(12장).
 - **구버전 Socket.IO**: 치지직이 socket.io-client 2.0.3까지만 지원해서 알려진 취약점이 있는 구버전 의존성을 쓸 수밖에 없다. 채팅 수신 모듈 안에서만 쓰고, 연결 대상은 치지직이 발급한 세션 URL로만 제한하며, `npm audit` 결과를 기록해 둔다.
 - **호스트**: FileVault를 켜고 잠자기를 끈다(`pmset`). 의존성 버전은 고정한다.
 
@@ -253,7 +273,7 @@ POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
 | 쓰기 API 429·5xx | 실행기가 백오프하며 최대 3회 재시도한다. 1분 동안 실패율이 50%를 넘으면 자동 숨김을 끄고 알린다 |
 | 쓰기 API 응답 시간 초과·연결 끊김·해석할 수 없는 2xx 본문 | 치지직이 이미 처리했을 수 있어 다시 보내지 않는다. "결과를 알 수 없으니 확인한 뒤 다시 시도"로 알린다. 연결 거부·DNS 실패(요청이 나가기 전)만 재시도한다. 5xx 재시도는 유지하되, 504처럼 앞단이 시간 초과를 알린 경우 치지직이 이미 처리했을 수 있다는 위험을 받아들인다 |
 | 쓰기 요청 폭주 | 실행기 대기열은 500건까지 받는다. 넘치면 새 요청을 바로 거절하고 실패로 기록한다 |
-| 워커 종료·응답 없음(2초 타임아웃) | 규칙은 계속 동작한다. "AI 중지"를 표시하고, launchd가 워커를 다시 띄운다 |
+| 워커 종료·응답 없음(2초 타임아웃) | 규칙은 계속 동작한다. "AI 중지"를 표시하고, 30초 넘게 이어지면 알림을 한 번 보낸다. launchd가 워커를 다시 띄운다. 조용한 채널에서도 상태 확인(10초마다)으로 알아챈다. 추론이 10초 넘게 멈추면 워커가 스스로 끝나 launchd가 다시 띄운다 |
 | AI 과부하 | 5.4의 정책을 따른다 |
 | 맥 미니·네트워크 다운 | 모든 자동 기능이 멈춘다. 방송 전에 상태 점검 화면으로 확인한다 |
 | DB | SQLite WAL 모드로 운영하고 매일 백업(7일 보관)한다 |
@@ -267,9 +287,10 @@ POST http://127.0.0.1:8711/classify   (1차 워커. 2차 워커는 8712)
 | `credential` | channel_id, access_token_enc, refresh_token_enc, access_expires_at, refreshed_at | 연결 해제 시 삭제 |
 | `setting` | channel_id, auto_hide_enabled, stage1_threshold(0.05), candidate_threshold(0.5), sure_threshold(0.99), breaker_per_minute(60), retention_days_content(30), retention_days_audit(180) | 상시 |
 | `rule_entry` | id, channel_id, kind(strong·weak·exception·allow·allow_domain·threat·keyword_route·spam), pattern, created_by, created_at | 상시 |
-| `verdict` | id, channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason(rule_id 또는 model), unsafe_probability, category, status(pending·hidden·ignored·restricted·false_positive), created_at | 30일 |
+| `verdict` | id, channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason(rule_id 또는 `ai:<범주>`), unsafe_probability, category, sure, status(pending·hidden·ignored·restricted·false_positive), created_at | 30일 |
+| `message_hide` | chat_channel_id, sender_channel_id, message_time, state(sending·hidden·result_unknown), updated_at. 같은 메시지에 숨김이 두 번 나가지 않게 하는 장부(원문 없음). 보내기 전에 sending을 먼저 적어, 결과를 적지 못하고 끝나면 결과 모름으로 막는다 | 원문·감사 기간 중 긴 쪽(기본 180일) |
 | `audit_log` | id, channel_id, actor_type(manager·rule·system), actor_channel_id, action, target_sender_channel_id, verdict_id, result, error, created_at | 180일(원문 없음) |
-| `minute_stat` | channel_id, minute, received, skipped, deduplicated, stage1_forwarded, stage2_done, stage2_dropped, candidates, auto_hidden, shadow, invalid_events | 180일 |
+| `minute_stat` | channel_id, minute, received, skipped, deduplicated, stage1_forwarded, stage2_done, stage2_dropped, ai_unchecked, candidates, auto_hidden, shadow, invalid_events | 180일 |
 | `manager_session` | id, manager_channel_id, role, expires_at, last_role_check_at | 만료 시 삭제 |
 | `push_subscription` | id, manager_channel_id, endpoint, keys | 해지 시 삭제 |
 

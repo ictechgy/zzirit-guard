@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 찌리릿 가드 1차 분류기 워커 LaunchAgent 템플릿. install-launchd.sh stage1-worker <모델 디렉터리>가 __표시__를 실제 경로로 바꿔 설치한다.
+     워커 venv의 python을 직접 부른다(launchd는 셸 설정을 읽지 않아 uv를 PATH에서 찾지 못할 수 있다).
+     실패 종료(멈춘 추론 70, 설정 오류 2)일 때만 10초 간격으로 다시 띄운다. 추론이 느려지지 않게 자원 제한이 없는 Interactive로 둔다. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.zzirit-guard.stage1-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/workers/stage1/.venv/bin/python</string>
+    <string>-m</string>
+    <string>zg_stage1.worker</string>
+    <string>--model-dir</string>
+    <string>__MODEL_DIR__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ZG_DATA_DIR</key><string>__DATA_DIR__</string>
+  </dict>
+  <key>WorkingDirectory</key><string>__REPO__/workers/stage1</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>__LOG_DIR__/stage1-worker.log</string>
+  <key>StandardErrorPath</key><string>__LOG_DIR__/stage1-worker.err.log</string>
+</dict>
+</plist>
