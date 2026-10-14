@@ -54,11 +54,13 @@ FINALS = (
 MODERN_JAMO_SOURCE = tuple("ᄀᄁᄂᄃᄄᄅᄆᄇᄈᄉᄊᄋᄌᄍᄎᄏᄐᄑᄒ") + tuple("ᅡᅢᅣᅤᅥᅦᅧᅨᅩᅪᅫᅬᅭᅮᅯᅰᅱᅲᅳᅴᅵ") + tuple("ᆨᆩᆪᆫᆬᆭᆮᆯᆰᆱᆲᆳᆴᆵᆶᆷᆸᆹᆺᆻᆼᆽᆾᆿᇀᇁᇂ")
 MODERN_JAMO = dict(zip(MODERN_JAMO_SOURCE, INITIALS + MEDIALS + FINALS[1:], strict=True))
 
-NUMERIC_AGE_PATTERN = re.compile(r"(?<!\d)(?:[7-9]|1\d)\s*(?:살|세)(?!\d)")
-GRADE_PATTERN = re.compile(r"(?:초[1-6]|중[1-3]|고[1-3])(?:\s*학년)?")
-KOREAN_AGE_PATTERN = re.compile(r"(?:일곱|여덟|아홉|열(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉)?)\s*살")
-PHONE_PATTERN = re.compile(r"(?<!\d)01[016789](?:[- .]?\d){7,8}(?!\d)")
-ADDRESS_PATTERNS = (re.compile(r"\d+\s*동\s*\d+\s*호"), re.compile(r"\d+\s*-\s*\d+\s*번지"))
+# 아래 형태 규칙은 normalize_for_matching을 거친 문자열(글자·숫자만 남음)에 적용한다.
+# 그래서 띄어쓰기·하이픈·점이 사라진 모양을 기준으로 쓴다.
+NUMERIC_AGE_PATTERN = re.compile(r"(?<!\d)(?:[7-9]|1\d)(?:살|세)(?!\d)")
+GRADE_PATTERN = re.compile(r"(?:초[1-6]|중[1-3]|고[1-3])(?:학년)?")
+KOREAN_AGE_PATTERN = re.compile(r"(?:일곱|여덟|아홉|열(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉)?)살")
+PHONE_PATTERN = re.compile(r"(?<!\d)01[016789]\d{7,8}(?!\d)")
+ADDRESS_PATTERNS = (re.compile(r"\d+동\d+호"), re.compile(r"\d+번지"))
 
 
 @dataclass(frozen=True)
@@ -79,9 +81,13 @@ class PrivateLists:
 
 
 def normalize_for_matching(text: str) -> str:
-    """대소문자·폭·띄어쓰기·문장부호 차이를 없애 단순 표기 우회가 목록 매칭을 피하지 못하게 한다."""
+    """NFKC·소문자로 바꾼 뒤 글자(L*)와 숫자(N*)만 남긴다.
+
+    왜 글자·숫자만 남기나: 공백·문장부호만 지우면 폭 없는 문자(U+200B 등, Cf)·기호(★, So)·결합 부호(M*)를
+    낱말 사이에 끼워 넣는 우회가 목록 매칭을 피한다(보안 검토). 거르기는 보수적이어야 하므로 그 밖의 문자를 모두 지운다.
+    """
     folded = unicodedata.normalize("NFKC", text).lower()
-    return "".join(character for character in folded if not character.isspace() and not unicodedata.category(character).startswith("P"))
+    return "".join(character for character in folded if unicodedata.category(character)[0] in {"L", "N"})
 
 
 def decompose_to_compatibility_jamo(text: str) -> str:
@@ -129,14 +135,20 @@ def contains_term(text: str, index: TermIndex) -> bool:
 
 
 def has_minor_age(text: str) -> bool:
-    """목록에 넣기 어려운 나이·학년 숫자 형태를 코드로 고정해 목록 누락에 의존하지 않게 한다."""
-    folded = unicodedata.normalize("NFKC", text).lower()
+    """목록에 넣기 어려운 나이·학년 숫자 형태를 코드로 고정해 목록 누락에 의존하지 않게 한다.
+
+    목록 매칭과 같은 정규화를 써, 숫자와 '살' 사이에 끼운 기호·폭 없는 문자로 피하지 못하게 한다.
+    """
+    folded = normalize_for_matching(text)
     return any(pattern.search(folded) is not None for pattern in (NUMERIC_AGE_PATTERN, GRADE_PATTERN, KOREAN_AGE_PATTERN))
 
 
 def is_pii_like(text: str) -> bool:
-    """실제 값인지 확인하지 않고 전화·주소 모양 자체를 버려 개인정보가 결과에 남을 가능성을 줄인다."""
-    folded = unicodedata.normalize("NFKC", text)
+    """실제 값인지 확인하지 않고 전화·주소 모양 자체를 버려 개인정보가 결과에 남을 가능성을 줄인다.
+
+    구분자(하이픈·점·공백·기호)를 지운 모양으로 보므로, 구분자를 바꿔 끼워도 같은 숫자열로 잡힌다.
+    """
+    folded = normalize_for_matching(text)
     return PHONE_PATTERN.search(folded) is not None or any(pattern.search(folded) is not None for pattern in ADDRESS_PATTERNS)
 
 

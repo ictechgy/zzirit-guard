@@ -6,7 +6,7 @@ M2 2차 계획의 학습 후보를 로컬에서 생성하고, 비공개 금칙 �
 
 1. `python -m zg_datagen.generate harmful|twins|boundary ...`로 JSONL과 manifest를 만든다.
 2. `python -m zg_datagen.filters ...`로 비공개 목록과 형태 규칙을 적용한다.
-3. `python -m zg_datagen.labels make-batches ...`로 작성 의도를 숨긴 라벨 묶음을 만든다.
+3. `python -m zg_datagen.labels make-batches ... --out-dir <묶음> --key-out <비공개 key>`로 작성 의도를 숨긴 라벨 묶음을 만든다. key는 묶음 디렉터리 밖에 둔다(묶음 디렉터리만 외부 라벨러에게 넘긴다).
 4. 두 라벨러는 `zg_datagen/label_prompt.md`만 보고 별도 디렉터리에 판정을 작성한다.
 5. `python -m zg_datagen.labels merge ...`로 일치한 판정과 집계만 합친다.
 

@@ -28,16 +28,30 @@ class LabelDecision:
     category: str | None
 
 
-def make_batches(input_paths: Sequence[Path], seed: int, batch_size: int, output_directory: Path) -> dict[str, object]:
-    """섞은 뒤 lid를 매겨 원래 id와 작성 의도가 라벨러의 판단에 영향을 주지 않게 한다."""
+def make_batches(input_paths: Sequence[Path], seed: int, batch_size: int, output_directory: Path, key_path: Path) -> dict[str, object]:
+    """섞은 뒤 lid를 매겨 원래 id와 작성 의도가 라벨러의 판단에 영향을 주지 않게 한다.
+
+    key(작성 의도가 든 비공개 연결 파일)는 묶음 디렉터리 밖에 따로 쓴다. 왜: 묶음 디렉터리를 통째로 외부 라벨러에게
+    넘기면 key도 함께 넘어가 블라인드가 깨진다(보안 검토).
+    """
     if not input_paths or batch_size < 1:
         raise ValueError("--inputs는 하나 이상이고 --batch-size는 1 이상이어야 합니다.")
+    ensure_key_outside(key_path, output_directory)
     records = load_generation_records(input_paths)
     random.Random(seed).shuffle(records)
     visible, key = build_blind_records(records)
-    paths = prepare_batch_paths(output_directory, len(visible), batch_size)
+    paths = prepare_batch_paths(output_directory, len(visible), batch_size) + [key_path]
+    ensure_outputs_absent([key_path])
     publish_batches(paths, visible, key, batch_size)
     return {"records": len(visible), "batches": len(paths) - 1}
+
+
+def ensure_key_outside(key_path: Path, output_directory: Path) -> None:
+    """key 경로가 묶음 디렉터리(또는 그 아래)에 있으면 거절한다. 라벨러에게 넘기는 디렉터리에 작성 의도가 섞이지 않게 한다."""
+    key_parent = key_path.resolve().parent
+    batch_directory = output_directory.resolve()
+    if key_parent == batch_directory or batch_directory in key_parent.parents:
+        raise ValueError("--key-out은 --out-dir 밖이어야 합니다. 묶음 디렉터리는 외부 라벨러에게 넘기므로 작성 의도가 든 key를 두지 마세요.")
 
 
 def load_generation_records(input_paths: Sequence[Path]) -> list[dict[str, object]]:
@@ -88,7 +102,6 @@ def prepare_batch_paths(output_directory: Path, record_count: int, batch_size: i
     prepare_output_directory(output_directory)
     batch_count = math.ceil(record_count / batch_size)
     paths = [output_directory / f"batch-{index:03d}.jsonl" for index in range(1, batch_count + 1)]
-    paths.append(output_directory / "key.jsonl")
     ensure_outputs_absent(paths)
     return paths
 
@@ -339,7 +352,8 @@ def build_parser() -> argparse.ArgumentParser:
     batches.add_argument("--inputs", type=Path, nargs="+", required=True)
     batches.add_argument("--seed", type=int, required=True)
     batches.add_argument("--batch-size", type=int, default=100)
-    batches.add_argument("--out-dir", type=Path, required=True)
+    batches.add_argument("--out-dir", type=Path, required=True, help="외부 라벨러에게 넘길 묶음 디렉터리")
+    batches.add_argument("--key-out", type=Path, required=True, help="작성 의도가 든 비공개 key 파일(--out-dir 밖)")
     merge = subparsers.add_parser("merge")
     merge.add_argument("--key", type=Path, required=True)
     merge.add_argument("--labeler-a", type=Path, required=True)
@@ -353,7 +367,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     arguments = build_parser().parse_args(argv)
     report: dict[str, object]
     if arguments.command == "make-batches":
-        report = make_batches(arguments.inputs, arguments.seed, arguments.batch_size, arguments.out_dir)
+        report = make_batches(arguments.inputs, arguments.seed, arguments.batch_size, arguments.out_dir, arguments.key_out)
     else:
         report = merge_labels(arguments.key, arguments.labeler_a, arguments.labeler_b, arguments.out_dir)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
