@@ -50,8 +50,8 @@ OVERLAP_STRIP_PATTERN = re.compile(r"[\s\W_]+", re.UNICODE)
 # 숫자 사이의 점·콜론·쉼표. 지우면 "1.5배속"과 "15배속"처럼 값이 다른 문장이 같아지므로, 지우기 전에 표시 글자로 바꿔 둔다.
 NUMERIC_SEPARATOR_PATTERN = re.compile(r"(?<=\d)[.:,](?=\d)")
 
-# 숫자 구분자 자리에 넣는 표시 글자. 단어 문자(한글 자모)라 지워지지 않는다. 채팅에서 거의 쓰지 않는 아래아를 쓴다.
-NUMERIC_SEPARATOR_MARK = "ㆍ"
+# 구분자마다 다른 표시 글자. 단어 문자(옛 한글 자모)라 지워지지 않고, 채팅에서 거의 쓰지 않는다. 1.5와 1:5를 구분하려고 따로 둔다.
+NUMERIC_SEPARATOR_MARKS: dict[str, str] = {".": "ㆍ", ":": "ㆆ", ",": "ㆅ"}
 
 # 평가셋 하나에서 ambiguous가 차지할 수 있는 최대 비율(정책 문서). 어려운 문장을 애매로 빼서 숫자를 좋게 만드는 일을 막는다.
 MAX_AMBIGUOUS_FRACTION = 0.05
@@ -150,7 +150,8 @@ def normalize_for_overlap(text: str) -> str:
     겹침을 지나치게 많이 잡는다. 여기서는 '사실상 같은 문장'만 잡으면 된다.
     """
     folded = unicodedata.normalize("NFKC", text).lower()
-    return OVERLAP_STRIP_PATTERN.sub("", NUMERIC_SEPARATOR_PATTERN.sub(NUMERIC_SEPARATOR_MARK, folded))
+    marked = NUMERIC_SEPARATOR_PATTERN.sub(lambda match: NUMERIC_SEPARATOR_MARKS[match.group(0)], folded)
+    return OVERLAP_STRIP_PATTERN.sub("", marked)
 
 
 def character_ngrams(normalized_text: str) -> frozenset[str]:
@@ -299,9 +300,17 @@ def find_cross_set_overlaps(item_sets: Sequence[Sequence[ChatEvalItem]]) -> list
     return findings
 
 
+def ensure_distinct_splits(item_sets: Sequence[Sequence[ChatEvalItem]]) -> None:
+    """여러 파일을 함께 검사할 때 같은 셋(예: 개발셋 두 개)이 두 번 오면 오류다. 개발셋과 보류셋을 짝지어 보는 검사이기 때문이다."""
+    splits = [items[0].split for items in item_sets]
+    if len(splits) != len(set(splits)):
+        raise DatasetFormatError(f"같은 셋이 두 번 들어왔습니다({', '.join(splits)}). 개발셋과 보류셋을 한 개씩 주세요.")
+
+
 def check_eval_files(paths: Sequence[Path]) -> list[OverlapFinding]:
     """평가셋 파일들을 각각 검증하고(load_validated_eval_set), 셋 사이의 겹침과 계열 충돌을 모은다. 건수 요약을 출력한다."""
     item_sets = [load_validated_eval_set(path) for path in paths]
+    ensure_distinct_splits(item_sets)
     for path, items in zip(paths, item_sets, strict=True):
         print(f"{path.name}: {len(items)}건({items[0].split})")
         print("\n".join(describe_counts(items)))

@@ -79,25 +79,40 @@ def test_summary_reports_critical_and_allow_extremes() -> None:
     assert summary["allow_forward_max"] == 0.0
 
 
-def test_candidates_are_floored_scores_plus_forward_nothing() -> None:
-    """후보는 점수를 여섯째 자리에서 내림한 값과 1.0이다. 0은 후보가 아니다(임계값은 0보다 커야 한다)."""
+def test_candidates_are_floored_scores_and_next_grid_values() -> None:
+    """후보는 점수를 여섯째 자리에서 내림한 값, 그 바로 위 격자값, 1.0이다. 0은 후보가 아니다(임계값은 0보다 커야 한다)."""
     items = [item("a", "allow", "short_normal"), item("b", "allow", "short_normal"), item("c", "allow", "short_normal")]
-    assert candidate_thresholds(scored_pairs(items, [0.3000001, 0.25, 0.0])) == [0.25, 0.3, 1.0]
+    assert candidate_thresholds(scored_pairs(items, [0.3000001, 0.25, 0.0])) == [0.000001, 0.25, 0.250001, 0.3, 0.300001, 1.0]
 
 
-def test_budget_threshold_keeps_boundary_items() -> None:
-    """점수 0.3000001인 문장은 고른 임계값(0.3)에서도 넘어간다. 올림하면 빠지는 문제를 막는다."""
+def test_budget_threshold_is_smallest_grid_value_meeting_budget() -> None:
+    """예산 0.75를 지키는 가장 작은 격자값은 점수 0.1인 문장만 빼는 0.100001이다. 고른 값 그대로 예산을 지킨다."""
     items = [item("f1", "allow", "friendly_profanity"), item("s1", "allow", "short_normal"), item("s2", "allow", "short_normal")]
     pairs = scored_pairs(items, [0.3000001, 0.1, 0.9])
     threshold = select_budget_threshold(pairs, HALF_HALF_MIX, 0.75)
-    assert threshold == pytest.approx(0.3)
-    assert forward_rates_by_category(pairs, threshold)["friendly_profanity"] == 1.0
+    assert threshold == pytest.approx(0.100001)
+    assert weighted_forward_rate(forward_rates_by_category(pairs, threshold), HALF_HALF_MIX) <= 0.75
 
 
-def test_budget_threshold_falls_back_to_forward_nothing() -> None:
-    """예산 0이면 아무것도 넘기지 않는 1.0을 고른다."""
+def test_budget_threshold_keeps_boundary_items() -> None:
+    """점수 0.3000001인 문장은 내림한 후보(0.3)에서 넘어간다. 올림하면 빠지는 문제를 막는다."""
+    items = [item("f1", "allow", "friendly_profanity"), item("s1", "allow", "short_normal")]
+    pairs = scored_pairs(items, [0.3000001, 0.2])
+    threshold = select_budget_threshold(pairs, HALF_HALF_MIX, 0.5)
+    assert threshold == pytest.approx(0.200001)
+    assert forward_rates_by_category(pairs, 0.3)["friendly_profanity"] == 1.0
+
+
+def test_budget_zero_picks_value_just_above_max_score() -> None:
+    """예산 0이면 가장 큰 점수 바로 위 격자값을 고른다(아무것도 넘기지 않음)."""
     pairs = scored_pairs([item("f1", "allow", "friendly_profanity")], [0.8])
-    assert select_budget_threshold(pairs, {"friendly_profanity": 1.0}, 0.0) == 1.0
+    assert select_budget_threshold(pairs, {"friendly_profanity": 1.0}, 0.0) == pytest.approx(0.800001)
+
+
+def test_no_threshold_when_scores_reach_one() -> None:
+    """점수가 정확히 1.0이면 임계값 1.0에서도 넘어가므로, 예산 0은 지킬 수 없어 None이다."""
+    pairs = scored_pairs([item("f1", "allow", "friendly_profanity")], [1.0])
+    assert select_budget_threshold(pairs, {"friendly_profanity": 1.0}, 0.0) is None
 
 
 def test_traffic_mix_validation() -> None:
@@ -131,6 +146,15 @@ def write_dev_report(path: Path, model_sha: str, split: str = "dev") -> Path:
     return path
 
 
+@pytest.mark.parametrize("bad_threshold", [None, -1, 0, 2, "0.4", True, float("nan")])
+def test_dev_threshold_must_be_in_range(tmp_path: Path, bad_threshold: object) -> None:
+    """개발셋 결과의 임계값이 (0, 1] 범위의 수가 아니면 오류다(NaN·문자열·불리언 포함)."""
+    path = tmp_path / "dev.json"
+    path.write_text(json.dumps({"split": "dev", "model_weights_sha256": "abc", "decision": {"mode": "budget", "threshold": bad_threshold}}), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="범위의 수가 아닙니다"):
+        read_dev_threshold(path, "abc")
+
+
 def test_dev_threshold_requires_same_model(tmp_path: Path) -> None:
     """같은 모델의 개발셋 결과에서만 임계값을 읽는다."""
     assert read_dev_threshold(write_dev_report(tmp_path / "dev.json", "abc"), "abc") == 0.42
@@ -149,6 +173,8 @@ def test_output_path_protects_holdout_results(tmp_path: Path) -> None:
         resolve_output_path(argparse.Namespace(output=None, model_dir=tmp_path, overwrite=False), "dev")
     with pytest.raises(OutputExistsError):
         resolve_output_path(argparse.Namespace(output=None, model_dir=tmp_path, overwrite=True), "holdout")
+    with pytest.raises(DatasetFormatError, match="--output"):
+        resolve_output_path(argparse.Namespace(output=tmp_path / "elsewhere.json", model_dir=tmp_path, overwrite=False), "holdout")
 
 
 def test_dev_report_has_table_scores_and_no_text() -> None:

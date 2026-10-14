@@ -100,6 +100,15 @@ def test_normalization_keeps_separators_between_digits() -> None:
     assert normalize_for_overlap("1.5배속") != normalize_for_overlap("15배속")
     assert normalize_for_overlap("2:1 역전") != normalize_for_overlap("21 역전")
     assert normalize_for_overlap("3판.") == normalize_for_overlap("3판")
+    assert len({normalize_for_overlap(text) for text in ("1.5배속", "1:5배속", "1,5배속")}) == 3
+
+
+def test_cli_rejects_same_split_twice(tmp_path: Path) -> None:
+    """개발셋 두 개처럼 같은 셋이 두 번 오면 오류다."""
+    first = write_jsonl(tmp_path / "a.jsonl", full_coverage_records("dev"))
+    second = write_jsonl(tmp_path / "b.jsonl", full_coverage_records("dev", seed_offset=10_000))
+    with pytest.raises(DatasetFormatError, match="같은 셋"):
+        main([str(first), str(second)])
 
 
 def test_jaccard_on_character_ngrams() -> None:

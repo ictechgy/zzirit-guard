@@ -55,8 +55,8 @@ CHAT_REPORT_THRESHOLDS: tuple[float, ...] = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,
 # 고르는 임계값의 소수 자릿수. 운영 설정에 그대로 옮겨 적을 수 있는 정밀도다.
 THRESHOLD_DECIMALS = 6
 
-# 아무것도 넘기지 않는 임계값. 점수는 1보다 작으므로 이 값이면 전달률이 0이다(예산을 지키는 마지막 후보).
-FORWARD_NOTHING_THRESHOLD = 1.0
+# 임계값이 가질 수 있는 가장 큰 값(probability_argument와 같은 (0, 1] 범위). 점수가 정확히 1.0인 문장은 이 값에서도 넘어간다.
+MAX_THRESHOLD = 1.0
 
 # 구성비 합이 1에서 이만큼 넘게 벗어나면 잘못 쓴 파일로 본다.
 MIX_SUM_TOLERANCE = 1e-6
@@ -122,25 +122,27 @@ def summarize_at_chat_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], thr
 
 
 def candidate_thresholds(pairs: Sequence[tuple[ChatEvalItem, float]]) -> list[float]:
-    """고를 수 있는 임계값 후보: 점수를 소수 여섯째 자리에서 내림한 값들과, 아무것도 넘기지 않는 1.0.
+    """고를 수 있는 임계값 후보(소수 여섯째 자리 격자): 점수마다 내림한 값과 그 바로 위 격자값, 그리고 최댓값 1.0.
 
-    왜 내림인가: 올림하면 그 점수의 문장이 빠져 재현율이 떨어진다. 내림한 값 자체로 다시 계산하므로 예산도 정확히 지킨다.
+    왜 둘 다인가: 내림한 값은 그 점수의 문장을 넣고, 바로 위 값은 빼는 가장 작은 임계값이다. 이 둘이면 격자 위의
+    모든 전달 경우를 덮어, 예산을 지키는 가장 작은 격자값을 놓치지 않는다. 범위 (0, 1] 밖의 값은 뺀다.
     """
-    scale = 10**THRESHOLD_DECIMALS
-    floored = {math.floor(score * scale) / scale for _item, score in pairs}
-    return sorted(value for value in floored | {FORWARD_NOTHING_THRESHOLD} if value > 0)
+    step = 10**-THRESHOLD_DECIMALS
+    floored = {round(math.floor(score / step) * step, THRESHOLD_DECIMALS) for _item, score in pairs}
+    above = {round(value + step, THRESHOLD_DECIMALS) for value in floored}
+    return sorted(value for value in floored | above | {MAX_THRESHOLD} if 0 < value <= MAX_THRESHOLD)
 
 
-def select_budget_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], mix: Mapping[str, float], budget: float) -> float:
-    """가중 전달률이 예산 이하가 되는 가장 작은 임계값. 돌려주는 값 그대로 계산해 확인한다.
+def select_budget_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], mix: Mapping[str, float], budget: float) -> float | None:
+    """가중 전달률이 예산 이하가 되는 가장 작은 임계값. 돌려주는 값 그대로 계산해 확인한다. 없으면 None이다.
 
     왜 가장 작은 값인가: 임계값이 작을수록 재현율이 높다. 예산을 지키는 범위에서 재현율을 최대로 하는 값이다.
-    1.0(아무것도 넘기지 않음)은 항상 예산을 지키므로 결과가 없는 경우는 없다. 그 값이 나오면 핵심 재현율이 0으로 보고된다.
+    None은 임계값 1.0에서도 예산을 넘는다는 뜻이다(점수가 1.0인 문장이 많을 때). 1차 분류기만으로는 예산을 지킬 수 없다.
     """
     for candidate in candidate_thresholds(pairs):
         if weighted_forward_rate(forward_rates_by_category(pairs, candidate), mix) <= budget:
             return candidate
-    return FORWARD_NOTHING_THRESHOLD
+    return None
 
 
 def compute_chat_auc(pairs: Sequence[tuple[ChatEvalItem, float]]) -> float:
@@ -160,13 +162,14 @@ def build_dev_report(items: Sequence[ChatEvalItem], scores: Sequence[float], mix
     """개발셋 결과: 임계값 표, 예산 임계값과 그 요약, 문장별 점수(id만). 원문은 넣지 않는다."""
     pairs = scored_pairs(items, scores)
     threshold = select_budget_threshold(pairs, mix, budget)
+    at_threshold = None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix)
     return {
         "split": "dev",
         "counts": describe_counts(items, pairs),
         "auc": compute_chat_auc(pairs),
         "traffic_mix": dict(mix),
         "threshold_table": [summarize_at_chat_threshold(pairs, value, mix) for value in CHAT_REPORT_THRESHOLDS],
-        "decision": {"mode": "budget", "budget": budget, "threshold": threshold, "at_threshold": summarize_at_chat_threshold(pairs, threshold, mix)},
+        "decision": {"mode": "budget", "budget": budget, "threshold": threshold, "at_threshold": at_threshold},
         "scores": {item.item_id: round(score, METRIC_DECIMALS) for item, score in zip(items, scores, strict=True)},
     }
 
@@ -204,14 +207,21 @@ def compute_model_weights_sha256(model_directory: Path) -> str:
     return compute_file_sha256(model_directory / modeling.WEIGHTS_FILE_NAME)
 
 
+def require_valid_threshold(value: object, file_name: str) -> float:
+    """개발셋 결과의 임계값이 (0, 1] 범위의 유한한 수인지 확인한다. NaN이면 모든 비교가 거짓이 돼 '하나도 안 넘김'으로 보이기 때문이다."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not (math.isfinite(value) and 0 < value <= MAX_THRESHOLD):
+        raise DatasetFormatError(f"{file_name}의 임계값({value!r})이 (0, 1] 범위의 수가 아닙니다. 예산을 지키는 임계값이 없었거나 파일이 손상됐습니다.")
+    return float(value)
+
+
 def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str) -> float:
-    """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나 다른 모델의 결과면 오류다."""
+    """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나, 다른 모델의 결과거나, 임계값이 잘못됐으면 오류다."""
     report = json.loads(dev_report_path.read_text(encoding="utf-8"))
     if report.get("split") != "dev" or report.get("decision", {}).get("mode") != "budget":
         raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 예산 결과가 아닙니다. --forward-budget으로 만든 개발셋 결과를 주세요.")
     if report.get("model_weights_sha256") != model_weights_sha256:
         raise DatasetFormatError(f"{dev_report_path.name}은 다른 모델의 결과입니다. 같은 --model-dir로 개발셋을 먼저 평가하세요.")
-    return float(report["decision"]["threshold"])
+    return require_valid_threshold(report["decision"].get("threshold"), dev_report_path.name)
 
 
 def require_matching_decision(arguments: argparse.Namespace, split: str) -> None:
@@ -230,7 +240,12 @@ def load_traffic_mix(path: Path | None) -> dict[str, float]:
 
 
 def resolve_output_path(arguments: argparse.Namespace, split: str) -> Path:
-    """결과 파일 경로. 이미 있으면 덮어쓰지 않는다. 보류셋 결과는 --overwrite로도 덮어쓰지 않는다(한 번만 보는 셋이라서)."""
+    """결과 파일 경로. 이미 있으면 덮어쓰지 않는다. 보류셋은 모델 디렉터리의 정해진 이름에만 쓰고, --overwrite로도 덮어쓰지 않는다.
+
+    왜: 보류셋은 모델마다 한 번만 본다. 다른 경로로 몇 번이고 다시 돌릴 수 있으면 그 결과를 보고 설정을 바꾸게 된다.
+    """
+    if split == "holdout" and arguments.output is not None:
+        raise DatasetFormatError("보류셋 결과는 모델 디렉터리의 chat-eval-holdout.json에만 씁니다. --output을 빼세요.")
     output = arguments.output or arguments.model_dir / f"chat-eval-{split}.json"
     if output.exists() and (split == "holdout" or not arguments.overwrite):
         raise OutputExistsError(f"{output.name}이 이미 있습니다. 개발셋 결과는 --overwrite로 바꿀 수 있고, 보류셋 결과는 바꾸지 않습니다.")
@@ -258,9 +273,11 @@ def format_chat_report_markdown(report: dict) -> str:
     lines = [f"### 채팅 평가({report['split']}, {counts['scored']}문장, 애매 {counts['ambiguous']}): AUC {report['auc']:.4f}", ""]
     lines += ["| 임계값 | 가중 전달률 | 핵심 재현율 최소 | 핵심 재현율 평균 | 허용 전달 최대 |", "|---|---|---|---|---|"]
     at_threshold = report["decision"]["at_threshold"]
-    lines += [format_summary_row(row) for row in report.get("threshold_table", []) + [at_threshold]]
+    lines += [format_summary_row(row) for row in report.get("threshold_table", []) + ([at_threshold] if at_threshold else [])]
     decision = {key: value for key, value in report["decision"].items() if key != "at_threshold"}
     lines += ["", f"결정: {json.dumps(decision, ensure_ascii=False)}", ""]
+    if at_threshold is None:
+        return "\n".join(lines + ["예산을 지키는 임계값이 없습니다. 1차 분류기만으로는 이 예산을 지킬 수 없습니다."])
     lines.append("범주별 전달률: " + ", ".join(f"{category} {rate}" for category, rate in at_threshold["by_category"].items()))
     return "\n".join(lines)
 
