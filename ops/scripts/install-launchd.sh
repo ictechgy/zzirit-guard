@@ -39,15 +39,17 @@ template_value() { escape_sed "$(escape_xml "$1")"; }
 
 # .env에서 ZG_DATA_DIR 한 줄만 읽어 출력한다. 비밀값이 든 .env를 source하지 않는다.
 # 왜: 서버는 .env의 ZG_DATA_DIR 아래에서 워커 소켓을 찾는다. 워커에 다른 경로를 주면 AI가 계속 '연결 안 됨'이 된다.
-# node --env-file처럼 마지막 줄이 이기고, 값을 감싼 따옴표 한 쌍은 벗긴다. 절대 경로가 아니거나 #(줄 끝 주석일 수 있음)이 있으면 거절한다.
+# node --env-file과 같게 읽는다: 마지막 줄이 이기고, 줄 앞 공백·export·= 둘레 공백을 허용하고, 값 앞뒤 공백을 지운 뒤 감싼 따옴표 한 쌍을 벗긴다.
+# 따옴표 안의 공백은 남긴다. 절대 경로가 아니거나 #(줄 끝 주석일 수 있음)이 있으면 거절한다.
 read_data_dir() {
   if [[ ! -r "$ENV_FILE" ]]; then
     echo "환경 파일이 없거나 읽을 수 없습니다: $ENV_FILE — ops/env.example을 복사해 채운 뒤 chmod 600 하세요(워커도 여기의 ZG_DATA_DIR을 씁니다)." >&2
     exit 1
   fi
+  local key_pattern='^[[:space:]]*(export[[:space:]]+)?ZG_DATA_DIR[[:space:]]*='
   local line value
-  line=$(grep -E '^ZG_DATA_DIR=' "$ENV_FILE" | tail -n 1 || true)
-  value="${${line#ZG_DATA_DIR=}%$'\r'}"
+  line=$(grep -E "$key_pattern" "$ENV_FILE" | tail -n 1 || true)
+  value=$(print -r -- "$line" | sed -E -e "s/$key_pattern//" -e $'s/\r$//' -e 's/^[[:space:]]+//' -e 's/[[:space:]]+$//')
   if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then value="${value:1:-1}"; fi
   if [[ "$value" != /* || "$value" == *'#'* ]]; then
     echo "${ENV_FILE}의 ZG_DATA_DIR이 없거나 절대 경로가 아닙니다(받은 값: '$value'). 줄 끝 주석 없이 /로 시작하는 경로를 쓰세요." >&2

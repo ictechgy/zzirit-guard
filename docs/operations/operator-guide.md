@@ -78,9 +78,11 @@ for worker in stage1-worker stage2-worker; do
   launchctl bootout gui/$(id -u)/com.zzirit-guard.$worker
   for name in $worker $worker.err; do [[ -f $name.log ]] && mv -n $name.log $name-$stamp.log; done
   (umask 077; touch $worker.log $worker.err.log)   # launchd가 만들면 644가 되므로 600으로 미리 만든다
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zzirit-guard.$worker.plist
+  # 내린 직후에는 작업이 아직 남아 올리기가 실패할 수 있어, 3초 뒤 한 번 더 시도한다(install-launchd.sh와 같다)
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zzirit-guard.$worker.plist || { sleep 3; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zzirit-guard.$worker.plist; }
 done
 chmod 600 *-worker*.log
+launchctl print gui/$(id -u)/com.zzirit-guard.stage1-worker | grep state   # 두 워커가 다시 떴는지 본다(stage2도)
 ```
 - **옮겨 둔 옛 로그는 30일이 지나면 지운다.** 로그에는 매니저 채널 ID(개인을 알아볼 수 있는 식별자)가 남으므로, 쓸모가 없어진 기록을 두지 않는다(개인정보 파기). 로그를 옮길 때마다(한 달에 한 번 이상) 아래 한 줄도 실행한다.
 - 30일은 파일을 마지막으로 쓴 날부터 센다. 그래서 로그 한 줄이 남는 기간은 길어야 약 두 달이다(옮기기 전 한 달, 옮긴 뒤 30일).
