@@ -5,7 +5,7 @@
 평가셋이 72문장이나 서로를 거의 그대로 담고 있으면 숫자가 부풀려지므로, 도구로 겹침을 막는다.
 라벨 정책: docs/ml/chat-eval-policy.md. 원문은 오류 메시지·출력에 넣지 않고 id만 쓴다.
 
-CLI 사용 예: uv run python -m zg_stage1.chat_eval_data eval_data/chat-dev-v1.jsonl eval_data/chat-holdout-v1.jsonl
+CLI 사용 예: uv run python -m zg_stage1.chat_eval_data eval_data/chat-dev-v2.jsonl eval_data/chat-holdout-v2.jsonl
 """
 
 from __future__ import annotations

@@ -15,8 +15,8 @@
 원문은 출력·결과 파일에 넣지 않는다. 문장은 id로만 가리킨다.
 
 CLI 사용 예:
-  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v1.jsonl --forward-budget 0.304
-  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-holdout-v1.jsonl --dev-report <모델>/chat-eval-dev.json
+  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v2.jsonl --forward-budget 0.304
+  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-holdout-v2.jsonl --dev-report <모델>/chat-eval-dev.json
 """
 
 from __future__ import annotations

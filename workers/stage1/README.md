@@ -161,15 +161,15 @@ uv run python -m zg_stage1.thresholds --scores-file "$ZG_DATA_DIR/ml/stage1/kcel
 uv run python -m zg_stage1.capacity --rates 10 20 30 50
 
 # 2) 평가셋 형식·겹침 검사(72문장, 두 셋 사이, 셋 안)
-uv run python -m zg_stage1.chat_eval_data eval_data/chat-dev-v1.jsonl eval_data/chat-holdout-v1.jsonl
+uv run python -m zg_stage1.chat_eval_data eval_data/chat-dev-v2.jsonl eval_data/chat-holdout-v2.jsonl
 
 # 3) 개발셋에서 F_max 예산을 지키는 임계값을 고른다
 uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>" \
-  --eval-file eval_data/chat-dev-v1.jsonl --forward-budget 0.304
+  --eval-file eval_data/chat-dev-v2.jsonl --forward-budget 0.304
 
 # 4) 3의 결과(같은 모델)로 보류셋을 한 번 본다. 임계값 하나의 집계만 남고, 결과 파일은 덮어쓰지 않는다
 uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>" \
-  --eval-file eval_data/chat-holdout-v1.jsonl --dev-report "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>/chat-eval-dev.json"
+  --eval-file eval_data/chat-holdout-v2.jsonl --dev-report "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>/chat-eval-dev.json"
 ```
 
 - 가중 전달률은 가정한 트래픽 구성비(`evaluate_chat.DEFAULT_TRAFFIC_MIX`)로 계산한다. 실측 비율이 생기면 `--mix-file`로 바꾼다.
@@ -181,10 +181,10 @@ uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kce
 ```sh
 # 저장소 루트에서. 문장마다 규칙 판정·키워드 경로 일치·AI 건너뜀 여부와 평가셋 해시·규칙 목록 지문을 쓴다(원문 없음)
 npm run build -w @zzirit-guard/server
-node apps/server/dist/tools/evaluateRules.js --eval-file workers/stage1/eval_data/chat-dev-v1.jsonl --output <scratch>/rules-dev.jsonl
+node apps/server/dist/tools/evaluateRules.js --eval-file workers/stage1/eval_data/chat-dev-v2.jsonl --output <scratch>/rules-dev.jsonl
 # 개발셋은 --keywords <파일>로 목록을 더해 볼 수 있다. 보류셋은 저장소 기본 목록(defaultRules.ts)으로만 돌린다
 
-uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v1.jsonl \
+uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v2.jsonl \
   --forward-budget 0.304 --rule-routes <scratch>/rules-dev.jsonl
 ```
 

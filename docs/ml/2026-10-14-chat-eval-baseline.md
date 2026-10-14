@@ -2,7 +2,7 @@
 
 - 작성일: 2026-10-14
 - 계획: [모델 보강 계획](2026-10-14-model-strengthening-plan.md) M1
-- 평가셋: [workers/stage1/eval_data](../../workers/stage1/eval_data/README.md)
+- 평가셋: [workers/stage1/eval_data](../../workers/stage1/eval_data/README.md)의 **v1**. 이후 v2로 욕설·성희롱·미성년 대상·협박 문장을 늘려 이 문서의 숫자와 바로 비교하지 않는다
   - 개발셋 600문장(채점 594, 애매 6)
   - 보류셋 588문장
   - 둘 다 합성이고 실채팅이 아니다.
