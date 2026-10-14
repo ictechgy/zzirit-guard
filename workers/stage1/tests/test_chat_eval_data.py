@@ -2,20 +2,28 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import pytest
 
 from tests.conftest import write_jsonl
 from zg_stage1.chat_eval_data import (
+    ALLOW_CATEGORIES,
+    HARMFUL_CATEGORIES,
+    MIN_SCORED_PER_CATEGORY,
     SEALED_REGRESSION_SHA256,
     OverlapIndex,
     character_ngrams,
+    ensure_ambiguous_limit,
+    ensure_category_coverage,
+    find_family_conflicts,
     find_internal_duplicates,
     find_overlaps,
     jaccard_similarity,
     load_chat_eval_set,
     load_sealed_regression_index,
+    load_validated_eval_set,
     main,
     normalize_for_overlap,
 )
@@ -87,6 +95,13 @@ def test_normalization_ignores_spacing_case_and_punctuation() -> None:
     assert normalize_for_overlap("GG 잘했다!!") == normalize_for_overlap("ｇｇ잘 했다.")
 
 
+def test_normalization_keeps_separators_between_digits() -> None:
+    """숫자 사이의 점·콜론은 남긴다. "1.5배속"과 "15배속"은 다른 문장이다. 숫자 뒤 마침표는 지운다."""
+    assert normalize_for_overlap("1.5배속") != normalize_for_overlap("15배속")
+    assert normalize_for_overlap("2:1 역전") != normalize_for_overlap("21 역전")
+    assert normalize_for_overlap("3판.") == normalize_for_overlap("3판")
+
+
 def test_jaccard_on_character_ngrams() -> None:
     """같으면 1, 전혀 다르면 0, 짧은 문장은 문장 전체 하나로 비교한다."""
     assert jaccard_similarity(character_ngrams("가나다라"), character_ngrams("가나다라")) == 1.0
@@ -117,10 +132,73 @@ def test_symbol_only_texts_are_not_compared(tmp_path: Path) -> None:
     assert find_internal_duplicates(items) == []
 
 
-def test_finds_internal_duplicates(tmp_path: Path) -> None:
-    """한 셋 안에서 정규화 후 같은 문장은 두 번째 것을 보고한다."""
-    items = load_chat_eval_set(write_jsonl(tmp_path / "dev.jsonl", [eval_record("d1", "화이팅!"), eval_record("d2", "화이팅"), eval_record("d3", "굿")]))
+def test_finds_internal_near_duplicates(tmp_path: Path) -> None:
+    """한 셋 안에서 같거나 거의 같은(낱말 하나만 다른) 문장은 뒤의 것을 보고한다."""
+    records = [eval_record("d1", "오늘 방송 진짜 재밌다 ㅋㅋ"), eval_record("d2", "오늘 방송 진짜 재밌다 ㅋㅋㅋ"), eval_record("d3", "점심 뭐 드셨어요")]
+    items = load_chat_eval_set(write_jsonl(tmp_path / "dev.jsonl", records))
     assert [(finding.item_id, finding.reference_id) for finding in find_internal_duplicates(items)] == [("d2", "d1")]
+
+
+def test_symbol_only_texts_are_not_internal_duplicates(tmp_path: Path) -> None:
+    """기호만 있는 문장끼리는 같다고 보지 않는다."""
+    items = load_chat_eval_set(write_jsonl(tmp_path / "dev.jsonl", [eval_record("d1", "!!!"), eval_record("d2", "???")]))
+    assert find_internal_duplicates(items) == []
+
+
+def test_family_conflicts_are_per_author(tmp_path: Path) -> None:
+    """같은 작성자의 같은 계열이 두 셋에 걸치면 보고한다. 다른 작성자가 우연히 같은 이름을 쓴 것은 괜찮다."""
+    dev = load_chat_eval_set(write_jsonl(tmp_path / "dev.jsonl", [eval_record("d1", "가나다라마")]))
+    same_author = load_chat_eval_set(write_jsonl(tmp_path / "h1.jsonl", [eval_record("h1", "바사아자차", split="holdout")]))
+    other_author = load_chat_eval_set(
+        write_jsonl(tmp_path / "h2.jsonl", [eval_record("h2", "카타파하가", split="holdout", author="model-c", reviewer="model-a")])
+    )
+    assert [(finding.item_id, finding.reference_id) for finding in find_family_conflicts([dev, same_author])] == [("h1", "d1")]
+    assert find_family_conflicts([dev, other_author]) == []
+
+
+def test_ambiguous_limit(tmp_path: Path) -> None:
+    """ambiguous가 5%를 넘으면 오류다."""
+    records = [eval_record(f"d{index}", f"문장 {index}") for index in range(19)] + [eval_record("dx", "애매", label="ambiguous", category="abuse")]
+    ensure_ambiguous_limit(load_chat_eval_set(write_jsonl(tmp_path / "ok.jsonl", records)), "ok.jsonl")
+    records.append(eval_record("dy", "애매2", label="ambiguous", category="abuse"))
+    with pytest.raises(DatasetFormatError, match="5%"):
+        ensure_ambiguous_limit(load_chat_eval_set(write_jsonl(tmp_path / "bad.jsonl", records)), "bad.jsonl")
+
+
+def diverse_text(seed: int) -> str:
+    """서로 겹치지 않는 임의 음절 8개짜리 문장. 범주 구성 테스트용 자리표시자다."""
+    random_generator = random.Random(seed)
+    return "".join(chr(0xAC00 + random_generator.randrange(11172)) for _ in range(8))
+
+
+def full_coverage_records(split: str, seed_offset: int = 0) -> list[dict]:
+    """모든 범주에 최소 수만큼의 채점 문장을 담은 평가셋. 계열 이름에 셋 이름을 넣어 두 셋의 계열이 겹치지 않게 한다."""
+    categories = [("harmful", category) for category in HARMFUL_CATEGORIES] + [("allow", category) for category in ALLOW_CATEGORIES]
+    records = []
+    for label, category in categories:
+        for index in range(MIN_SCORED_PER_CATEGORY):
+            identifier = f"{split}-{category}-{index}"
+            text = diverse_text(seed_offset + len(records))
+            records.append(eval_record(identifier, text, label=label, category=category, split=split, family=f"{split}-{category}"))
+    return records
+
+
+def test_category_coverage(tmp_path: Path) -> None:
+    """모든 범주에 최소 수가 있으면 통과하고, 하나라도 모자라면 그 범주를 알려 준다."""
+    records = full_coverage_records("dev")
+    ensure_category_coverage(load_chat_eval_set(write_jsonl(tmp_path / "ok.jsonl", records)), "ok.jsonl")
+    short = [record for record in records if not (record["category"] == "minors" and record["id"].endswith("-0"))]
+    with pytest.raises(DatasetFormatError, match="minors"):
+        ensure_category_coverage(load_chat_eval_set(write_jsonl(tmp_path / "short.jsonl", short)), "short.jsonl")
+
+
+def test_validated_load_rejects_copy_of_sealed_sentence(tmp_path: Path) -> None:
+    """평가용으로 읽을 때도 72문장 겹침을 검사한다. 검사 CLI를 건너뛰어도 막힌다."""
+    sealed_text = load_sealed_regression_index().entries[0][1]
+    records = full_coverage_records("dev")
+    records[0]["text"] = sealed_text
+    with pytest.raises(DatasetFormatError, match="sealed:"):
+        load_validated_eval_set(write_jsonl(tmp_path / "dev.jsonl", records))
 
 
 def test_sealed_index_covers_all_regression_sentences() -> None:
@@ -130,19 +208,31 @@ def test_sealed_index_covers_all_regression_sentences() -> None:
     assert all(entry[0].startswith("sealed:") for entry in index.entries)
 
 
-def test_cli_reports_overlap_between_files(tmp_path: Path, capsys) -> None:
+def test_cli_reports_overlap_between_files(tmp_path: Path) -> None:
     """개발셋과 보류셋에 거의 같은 문장이 있으면 CLI가 id와 함께 오류를 낸다. 원문은 메시지에 넣지 않는다."""
-    dev = write_jsonl(tmp_path / "dev.jsonl", [eval_record("d1", "이번 판 정글 동선 너무 좋았어요")])
-    holdout = write_jsonl(tmp_path / "holdout.jsonl", [eval_record("h1", "이번 판 정글 동선 너무 좋았어요!!", split="holdout")])
-    with pytest.raises(DatasetFormatError, match="d1~h1") as raised:
+    dev_records = full_coverage_records("dev")
+    holdout_records = full_coverage_records("holdout", seed_offset=10_000)
+    holdout_records[0]["text"] = dev_records[0]["text"] + "!!"
+    dev = write_jsonl(tmp_path / "dev.jsonl", dev_records)
+    holdout = write_jsonl(tmp_path / "holdout.jsonl", holdout_records)
+    with pytest.raises(DatasetFormatError, match=f"{dev_records[0]['id']}~{holdout_records[0]['id']}") as raised:
         main([str(dev), str(holdout)])
-    assert "정글" not in str(raised.value)
+    assert dev_records[0]["text"] not in str(raised.value)
 
 
 def test_cli_passes_clean_files(tmp_path: Path, capsys) -> None:
     """겹침이 없으면 건수 요약과 '겹침 없음'을 출력한다."""
-    dev = write_jsonl(tmp_path / "dev.jsonl", [eval_record("d1", "이번 판 정글 동선 너무 좋았어요")])
-    holdout = write_jsonl(tmp_path / "holdout.jsonl", [eval_record("h1", "저녁 메뉴 추천 좀 해주세요", split="holdout")])
+    dev = write_jsonl(tmp_path / "dev.jsonl", full_coverage_records("dev"))
+    holdout = write_jsonl(tmp_path / "holdout.jsonl", full_coverage_records("holdout", seed_offset=10_000))
+    for record_path in (dev, holdout):
+        records = [line for line in record_path.read_text(encoding="utf-8").splitlines() if line]
+        assert len(records) == 13 * MIN_SCORED_PER_CATEGORY
     main([str(dev), str(holdout)])
     output = capsys.readouterr().out
-    assert "dev.jsonl: 1건(dev)" in output and "겹침 없음" in output
+    assert "dev.jsonl: 260건(dev)" in output and "겹침 없음" in output
+
+
+def test_committed_eval_sets_are_clean() -> None:
+    """저장소에 커밋한 개발셋·보류셋이 모든 검사(72문장·셋 사이·셋 안·계열·범주 구성·애매 비율)를 통과한다."""
+    eval_directory = Path(__file__).resolve().parents[1] / "eval_data"
+    main([str(eval_directory / "chat-dev-v1.jsonl"), str(eval_directory / "chat-holdout-v1.jsonl")])

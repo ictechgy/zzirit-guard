@@ -47,6 +47,18 @@ CHARACTER_NGRAM_SIZE = 3
 # 겹침 비교에서 지우는 문자: 공백·문장부호·기호. 띄어쓰기나 마침표만 다른 문장을 같은 문장으로 보기 위해서다.
 OVERLAP_STRIP_PATTERN = re.compile(r"[\s\W_]+", re.UNICODE)
 
+# 숫자 사이의 점·콜론·쉼표. 지우면 "1.5배속"과 "15배속"처럼 값이 다른 문장이 같아지므로, 지우기 전에 표시 글자로 바꿔 둔다.
+NUMERIC_SEPARATOR_PATTERN = re.compile(r"(?<=\d)[.:,](?=\d)")
+
+# 숫자 구분자 자리에 넣는 표시 글자. 단어 문자(한글 자모)라 지워지지 않는다. 채팅에서 거의 쓰지 않는 아래아를 쓴다.
+NUMERIC_SEPARATOR_MARK = "ㆍ"
+
+# 평가셋 하나에서 ambiguous가 차지할 수 있는 최대 비율(정책 문서). 어려운 문장을 애매로 빼서 숫자를 좋게 만드는 일을 막는다.
+MAX_AMBIGUOUS_FRACTION = 0.05
+
+# 범주마다 있어야 하는 최소 채점 문장 수. 이보다 적으면 범주별 비율이 한두 문장에 좌우된다.
+MIN_SCORED_PER_CATEGORY = 20
+
 
 @dataclass(frozen=True)
 class ChatEvalItem:
@@ -132,12 +144,13 @@ def load_chat_eval_set(path: str | Path) -> list[ChatEvalItem]:
 
 
 def normalize_for_overlap(text: str) -> str:
-    """겹침 비교용 정규화: NFKC(전각·호환 문자 통일), 소문자, 공백·문장부호 제거.
+    """겹침 비교용 정규화: NFKC(전각·호환 문자 통일), 소문자, 공백·문장부호 제거. 숫자 사이의 구분자는 남긴다.
 
     왜 이 정도만 하나: 판정 파이프라인의 정규화(자모 조합·숫자 치환)까지 하면 서로 다른 문장이 같아져
     겹침을 지나치게 많이 잡는다. 여기서는 '사실상 같은 문장'만 잡으면 된다.
     """
-    return OVERLAP_STRIP_PATTERN.sub("", unicodedata.normalize("NFKC", text).lower())
+    folded = unicodedata.normalize("NFKC", text).lower()
+    return OVERLAP_STRIP_PATTERN.sub("", NUMERIC_SEPARATOR_PATTERN.sub(NUMERIC_SEPARATOR_MARK, folded))
 
 
 def character_ngrams(normalized_text: str) -> frozenset[str]:
@@ -193,15 +206,50 @@ def find_overlaps(items: Sequence[ChatEvalItem], index: OverlapIndex) -> list[Ov
 
 
 def find_internal_duplicates(items: Sequence[ChatEvalItem]) -> list[OverlapFinding]:
-    """한 셋 안에서 정규화 후 완전히 같은 문장 쌍을 찾는다. 같은 문장이 두 번 세어지면 지표가 치우친다."""
-    first_id_by_text: dict[str, str] = {}
+    """한 셋 안에서 같거나 거의 같은 문장을 찾는다. 뒤에 나온 문장마다 앞의 문장 중 가장 비슷한 것 하나를 보고한다.
+
+    왜: 한 틀에 낱말만 바꾼 문장이 여러 번 세어지면 범주별 비율이 그 틀 하나에 치우친다. 셋 사이 검사와 같은 기준을 쓴다.
+    """
     findings: list[OverlapFinding] = []
-    for item in items:
-        normalized = normalize_for_overlap(item.text)
-        first_id = first_id_by_text.setdefault(normalized, item.item_id)
-        if normalized and first_id != item.item_id:
-            findings.append(OverlapFinding(item.item_id, first_id, 1.0))
+    for position, item in enumerate(items):
+        earlier = OverlapIndex.build((other.item_id, other.text) for other in items[:position])
+        finding = earlier.find_overlap(item.item_id, item.text) if normalize_for_overlap(item.text) else None
+        if finding is not None:
+            findings.append(finding)
     return findings
+
+
+def find_family_conflicts(item_sets: Sequence[Sequence[ChatEvalItem]]) -> list[OverlapFinding]:
+    """같은 작성자의 같은 상황 계열이 두 셋에 걸쳐 있는지 찾는다(정책: 같은 계열은 같은 셋에).
+
+    왜 작성자까지 묶나: 계열 이름은 작성 모델이 붙여서, 다른 모델이 우연히 같은 이름을 쓴 것은 같은 상황이라는 뜻이 아니다.
+    """
+    first_by_family: dict[tuple[str, str], ChatEvalItem] = {}
+    findings: list[OverlapFinding] = []
+    for items in item_sets:
+        for item in items:
+            first = first_by_family.setdefault((item.author, item.family), item)
+            if first.split != item.split:
+                findings.append(OverlapFinding(item.item_id, first.item_id, 1.0))
+    return findings
+
+
+def ensure_ambiguous_limit(items: Sequence[ChatEvalItem], file_name: str) -> None:
+    """ambiguous 비율이 정책 상한(5%)을 넘지 않는지 확인한다."""
+    ambiguous_count = sum(1 for item in items if not item.is_scored)
+    if ambiguous_count > MAX_AMBIGUOUS_FRACTION * len(items):
+        raise DatasetFormatError(f"{file_name}: ambiguous가 {ambiguous_count}/{len(items)}건으로 5%를 넘습니다. 정책으로 판정해 라벨을 붙이거나 문장을 빼세요.")
+
+
+def ensure_category_coverage(items: Sequence[ChatEvalItem], file_name: str) -> None:
+    """모든 유해 범주와 허용 유형에 채점 문장이 최소 수 이상 있는지 확인한다.
+
+    왜: 범주가 빠지면 가중 전달률과 핵심 범주 재현율이 그 범주 없이 계산돼 실제보다 좋게 보인다.
+    """
+    counts = Counter(item.category for item in items if item.is_scored)
+    short = [f"{category}({counts[category]})" for category in HARMFUL_CATEGORIES + ALLOW_CATEGORIES if counts[category] < MIN_SCORED_PER_CATEGORY]
+    if short:
+        raise DatasetFormatError(f"{file_name}: 채점 문장이 {MIN_SCORED_PER_CATEGORY}건보다 적은 범주가 있습니다: {', '.join(short)}. 문장을 더 넣으세요.")
 
 
 def load_sealed_regression_index(path: Path = CHAT_SAMPLES_PATH) -> OverlapIndex:
@@ -215,18 +263,49 @@ def describe_counts(items: Sequence[ChatEvalItem]) -> list[str]:
     return [f"  {label:9} {category:18} {count}" for (label, category), count in sorted(counts.items())]
 
 
-def check_eval_files(paths: Sequence[Path]) -> list[OverlapFinding]:
-    """평가셋 파일들을 검증하고, 72문장·다른 파일·자기 자신과의 겹침을 모두 모은다. 건수 요약을 출력한다."""
-    sealed_index = load_sealed_regression_index()
-    loaded = [(path, load_chat_eval_set(path)) for path in paths]
+def ensure_sealed_regression_unchanged() -> None:
+    """봉인한 72문장 파일이 바뀌지 않았는지 확인한다. 바뀌었으면 겹침 검사의 기준이 흔들려 결과를 믿을 수 없다."""
+    if compute_file_sha256(CHAT_SAMPLES_PATH) != SEALED_REGRESSION_SHA256:
+        raise DatasetFormatError("봉인한 72문장 파일이 바뀌었습니다. 회귀 세트는 고치지 않습니다. git으로 원래 내용을 되돌리세요.")
+
+
+def raise_if_overlapping(findings: Sequence[OverlapFinding]) -> None:
+    """겹침이 있으면 id 목록(최대 20건)을 담아 오류를 낸다. 원문은 넣지 않는다."""
+    if findings:
+        listing = ", ".join(f"{finding.item_id}~{finding.reference_id}({finding.similarity})" for finding in findings[:20])
+        raise DatasetFormatError(f"겹치는 문장 {len(findings)}건: {listing}. 해당 문장을 빼거나 다시 쓰세요.")
+
+
+def load_validated_eval_set(path: Path) -> list[ChatEvalItem]:
+    """평가에 쓸 셋 하나를 읽고, 봉인 확인·애매 비율·범주 구성·72문장 겹침·셋 안 중복을 모두 검사한다.
+
+    왜 평가 도구도 검사하나: 검사 CLI를 건너뛰고 72문장을 베낀 파일로 바로 평가하면 그럴듯한 결과가 나오기 때문이다.
+    두 셋 사이의 겹침과 계열 검사는 두 파일이 다 있어야 해서 검사 CLI와 저장소 테스트가 맡는다.
+    """
+    ensure_sealed_regression_unchanged()
+    items = load_chat_eval_set(path)
+    ensure_ambiguous_limit(items, path.name)
+    ensure_category_coverage(items, path.name)
+    raise_if_overlapping(find_overlaps(items, load_sealed_regression_index()) + find_internal_duplicates(items))
+    return items
+
+
+def find_cross_set_overlaps(item_sets: Sequence[Sequence[ChatEvalItem]]) -> list[OverlapFinding]:
+    """서로 다른 셋 사이의 같거나 거의 같은 문장."""
     findings: list[OverlapFinding] = []
-    for position, (path, items) in enumerate(loaded):
-        print(f"{path.name}: {len(items)}건({items[0].split})")
-        print("\n".join(describe_counts(items)))
-        findings += find_overlaps(items, sealed_index) + find_internal_duplicates(items)
-        for _other_path, other_items in loaded[position + 1 :]:
+    for position, items in enumerate(item_sets):
+        for other_items in item_sets[position + 1 :]:
             findings += find_overlaps(items, OverlapIndex.build((item.item_id, item.text) for item in other_items))
     return findings
+
+
+def check_eval_files(paths: Sequence[Path]) -> list[OverlapFinding]:
+    """평가셋 파일들을 각각 검증하고(load_validated_eval_set), 셋 사이의 겹침과 계열 충돌을 모은다. 건수 요약을 출력한다."""
+    item_sets = [load_validated_eval_set(path) for path in paths]
+    for path, items in zip(paths, item_sets, strict=True):
+        print(f"{path.name}: {len(items)}건({items[0].split})")
+        print("\n".join(describe_counts(items)))
+    return find_cross_set_overlaps(item_sets) + find_family_conflicts(item_sets)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -234,12 +313,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m zg_stage1.chat_eval_data", description="채팅 평가셋 검증·겹침 검사")
     parser.add_argument("files", type=Path, nargs="+", help="평가셋 JSONL 파일(개발셋·보류셋)")
     arguments = parser.parse_args(argv)
-    if compute_file_sha256(CHAT_SAMPLES_PATH) != SEALED_REGRESSION_SHA256:
-        raise DatasetFormatError("봉인한 72문장 파일이 바뀌었습니다. 회귀 세트는 고치지 않습니다. git으로 원래 내용을 되돌리세요.")
-    findings = check_eval_files(arguments.files)
-    if findings:
-        listing = ", ".join(f"{finding.item_id}~{finding.reference_id}({finding.similarity})" for finding in findings[:20])
-        raise DatasetFormatError(f"겹치는 문장 {len(findings)}건: {listing}. 해당 문장을 빼거나 다시 쓰세요.")
+    raise_if_overlapping(check_eval_files(arguments.files))
     print("겹침 없음")
 
 
