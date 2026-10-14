@@ -63,6 +63,9 @@ PHONE_PATTERN = re.compile(r"(?<!\d)0 ?1 ?[016789](?: ?\d){7,8}(?!\d)")
 ADDRESS_PATTERNS = (re.compile(r"\d+ ?동 ?\d+ ?호"), re.compile(r"\d+ ?- ?\d+ ?번지"), re.compile(r"\d+ ?번지"))
 # 형태 규칙에서 지우는 문자 분류: 폭 없는 서식 문자(Cf)와 결합 부호(Mn·Mc·Me). 낱말·숫자 사이에 끼워 규칙을 피하는 데 쓰인다.
 INVISIBLE_CATEGORIES = frozenset({"Cf", "Mn", "Mc", "Me"})
+# 글자(Lo)로 분류되지만 보이지 않는 한글 채움 문자. 글자·숫자만 남기는 정규화가 통과시켜 낱말·숫자 사이에 끼우는 우회에 쓰인다.
+# U+FFA0(반각 채움)은 NFKC가 U+3164로 바꾸지만, 정규화 순서와 상관없이 막으려고 함께 둔다.
+HANGUL_FILLERS = frozenset({"\u115f", "\u1160", "\u3164", "\uffa0"})
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,7 @@ def normalize_for_matching(text: str) -> str:
     낱말 사이에 끼워 넣는 우회가 목록 매칭을 피한다(보안 검토). 거르기는 보수적이어야 하므로 그 밖의 문자를 모두 지운다.
     """
     folded = unicodedata.normalize("NFKC", text).lower()
-    return "".join(character for character in folded if unicodedata.category(character)[0] in {"L", "N"})
+    return "".join(character for character in folded if character not in HANGUL_FILLERS and unicodedata.category(character)[0] in {"L", "N"})
 
 
 def normalize_for_patterns(text: str) -> str:
@@ -106,7 +109,7 @@ def normalize_for_patterns(text: str) -> str:
 def pattern_character(character: str) -> str:
     """형태 규칙 정규화의 한 글자 처리: 보이지 않는 문자는 지우고, 글자·숫자는 그대로, 나머지는 공백으로 바꾼다."""
     category = unicodedata.category(character)
-    if category in INVISIBLE_CATEGORIES:
+    if category in INVISIBLE_CATEGORIES or character in HANGUL_FILLERS:
         return ""
     return character if category[0] in {"L", "N"} else " "
 
