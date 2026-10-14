@@ -348,20 +348,27 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     if (health[stage].needsProbe(deps.clock())) probe(stage, stage === "stage1" ? deps.stage1 : deps.stage2);
     for (const each of ["stage1", "stage2"] as const) if (health[each].takeDownNotice(deps.clock())) deps.onWorkerDown(each);
   };
-  /** 상태 확인 한 번. */
+  /**
+   * 상태 확인 한 번. 응답이 왔을 때 세대가 바뀌었으면(세션 초기화·종료) 상태를 바꾸지 않는다.
+   * 왜: 초기화가 확인 중 표시를 이미 지웠으므로, 늦게 온 옛 응답이 그 뒤 새로 시작한 확인의 표시를 지우거나 상태를 덮으면 안 된다.
+   */
   const probe = (stage: WorkerStage, client: WorkerClient): void => {
     health[stage].markProbing(deps.clock());
+    const requestGeneration = generation;
+    const isCurrent = () => requestGeneration === generation;
     track(
       client
         .health(controller.signal)
-        .then((model) => health[stage].recordSuccess(model, deps.clock()))
-        .catch((error: unknown) => {
-          if (error instanceof WorkerCallError && error.kind === "aborted") return;
-          if (error instanceof WorkerCallError && error.kind === "busy") health[stage].recordAlive(deps.clock());
-          else health[stage].recordFailure(deps.clock());
-        })
-        .finally(() => health[stage].clearProbing()),
+        .then((model) => isCurrent() && health[stage].recordSuccess(model, deps.clock()))
+        .catch((error: unknown) => isCurrent() && recordProbeFailure(stage, error))
+        .finally(() => isCurrent() && health[stage].clearProbing()),
     );
+  };
+  /** 상태 확인 실패를 반영한다. 중단은 무시하고, 바쁨은 살아 있음으로, 그 밖은 장애로 본다. */
+  const recordProbeFailure = (stage: WorkerStage, error: unknown): void => {
+    if (error instanceof WorkerCallError && error.kind === "aborted") return;
+    if (error instanceof WorkerCallError && error.kind === "busy") health[stage].recordAlive(deps.clock());
+    else health[stage].recordFailure(deps.clock());
   };
 
   /** 세대를 바꾸고 대기 중·처리 중인 메시지를 모두 미검사로 확정한 뒤, 요청을 중단하고 캐시를 비운다. */
@@ -380,6 +387,9 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     cache1.clear();
     cache2.clear();
     firstChatters.clear();
+    // 처리 중이던 상태 확인은 중단했고 그 응답은 무시하므로, 확인 중 표시를 여기서 지워 다음 확인이 막히지 않게 한다.
+    health.stage1.clearProbing();
+    health.stage2.clearProbing();
   };
 
   return {
@@ -390,6 +400,8 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     },
     submit(submission) {
       if (isStopped) return;
+      // 첫 채팅 여부는 문장을 받든 버리든 먼저 본다. 왜: 버린 첫 채팅 뒤의 다음 채팅이 첫 채팅으로 앞줄에 서지 않게 한다.
+      const firstChatter = firstChatters.observe(submission.ref.senderChannelId);
       if (!isAcceptableContent(submission.ref.content, settings.maxContentCodePoints)) {
         // 너무 길거나 올바르지 않은 문장은 해시하지도 추적하지도 않고 미검사로 센다(자르지 않는다).
         unchecked.add(deps.clock());
@@ -401,7 +413,7 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
         workerId: `m${(nextWorkerId += 1)}`,
         contentKey: createHash("sha256").update(submission.ref.content).digest("hex"),
         generation,
-        firstChatter: firstChatters.observe(submission.ref.senderChannelId),
+        firstChatter,
         isSettled: false,
       });
     },

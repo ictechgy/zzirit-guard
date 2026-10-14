@@ -322,3 +322,37 @@ describe("리뷰 반영(Codex PR C)", () => {
   });
 });
 
+describe("리뷰 반영(Codex PR C 2차)", () => {
+  it("너무 긴 첫 채팅을 버려도 그 사람의 다음 채팅은 첫 채팅으로 앞줄에 서지 않는다", async () => {
+    const releases: Array<() => void> = [];
+    const respond = stage2.respond;
+    stage2.respond = (items, signal) => (releases.length === 0 ? new Promise((resolve) => releases.push(() => resolve(respond(items, signal)))) : respond(items, signal));
+    ai.submit(submission("처리 중", { keyword: 1, sender: "v0" }));
+    await vi.advanceTimersByTimeAsync(0);
+    ai.submit(submission("가".repeat(1_001), { sender: "v1" }));
+    ai.submit(submission("둘째 채팅", { keyword: 1, sender: "v1" }));
+    ai.submit(submission("새 사람", { keyword: 1, sender: "v9" }));
+    releases[0]?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stage2.calls.map((call) => call[0]?.text)).toEqual(["처리 중", "새 사람", "둘째 채팅"]);
+  });
+
+  it("세션 초기화 뒤 늦게 온 상태 확인 응답은 상태를 바꾸지 않고, 다음 상태 확인을 막지 않는다", async () => {
+    // 첫 확인만 중단을 무시하고 붙잡아 둔다(늦은 응답). 그 뒤 확인은 바로 답한다.
+    const releases: Array<(model: string) => void> = [];
+    let probeCount = 0;
+    stage1.healthResponse = () => {
+      probeCount += 1;
+      return probeCount === 1 ? new Promise((resolve) => releases.push(resolve)) : Promise.resolve("stage1@new");
+    };
+    ai.start();
+    await vi.advanceTimersByTimeAsync(1);
+    ai.resetSession();
+    releases[0]?.("stage1@old");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ai.status().stage1).toMatchObject({ state: "unknown", model: null });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(ai.status().stage1).toMatchObject({ state: "ok", model: "stage1@new" });
+  });
+});
+

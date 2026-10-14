@@ -1,6 +1,7 @@
 import type { ChatLine, RealtimeEvent } from "@zzirit-guard/shared";
 import type { AiResult, AiSubmission } from "../ai/aiStage.js";
 import type { ChatEvent } from "../chat/chatEvent.js";
+import type { MessageTarget } from "../chzzk/apiClient.js";
 import type { MessageRef } from "../detection/floodDetectors.js";
 import type { DetectionResult } from "../detection/pipeline.js";
 import { describeError, type Logger } from "../logger.js";
@@ -188,12 +189,7 @@ function recordAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
  */
 function submitAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: MessageRef, verdictId: number): void {
   const target = toTarget(ref);
-  // 같은 메시지에 숨김이 이미 나갔거나 나가는 중이면 보내지 않는다(계획 R4). 떼도배는 앞에서 걸렀으므로 여기서 막히는 것은 드문 경합뿐이다.
-  const blocked = deps.hideGuard.tryAcquire(target);
-  if (blocked) {
-    deps.logger.warn("같은 메시지에 숨김이 이미 있어 자동 숨김을 보내지 않았습니다", { verdictId, blocked });
-    return;
-  }
+  if (!acquireAutoHide(deps, target, verdictId)) return;
   // 방금 만든 판정이라 붙잡기는 늘 성공한다. 결과가 오기 전까지 매니저의 숨기기·무시가 같은 판정에 겹치지 않게 한다(S12).
   deps.claims.tryClaim(verdictId, "auto_hide");
   // 예외로 끝나 결과가 없으면 null로 남아 settleHideClaim이 놓는다(지금까지와 같다).
@@ -212,6 +208,23 @@ function submitAutoHide(deps: DecisionHandlerDeps, channelId: string, ref: Messa
       settleHideClaim(deps.claims, verdictId, settled);
       deps.hideGuard.settle(target, settled);
     });
+}
+
+/**
+ * 자동 숨김을 보내기 전에 메시지 막기를 잡는다. 잡지 못하면 보내지 않는다(판정은 대기 중으로 남아 매니저가 처리할 수 있다).
+ * - 같은 메시지에 숨김이 이미 나갔거나 나가는 중이면 막힌다(계획 R4). 떼도배는 앞에서 걸렀으므로 여기서 막히는 것은 드문 경합뿐이다.
+ * - 숨김 장부 쓰기가 실패하면 예외가 온다. 흔적 없이 보내면 재시작 뒤 같은 숨김이 다시 나갈 수 있어 보내지 않는다.
+ * @returns 보내도 되면 true
+ */
+function acquireAutoHide(deps: DecisionHandlerDeps, target: MessageTarget, verdictId: number): boolean {
+  try {
+    const blocked = deps.hideGuard.tryAcquire(target);
+    if (blocked) deps.logger.warn("같은 메시지에 숨김이 이미 있어 자동 숨김을 보내지 않았습니다", { verdictId, blocked });
+    return blocked === null;
+  } catch (error: unknown) {
+    deps.logger.error("숨김 장부에 적지 못해 자동 숨김을 보내지 않았습니다(DB 상태를 확인하세요)", { verdictId, error: describeError(error) });
+    return false;
+  }
 }
 
 /**

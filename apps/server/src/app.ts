@@ -135,7 +135,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   /** 사람 단위 제재가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). 제재는 매니저 라우트에서만 보낸다. */
   const senderActions = createSenderActionGuard(clock);
   /** 같은 메시지에 숨김이 두 번 나가지 않게 막는 표. 매니저 숨김(routes)과 자동 숨김이 함께 쓴다(계획 R4). */
-  const hideGuard = createMessageHideGuard(createMessageHideLedger(database, clock));
+  const hideGuard = createMessageHideGuard(createMessageHideLedger(database, clock), logger);
   /** AI 단계. ZG_AI_ENABLED일 때만 만든다. 결정 처리기와 서로 부르므로 결정 처리기를 먼저 만들고 뒤에 채운다. */
   let aiStage: AiStage | null = null;
   const decisionHandler = createDecisionHandler({

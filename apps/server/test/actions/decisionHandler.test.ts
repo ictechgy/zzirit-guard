@@ -39,7 +39,7 @@ beforeEach(() => {
   events = [];
   chatLines = [];
   claims = createVerdictClaims();
-  hideGuard = createMessageHideGuard(createMessageHideLedger(database, () => 0));
+  hideGuard = createMessageHideGuard(createMessageHideLedger(database, () => 0), silentLogger);
   handler = createDecisionHandler({
     verdicts, autoHide, stats, claims, logger: silentLogger, hideGuard, settings: createSettingsRepository(database),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
@@ -349,7 +349,7 @@ describe("메시지 숨김 장부(Codex PR C 리뷰)", () => {
 
   it("결과를 알 수 없는 숨김은 기한 없이 막고, 한 번 숨긴 메시지는 결과 모름으로 되돌리지 않는다", () => {
     const ledger = createMessageHideLedger(database, () => 0);
-    const guard = createMessageHideGuard(ledger);
+    const guard = createMessageHideGuard(ledger, silentLogger);
     const target = { chatChannelId: "chat-1", messageTime: 9, senderChannelId: "x" };
     expect(guard.tryAcquire(target)).toBeNull();
     guard.settle(target, { ok: false, message: "모름", isResultUnknown: true });
@@ -360,12 +360,54 @@ describe("메시지 숨김 장부(Codex PR C 리뷰)", () => {
   });
 
   it("보내지 않았거나 실패한 숨김은 막지 않는다", () => {
-    const guard = createMessageHideGuard(createMessageHideLedger(database, () => 0));
+    const guard = createMessageHideGuard(createMessageHideLedger(database, () => 0), silentLogger);
     const target = { chatChannelId: "chat-1", messageTime: 10, senderChannelId: "x" };
     expect(guard.tryAcquire(target)).toBeNull();
     expect(guard.tryAcquire(target)).toBe("in_flight");
     guard.settle(target, { ok: false, message: "실패" });
     expect(guard.tryAcquire(target)).toBeNull();
+  });
+});
+
+describe("숨김 장부 쓰기 실패(Codex PR C 2차 리뷰)", () => {
+  const target = { chatChannelId: "chat-1", messageTime: 20, senderChannelId: "x" };
+
+  it("보낸 뒤 결과를 장부에 적지 못해도 예외를 던지지 않고, 같은 메시지는 결과 모름으로 계속 막는다", () => {
+    const ledger = createMessageHideLedger(database, () => 0);
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const failingRecord = () => {
+      throw new Error("SQLITE_BUSY");
+    };
+    const guard = createMessageHideGuard({ ...ledger, record: failingRecord }, logger);
+    expect(guard.tryAcquire(target)).toBeNull();
+    expect(() => guard.settle(target, { ok: true, note: null })).not.toThrow();
+    expect(guard.blockOf(target)).toBe("result_unknown");
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("보내는 중 표시가 남은 채 재시작하면(결과를 적기 전에 죽음) 결과 모름으로 막는다", () => {
+    const ledger = createMessageHideLedger(database, () => 0);
+    expect(createMessageHideGuard(ledger, silentLogger).tryAcquire(target)).toBeNull();
+    expect(createMessageHideGuard(ledger, silentLogger).blockOf(target)).toBe("result_unknown");
+  });
+
+  it("보내기 전에 장부에 적지 못하면 자동 숨김을 보내지 않고, 판정은 대기 중으로 남아 매니저가 처리할 수 있다", () => {
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const ledger = createMessageHideLedger(database, () => 0);
+    const failingMark = () => {
+      throw new Error("SQLITE_FULL");
+    };
+    const failingHandler = createDecisionHandler({
+      verdicts, autoHide, stats, claims, logger, settings: createSettingsRepository(database),
+      hideGuard: createMessageHideGuard({ ...ledger, markSending: failingMark }, logger),
+      executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
+      broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
+    });
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    expect(() => failingHandler.handle(chat("느금마"), result("auto_hide", "느금마"))).not.toThrow();
+    expect(submit).not.toHaveBeenCalled();
+    expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.status)).toEqual(["pending"]);
+    expect(logger.error).toHaveBeenCalledWith("숨김 장부에 적지 못해 자동 숨김을 보내지 않았습니다(DB 상태를 확인하세요)", expect.objectContaining({ error: "Error: SQLITE_FULL" }));
   });
 });
 

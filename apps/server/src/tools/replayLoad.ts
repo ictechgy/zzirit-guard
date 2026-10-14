@@ -133,7 +133,7 @@ function buildPipeline() {
   const settings = createSettingsRepository(database);
   const handler = createDecisionHandler({
     verdicts, executor, claims: createVerdictClaims(), stats: createMinuteStats(database, clock), logger: silentLogger, settings,
-    hideGuard: createMessageHideGuard(createMessageHideLedger(database, clock)),
+    hideGuard: createMessageHideGuard(createMessageHideLedger(database, clock), silentLogger),
     autoHide: createAutoHideSwitch({ database, settings, auditLog, clock, logger: silentLogger }),
     broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
   });

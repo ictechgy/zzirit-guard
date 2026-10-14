@@ -56,6 +56,31 @@ describe("openDatabase", () => {
     expect(Number(insert.run("spam", "새규칙").lastInsertRowid)).toBe(expectedNextId);
   });
 
+  it("v2 DB를 v3로 올리면 이미 숨긴 메시지(지금 숨김 상태이거나 숨김 성공 감사 기록이 있는 판정)를 숨김 장부로 옮긴다", () => {
+    const database = new BetterSqlite3(":memory:");
+    MIGRATIONS.slice(0, 2).forEach((statement) => database.exec(statement as string));
+    database.pragma("user_version = 2");
+    const insertVerdict = database.prepare(
+      `INSERT INTO verdict (channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason, status, created_at)
+       VALUES ('c1', 'chat', ?, ?, 'n', '원문', 'auto_hide', 'rule', ?, ?)`,
+    );
+    insertVerdict.run(1, "a", "hidden", 100);
+    insertVerdict.run(1, "a", "hidden", 200);
+    const restricted = Number(insertVerdict.run(2, "b", "restricted", 300).lastInsertRowid);
+    const failed = Number(insertVerdict.run(3, "c", "pending", 400).lastInsertRowid);
+    insertVerdict.run(4, "d", "false_positive", 500);
+    const insertAudit = database.prepare(
+      "INSERT INTO audit_log (channel_id, actor_type, action, verdict_id, result, created_at) VALUES ('c1', 'manager', 'hide', ?, ?, 0)",
+    );
+    insertAudit.run(restricted, "ok");
+    insertAudit.run(failed, "error");
+    runMigrations(database);
+    expect(database.prepare("SELECT sender_channel_id, message_time, state, updated_at FROM message_hide ORDER BY sender_channel_id").all()).toEqual([
+      { sender_channel_id: "a", message_time: 1, state: "hidden", updated_at: 200 },
+      { sender_channel_id: "b", message_time: 2, state: "hidden", updated_at: 300 },
+    ]);
+  });
+
   it("알 수 없는 규칙 종류를 거부한다", () => {
     const database = openDatabase(":memory:");
     database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();

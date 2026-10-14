@@ -53,7 +53,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     verdicts, auditLog, settings, clock,
     claims: createVerdictClaims(),
     senderActions: createSenderActionGuard(clock),
-    hideGuard: createMessageHideGuard(createMessageHideLedger(database, clock)),
+    hideGuard: createMessageHideGuard(createMessageHideLedger(database, clock), silentLogger),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ database, settings, auditLog, clock, logger: silentLogger }),
     rules: createRuleRepository(database, clock),

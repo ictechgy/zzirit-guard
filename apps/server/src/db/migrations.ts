@@ -131,6 +131,9 @@ export const MIGRATIONS: readonly string[] = [
   // '확실' 배지는 결과가 나온 때의 임계값으로 정해 저장한다(나중에 임계값을 바꿔도 이미 올린 배지가 바뀌지 않게).
   // 같은 메시지의 판정을 찾는 색인: AI 결과를 기록하기 전 겹침 확인에 쓴다.
   // 메시지 숨김 장부: 같은 메시지에 숨김이 두 번 나가지 않게 숨김 결과(성공·결과 모름)를 메시지마다 남긴다(원문 없음).
+  // sending은 보내기 직전 표시다(결과를 적기 전에 죽거나 DB가 실패하면 결과 모름으로 본다).
+  // 이미 숨긴 메시지를 옮겨 적는다: 지금 숨김 상태인 판정과, 숨김 성공 감사 기록이 가리키는 판정(숨긴 뒤 오판·제한으로 바뀐 것).
+  // 옮기지 않으면 올린 직후 치지직이 같은 메시지를 다시 보낼 때 되돌릴 수 없는 숨김이 또 나간다.
   `
   ALTER TABLE minute_stat ADD COLUMN ai_unchecked INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE verdict ADD COLUMN sure INTEGER NOT NULL DEFAULT 0 CHECK (sure IN (0, 1));
@@ -139,11 +142,19 @@ export const MIGRATIONS: readonly string[] = [
     chat_channel_id TEXT NOT NULL,
     sender_channel_id TEXT NOT NULL,
     message_time INTEGER NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('hidden','result_unknown')),
+    state TEXT NOT NULL CHECK (state IN ('sending','hidden','result_unknown')),
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (chat_channel_id, sender_channel_id, message_time)
   );
   CREATE INDEX message_hide_updated ON message_hide (updated_at);
+  INSERT INTO message_hide (chat_channel_id, sender_channel_id, message_time, state, updated_at)
+    SELECT chat_channel_id, sender_channel_id, message_time, 'hidden', MAX(created_at) FROM (
+      SELECT chat_channel_id, sender_channel_id, message_time, created_at FROM verdict WHERE status = 'hidden'
+      UNION ALL
+      SELECT verdict.chat_channel_id, verdict.sender_channel_id, verdict.message_time, verdict.created_at
+        FROM audit_log JOIN verdict ON verdict.id = audit_log.verdict_id
+        WHERE audit_log.action = 'hide' AND audit_log.result = 'ok'
+    ) GROUP BY chat_channel_id, sender_channel_id, message_time;
   `,
 ];
 
