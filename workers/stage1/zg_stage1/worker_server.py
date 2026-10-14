@@ -65,11 +65,12 @@ LOGGER = logging.getLogger("zg_worker")
 
 @dataclass(frozen=True)
 class WorkerSettings:
-    """처리 스레드가 쓰는 워커 정보. max_items는 한 요청의 항목 수 상한이다."""
+    """처리 스레드가 쓰는 워커 정보. max_items는 한 요청의 항목 수 상한, categories는 이 워커가 낼 수 있는 범주다."""
 
     model: str
     max_items: int
     runner: InferenceRunner
+    categories: frozenset[str | None]
 
 
 def route_error(path: str, method: str) -> tuple[int, str] | None:
@@ -304,13 +305,15 @@ class WorkerRequestHandler(BaseHTTPRequestHandler):
         return self._classify(items)
 
     def _classify(self, items: list[ClassifyItem]) -> tuple[int, bytes, int]:
-        """추론 스레드에 넘겨 응답을 만든다. 늦으면 503, 모델·코드 문제면 500이다."""
+        """추론 스레드에 넘겨 응답을 만든다. 늦으면 503, 분류기가 입력을 거절하면 그 계약 오류(예: 2차의 text_too_long), 모델·코드 문제면 500이다."""
         settings = self.server.settings
         try:
             verdicts: list[ItemVerdict] = settings.runner.classify([item.text for item in items])
-            return 200, build_classify_response(settings.model, items, verdicts), len(items)
+            return 200, build_classify_response(settings.model, items, verdicts, settings.categories), len(items)
         except InferenceBusyError:
             return 503, build_error_response("busy"), 0
+        except ContractError as error:
+            return error.status, build_error_response(error.code), 0
         except Exception as error:  # 모델·코드 문제: 연결은 응답하고 끝내며 로그는 종류만 남긴다
             return handle_unexpected_error(error)
 

@@ -1,0 +1,43 @@
+# 찌리릿 가드 2차 분류기(kanana-safeguard-8b, mlx 4비트) 워커.
+# 왜 1차와 다른 프로젝트인가: 1차는 PyTorch(CPU), 2차는 mlx(GPU)라 의존성이 겹치지 않는다. 한 환경에 두면 잠금이 커지고 서로의 갱신에 묶인다.
+[project]
+name = "zg-stage2"
+version = "0.1.0"
+description = "찌리릿 가드 2차 분류기(kanana-safeguard) 워커"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-lm==0.31.3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==1.15.0",
+    "pytest==9.0.3",
+    "ruff==0.12.0",
+]
+
+[tool.uv]
+# 공급망 위생: 잠금 시점 기준 2주 넘게 공개된 배포본만 고른다(전이 의존성 포함).
+exclude-newer = "2026-09-30T00:00:00Z"
+# 운영 대상은 Apple Silicon 맥 한 대뿐이다(스펙 §1·§4). mlx는 이 환경에서만 돈다.
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+# 한국어 문서화 주석과 오류 메시지가 길어 기본값(88)보다 넉넉하게 둔다(1차와 같다).
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+# 오류(E·F·W), 흔한 버그(B), 최신 문법(UP), 단순화(SIM), 이름 규칙(N). 1차와 같다.
+select = ["E", "F", "W", "B", "UP", "SIM", "N"]
+
+[tool.mypy]
+python_version = "3.12"
+# mlx·mlx-lm 일부 모듈은 타입 정보가 없어, 없는 것만 Any로 본다.
+ignore_missing_imports = true

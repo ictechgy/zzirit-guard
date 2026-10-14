@@ -1,6 +1,6 @@
 {
  "contract": 1,
- "description": "워커 요청 사례. status는 워커별 기대 상태 코드, error는 오류 본문의 코드다. generate는 항목 수(items)와 각 text의 코드 포인트 수(text_length, 글자 character 기본 '가')로 본문을 만든다. generate_raw_bytes는 그 길이의 JSON 아닌 본문을 보낸다.",
+ "description": "워커 요청 사례. status는 워커별 기대 상태 코드, error는 오류 본문의 코드다. generate는 항목 수(items)와 각 text의 코드 포인트 수(text_length, 글자 character 기본 '가')로 본문을 만든다. generate_raw_bytes는 그 길이의 JSON 아닌 본문을 보낸다. error가 워커별 표이면 워커마다 오류 코드가 다르다(2차는 항목 1건까지라 여러 건 사례가 too_many_items다).",
  "cases": [
   {
    "name": "one_item",
@@ -41,8 +41,9 @@
    },
    "status": {
     "stage1": 200,
-    "stage2": 200
-   }
+    "stage2": 400
+   },
+   "error": "too_many_items"
   },
   {
    "name": "five_items",
@@ -123,8 +124,9 @@
    },
    "status": {
     "stage1": 200,
-    "stage2": 200
-   }
+    "stage2": 400
+   },
+   "error": "text_too_long"
   },
   {
    "name": "text_1000_astral_code_points",
@@ -135,8 +137,9 @@
    },
    "status": {
     "stage1": 200,
-    "stage2": 200
-   }
+    "stage2": 400
+   },
+   "error": "text_too_long"
   },
   {
    "name": "text_1001_code_points",
@@ -342,7 +345,10 @@
     "stage1": 400,
     "stage2": 400
    },
-   "error": "duplicate_id"
+   "error": {
+    "stage1": "duplicate_id",
+    "stage2": "too_many_items"
+   }
   },
   {
    "name": "text_empty",

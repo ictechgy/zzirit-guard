@@ -29,7 +29,7 @@ from zg_stage1.errors import ModelFormatError, PathResolutionError, Stage1Error
 from zg_stage1.inference_contract import REGENERATE_HINT, read_inference_contract
 from zg_stage1.modeling import load_trained_classifier, load_trained_tokenizer, score_texts
 from zg_stage1.paths import DATA_DIRECTORY_VARIABLE, ensure_existing_directory, ensure_safetensors_only
-from zg_stage1.worker_contract import ItemVerdict, validate_model_identifier
+from zg_stage1.worker_contract import STAGE1_CATEGORIES, ItemVerdict, validate_model_identifier
 from zg_stage1.worker_runtime import (
     InferenceRunner,
     WorkerSetupError,
@@ -165,7 +165,7 @@ def serve_model(model_directory: Path, threads: int, socket_path: Path, on_ready
     runner = InferenceRunner(lambda: build_warmed_scorer(model_directory, threads))
     runner.start()
     try:
-        serve_until_stopped(socket_path, WorkerSettings(model, MAX_ITEMS_PER_REQUEST, runner), on_ready)
+        serve_until_stopped(socket_path, WorkerSettings(model, MAX_ITEMS_PER_REQUEST, runner, STAGE1_CATEGORIES), on_ready)
     finally:
         runner.stop()
 
