@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -10,12 +11,14 @@ import pytest
 from tests.conftest import write_jsonl
 from zg_stage1.data import LabeledText, load_labeled_texts
 from zg_stage1.errors import DatasetFormatError, OutputExistsError, OutputLocationError
+from zg_stage1.chat_eval_data import OverlapFinding
 from zg_stage1.training_mix import (
     DEFAULT_HARD_NEGATIVES_PATH,
     HARD_NEGATIVE_VERSIONS,
     MixSettings,
     build_training_rows,
     count_binary_labels,
+    describe_excluded_overlap,
     downsample_toxic,
     ensure_no_evaluation_overlap,
     exclude_evaluation_overlaps,
@@ -25,6 +28,7 @@ from zg_stage1.training_mix import (
     load_hard_negatives,
     main,
     manifest_path_for,
+    write_training_outputs,
 )
 
 
@@ -198,3 +202,43 @@ def test_cli_refuses_output_inside_repository(tmp_path: Path, khaters_records: l
     with pytest.raises(OutputLocationError):
         main(["--out", str(inside), "--khaters-train", str(khaters), "--hard-negatives", str(hard)], environment={})
     assert not inside.exists()
+
+
+def test_manifest_keeps_safe_ids_and_hashes_others() -> None:
+    """뺀 K-HATERS 줄의 id는 짧은 영숫자면 그대로, 문장·경로 모양이면 sha256 앞 16자로 적는다. 평가 문장 id는 그대로다."""
+    findings = [OverlapFinding("12391", "dev-0491", 1.0), OverlapFinding("감사합니다 정말", "d1", 0.9), OverlapFinding("/Users/alice/train.jsonl", "d2", 1.0)]
+    described = [describe_excluded_overlap(finding) for finding in findings]
+    assert described[0] == {"item_id": "12391", "reference_id": "dev-0491", "similarity": 1.0}
+    assert all(record["item_id"].startswith("sha256:") and len(record["item_id"]) == 23 for record in described[1:])
+    assert "감사" not in json.dumps(described, ensure_ascii=False) and "alice" not in json.dumps(described)
+
+
+def staged_or_published_files(directory: Path) -> list[str]:
+    """디렉터리에 남은 파일 이름(정렬)."""
+    return sorted(path.name for path in directory.iterdir())
+
+
+def test_failure_between_publishes_removes_both_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """학습 파일을 넣은 뒤 manifest를 넣다 실패하면, 이번에 만든 학습 파일과 임시 파일을 모두 지우고 오류를 올린다."""
+    real_link = os.link
+    calls: list[str] = []
+
+    def link_then_fail(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
+        calls.append(str(destination))
+        if len(calls) == 2:
+            raise OSError(28, "No space left on device")
+        real_link(source, destination)
+
+    monkeypatch.setattr(os, "link", link_then_fail)
+    with pytest.raises(OSError, match="No space"):
+        write_training_outputs(tmp_path / "mix.jsonl", [{"id": "1", "text": "가", "label": "normal"}], MixSettings(None, 1, 1), {}, [])
+    assert len(calls) == 2 and staged_or_published_files(tmp_path) == []
+
+
+def test_publish_does_not_overwrite_existing_output(tmp_path: Path) -> None:
+    """시작할 때 확인한 뒤에 같은 이름의 학습 파일이 생겨도 덮어쓰지 않는다. 그 파일은 그대로 두고 이번 실행의 파일만 지운다."""
+    existing = tmp_path / "mix.jsonl"
+    existing.write_text("앞선 학습 파일\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        write_training_outputs(existing, [{"id": "1", "text": "가", "label": "normal"}], MixSettings(None, 1, 1), {}, [])
+    assert existing.read_text(encoding="utf-8") == "앞선 학습 파일\n" and staged_or_published_files(tmp_path) == ["mix.jsonl"]
