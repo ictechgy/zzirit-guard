@@ -289,3 +289,15 @@ def test_unsupported_hard_link_gives_actionable_error(tmp_path: Path, monkeypatc
     with pytest.raises(OutputLocationError, match="하드 링크"):
         write_one_row(tmp_path / "mix.jsonl")
     assert staged_or_published_files(tmp_path) == []
+
+
+def test_identity_failure_removes_new_staging_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """임시 파일을 만든 직후 그 신원을 못 읽으면, 정리 목록에 넣기 전이라도 그 파일을 지우고 오류를 올린다."""
+
+    def failing_fstat(descriptor: int) -> os.stat_result:
+        raise OSError(errno.EIO, "I/O error")
+
+    monkeypatch.setattr(os, "fstat", failing_fstat)
+    with pytest.raises(OSError, match="I/O"):
+        write_one_row(tmp_path / "mix.jsonl")
+    assert staged_or_published_files(tmp_path) == []

@@ -235,13 +235,23 @@ def file_identity(status: os.stat_result) -> tuple[int, int]:
     return (status.st_dev, status.st_ino)
 
 
+def identify_new_file(descriptor: int, path: Path) -> CreatedFile:
+    """mkstemp가 막 만든 파일의 기록. 신원을 못 읽으면 닫고 지운 뒤 오류를 올린다(아직 정리 목록에 없어 여기서 지워야 한다)."""
+    try:
+        return CreatedFile(path, file_identity(os.fstat(descriptor)))
+    except OSError:
+        os.close(descriptor)
+        path.unlink(missing_ok=True)
+        raise
+
+
 def stage_text_file(directory: Path, text: str, created: list[CreatedFile]) -> CreatedFile:
     """directory에 고유한 이름의 임시 파일(권한 OUTPUT_FILE_MODE)을 만들어 text를 쓴다.
 
     created: 이번 실행이 만든 파일 목록. 쓰기 전에 먼저 적어 두어, 쓰다 실패해도 호출한 쪽이 지울 수 있게 한다.
     """
     descriptor, name = tempfile.mkstemp(dir=directory, prefix=STAGED_FILE_PREFIX, suffix=STAGED_FILE_SUFFIX)
-    staged = CreatedFile(Path(name), file_identity(os.fstat(descriptor)))
+    staged = identify_new_file(descriptor, Path(name))
     created.append(staged)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(text)
