@@ -277,7 +277,10 @@ def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str, policy_
         raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 예산 결과가 아닙니다. --forward-budget으로 만든 개발셋 결과를 주세요.")
     if report.get("model_weights_sha256") != model_weights_sha256:
         raise DatasetFormatError(f"{dev_report_path.name}은 다른 모델의 결과입니다. 같은 --model-dir로 개발셋을 먼저 평가하세요.")
-    dev_policy = (report.get("rule_routes") or {}).get("policy_sha256")
+    dev_routes = report.get("rule_routes")
+    if dev_routes is not None and not dev_routes.get("policy_sha256"):
+        raise DatasetFormatError(f"{dev_report_path.name}은 규칙 목록 지문이 없는 옛 결과입니다. 지금 도구로 개발셋을 다시 평가하세요.")
+    dev_policy = None if dev_routes is None else dev_routes["policy_sha256"]
     if dev_policy != policy_sha256:
         message = f"{dev_report_path.name}과 규칙 경로(사용 여부나 규칙 목록)가 다릅니다. 개발셋과 같은 규칙 목록으로 만든 --rule-routes를 주세요."
         raise DatasetFormatError(message)
@@ -299,9 +302,10 @@ def parse_rule_route(line: str, location: str) -> RouteRecord:
     fields = record if isinstance(record, dict) else {}
     hashes = [fields.get("evalSha256"), fields.get("policySha256")]
     has_hashes = all(isinstance(value, str) and value for value in hashes)
-    if fields.get("decision") not in RULE_DECISIONS or not isinstance(fields.get("id"), str) or not has_hashes:
-        raise DatasetFormatError(f"{location}: 규칙 경로 결과 형식이 아닙니다(id, decision, evalSha256, policySha256). 규칙 평가 도구를 다시 돌리세요.")
-    route = RuleRoute(rule_flagged=fields["decision"] != "pass", keyword=fields.get("keyword") is not None, skip_ai=fields.get("skipAi") is True)
+    has_flags = isinstance(fields.get("skipAi"), bool)
+    if fields.get("decision") not in RULE_DECISIONS or not isinstance(fields.get("id"), str) or not has_hashes or not has_flags:
+        raise DatasetFormatError(f"{location}: 규칙 경로 결과 형식이 아닙니다(id, decision, skipAi, evalSha256, policySha256). 규칙 평가 도구를 다시 돌리세요.")
+    route = RuleRoute(rule_flagged=fields["decision"] != "pass", keyword=fields.get("keyword") is not None, skip_ai=fields["skipAi"])
     return RouteRecord(fields["id"], route, fields["evalSha256"], fields["policySha256"])
 
 

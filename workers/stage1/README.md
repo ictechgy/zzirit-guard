@@ -173,6 +173,27 @@ uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kce
 ```
 
 - 가중 전달률은 가정한 트래픽 구성비(`evaluate_chat.DEFAULT_TRAFFIC_MIX`)로 계산한다. 실측 비율이 생기면 `--mix-file`로 바꾼다.
+
+### 규칙·키워드 경로까지 합친 평가
+
+실제 경로는 "규칙 → 키워드 경로 → 1차"다. 서버의 규칙 평가 도구로 문장별 규칙 판정을 만든 뒤 `--rule-routes`로 합친다.
+
+```sh
+# 저장소 루트에서. 문장마다 규칙 판정·키워드 경로 일치·AI 건너뜀 여부와 평가셋 해시·규칙 목록 지문을 쓴다(원문 없음)
+npm run build -w @zzirit-guard/server
+node apps/server/dist/tools/evaluateRules.js --eval-file workers/stage1/eval_data/chat-dev-v1.jsonl --output <scratch>/rules-dev.jsonl
+# 개발셋은 --keywords <파일>로 목록을 더해 볼 수 있다. 보류셋은 저장소 기본 목록(defaultRules.ts)으로만 돌린다
+
+uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v1.jsonl \
+  --forward-budget 0.304 --rule-routes <scratch>/rules-dev.jsonl
+```
+
+- 재현율은 규칙·키워드·1차 중 하나라도 잡으면 잡은 것으로 센다.
+- 2차 부하는 규칙이 먼저 판정한 문장과 가벼운 반응(ㅋㅋ 등)을 빼고, 키워드나 1차로 2차에 가는 문장만 센다.
+- 보류셋은 개발셋과 같은 모델(가중치 sha256)과 같은 규칙 목록 지문이어야 평가한다.
+- 알려진 한계:
+  - 예외 단어는 공백을 지운 문장에서 찾는다. 그래서 운영자가 넣은 예외 단어가 키워드를 품으면 그 키워드를 가릴 수 있다(기본 목록에서는 피했다).
+  - 보류셋의 문장별 규칙 결과 파일은 남는다. 보류셋으로 목록을 다듬지 않는 것은 절차(기본 목록 커밋 → 개발셋 → 보류셋 한 번)로 지킨다.
 - 72문장 회귀 세트는 봉인했다. 파일이 바뀌면 테스트와 겹침 검사가 실패한다.
 - `evaluate_chat`도 평가 전에 같은 검사(72문장 겹침, 셋 안 중복, 애매 5% 이하, 범주마다 20문장 이상)를 한다.
 - F_max는 시드가 다른 반복 5번 모두에서 기준을 지키는 값이다.

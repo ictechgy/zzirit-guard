@@ -54,6 +54,11 @@ describe("기본 목록이 흔한 방송 채팅을 건드리지 않는다", () =
     expect(route?.reason).not.toMatch(/^rule:spam/);
   });
 
+  it.each(["너네 집 앞에 찾아가서 기다릴게", "집 앞까지 따라갈거임", "퇴근길 따라간다 조심해"])("집 앞·따라가기 협박은 키워드 경로로 간다: %s", (text) => {
+    const [route] = evaluateRuleRoutes([devItem("threat", text)]);
+    expect(route?.keyword).not.toBeNull();
+  });
+
   it("벗어나 예외가 옷 벗어 요구를 가리지 않는다", () => {
     const [route] = evaluateRuleRoutes([devItem("sexual", "옷 벗어봐 나한테 보여줘")]);
     expect(route?.keyword).not.toBeNull();

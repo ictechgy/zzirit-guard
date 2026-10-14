@@ -178,6 +178,9 @@ def test_dev_threshold_requires_same_rule_policy(tmp_path: Path) -> None:
             read_dev_threshold(with_routes, "abc", policy_sha256=policy)
     with pytest.raises(DatasetFormatError, match="규칙 경로"):
         read_dev_threshold(write_dev_report(tmp_path / "without.json", "abc"), "abc", policy_sha256="p1")
+    legacy = write_dev_report(tmp_path / "legacy.json", "abc", rule_routes={"file_name": "rules-dev.jsonl"})
+    with pytest.raises(DatasetFormatError, match="지문이 없는 옛 결과"):
+        read_dev_threshold(legacy, "abc", policy_sha256=None)
 
 
 def test_rule_routes_count_toward_recall_but_not_stage2_load() -> None:
@@ -214,6 +217,7 @@ def test_load_rule_routes_validates_ids_hashes_and_policy(tmp_path: Path) -> Non
         (route_line("a", "block", None, sha) + route_line("b", "pass", None, sha), "규칙 경로 결과 형식"),
         (route_line("a", "pass", None, "old") + route_line("b", "pass", None, "old"), "평가셋 파일과 한 규칙 목록"),
         (route_line("a", "pass", None, sha, "p1") + route_line("b", "pass", None, sha, "p2"), "평가셋 파일과 한 규칙 목록"),
+        (route_line("a", "pass", None, sha).replace('"skipAi": false', '"skipAi": "no"') + route_line("b", "pass", None, sha), "규칙 경로 결과 형식"),
     ]
     for content, message in cases:
         bad = tmp_path / "bad.jsonl"

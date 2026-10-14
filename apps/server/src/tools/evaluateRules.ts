@@ -17,6 +17,12 @@ import { createRuleRepository, type RuleRepository } from "../detection/ruleRepo
 import { findFirstMatch, locateExceptions } from "../detection/wordMatch.js";
 import { createAuditLog } from "../records/auditLog.js";
 
+/**
+ * 평가 도구 버전. 규칙 목록 지문에 함께 넣는다. 판정 순서나 정규화처럼 같은 목록이라도 결과가 바뀌는 변경을 하면 올린다.
+ * 왜: 개발셋과 보류셋의 규칙 결과가 같은 목록이어도 서로 다른 판정 방식으로 만들어졌다면 섞으면 안 되기 때문이다.
+ */
+const EVALUATOR_VERSION = "evaluate-rules@1";
+
 /** 평가용 채널 식별자. 메모리 DB에만 있다. */
 const EVALUATION_CHANNEL_ID = "evaluation";
 
@@ -101,7 +107,7 @@ function findKeywordRoute(rules: RuleRepository, text: string): number | null {
  */
 function computePolicySha256(rules: RuleRepository): string {
   const lines = rules.list(EVALUATION_CHANNEL_ID).map((rule) => `${rule.kind}\t${rule.pattern}`).sort();
-  return createHash("sha256").update(lines.join("\n")).digest("hex");
+  return createHash("sha256").update([EVALUATOR_VERSION, ...lines].join("\n")).digest("hex");
 }
 
 /**
