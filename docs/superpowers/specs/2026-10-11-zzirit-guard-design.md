@@ -282,7 +282,7 @@ POST /classify   (유닉스 소켓 $ZG_DATA_DIR/run/stage1.sock, 2차는 stage2.
 | `setting` | channel_id, auto_hide_enabled, stage1_threshold(0.05), candidate_threshold(0.5), sure_threshold(0.99), breaker_per_minute(60), retention_days_content(30), retention_days_audit(180) | 상시 |
 | `rule_entry` | id, channel_id, kind(strong·weak·exception·allow·allow_domain·threat·keyword_route·spam), pattern, created_by, created_at | 상시 |
 | `verdict` | id, channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason(rule_id 또는 `ai:<범주>`), unsafe_probability, category, sure, status(pending·hidden·ignored·restricted·false_positive), created_at | 30일 |
-| `message_hide` | chat_channel_id, sender_channel_id, message_time, state(hidden·result_unknown), updated_at. 같은 메시지에 숨김이 두 번 나가지 않게 하는 장부(원문 없음) | 180일 |
+| `message_hide` | chat_channel_id, sender_channel_id, message_time, state(sending·hidden·result_unknown), updated_at. 같은 메시지에 숨김이 두 번 나가지 않게 하는 장부(원문 없음). 보내기 전에 sending을 먼저 적어, 결과를 적지 못하고 끝나면 결과 모름으로 막는다 | 원문·감사 기간 중 긴 쪽(기본 180일) |
 | `audit_log` | id, channel_id, actor_type(manager·rule·system), actor_channel_id, action, target_sender_channel_id, verdict_id, result, error, created_at | 180일(원문 없음) |
 | `minute_stat` | channel_id, minute, received, skipped, deduplicated, stage1_forwarded, stage2_done, stage2_dropped, ai_unchecked, candidates, auto_hidden, shadow, invalid_events | 180일 |
 | `manager_session` | id, manager_channel_id, role, expires_at, last_role_check_at | 만료 시 삭제 |
