@@ -114,3 +114,20 @@ def test_cli_prints_table_and_writes_json(tmp_path, capsys) -> None:
     main(["--rates", "5", "--duration-seconds", "120", "--output", str(output)])
     assert "| 5 | 1.000 |" in capsys.readouterr().out
     assert '"max_forward_fraction": 1.0' in output.read_text(encoding="utf-8")
+
+
+def test_reported_fraction_is_feasible_in_every_replication() -> None:
+    """Codex가 찾은 반례(초당 20건, 60초, 시드 30): 보고한 F_max는 모든 반복에서 기준을 지켜야 한다."""
+    scenario = CapacityScenario(policy=QueuePolicy(), service=ServiceTimeModel(), criteria=Criteria(), duration_seconds=60.0, seed=30)
+    fraction = find_max_forward_fraction(20.0, scenario)
+    assert 0.0 < fraction < 1.0
+    assert scenario.is_feasible(20.0 * fraction)
+    assert all(scenario.criteria.is_met_by(result) for result in scenario.simulate_all(20.0 * fraction))
+
+
+def test_replications_use_different_random_paths() -> None:
+    """반복마다 다른 시드를 써서 결과가 다르다(같은 경로만 반복하면 반복의 의미가 없다)."""
+    scenario = CapacityScenario(policy=QueuePolicy(), service=ServiceTimeModel(), criteria=Criteria(), duration_seconds=60.0, replications=3)
+    results = scenario.simulate_all(9.0)
+    assert len(results) == 3
+    assert len({result.arrivals for result in results}) > 1

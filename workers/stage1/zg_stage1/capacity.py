@@ -9,6 +9,7 @@
 - 들어온 지 15초가 지난 항목은 처리하지 않고 버린다(그때쯤이면 채팅이 이미 지나갔다).
 - 도착은 포아송 과정으로 본다. 실제 채팅의 몰림(버스트)은 이보다 거칠 수 있어, 결과는 낙관적인 상한이다.
 - 우선순위는 무시하고 먼저 온 순서로 처리한다. 버림 비율과 대기 시간 전체를 보는 데는 순서가 영향을 주지 않는다.
+- 시드가 다른 반복 여러 번이 모두 기준을 지켜야 통과로 본다. 고른 값은 반올림한 뒤 다시 검증한다.
 
 CLI 사용 예: uv run python -m zg_stage1.capacity --rates 10 20 30 50
 """
@@ -46,6 +47,10 @@ DEFAULT_MAX_WAIT_P95_SECONDS = 1.5
 # 시뮬레이션 길이(30분)와 시드. 길수록 숫자가 안정되고, 시드를 고정해 같은 결과를 다시 낸다.
 DEFAULT_DURATION_SECONDS = 1800.0
 DEFAULT_SEED = 20261014
+
+# 독립 반복 횟수. 한 번의 난수 경로만 보면 p95가 기준 근처에서 흔들려, 다른 시드에서는 기준을 넘는 값을 고를 수 있다.
+# 그래서 반복 모두에서 기준을 지켜야 '된다'고 본다(보수적인 쪽).
+DEFAULT_REPLICATIONS = 5
 
 # 기본으로 계산하는 초당 채팅량. 스펙의 '피크에 초당 수십 건'을 덮는다.
 DEFAULT_RATES: tuple[float, ...] = (10.0, 20.0, 30.0, 50.0)
@@ -205,28 +210,51 @@ class CapacityScenario:
     criteria: Criteria
     duration_seconds: float = DEFAULT_DURATION_SECONDS
     seed: int = DEFAULT_SEED
+    replications: int = DEFAULT_REPLICATIONS
 
-    def simulate(self, stage2_rate_per_second: float) -> SimulationResult:
-        """2차 도착률 하나로 시뮬레이션한다. 도착과 처리 시간에 같은 시드를 써서 비율끼리 비교가 공정하게 한다."""
-        arrival_times = generate_arrival_times(stage2_rate_per_second, self.duration_seconds, random.Random(self.seed))
-        return simulate_queue(arrival_times, self.policy, self.service, self.seed + 1)
+    def simulate(self, stage2_rate_per_second: float, replication: int = 0) -> SimulationResult:
+        """2차 도착률 하나로 반복 한 번을 시뮬레이션한다.
+
+        반복마다 시드를 바꾸되, 같은 반복 번호는 비율이 달라도 같은 시드를 써서 비율끼리 비교가 공정하게 한다.
+        """
+        replication_seed = self.seed + 2 * replication
+        arrival_times = generate_arrival_times(stage2_rate_per_second, self.duration_seconds, random.Random(replication_seed))
+        return simulate_queue(arrival_times, self.policy, self.service, replication_seed + 1)
+
+    def simulate_all(self, stage2_rate_per_second: float) -> list[SimulationResult]:
+        """모든 반복의 결과."""
+        return [self.simulate(stage2_rate_per_second, replication) for replication in range(self.replications)]
+
+    def is_feasible(self, stage2_rate_per_second: float) -> bool:
+        """모든 반복에서 기준을 지키는지."""
+        return all(self.criteria.is_met_by(result) for result in self.simulate_all(stage2_rate_per_second))
 
 
-def find_max_forward_fraction(chat_rate_per_second: float, scenario: CapacityScenario) -> float:
-    """초당 채팅량에서 기준을 지키는 최대 2차 전달 비율(F_max)을 이분 탐색으로 찾는다. 0~1, 소수 셋째 자리 내림.
-
-    왜 이분 탐색인가: 전달 비율이 커질수록 버림·대기가 늘어나는 단조 관계라 경계만 찾으면 된다.
-    """
+def bisect_feasible_fraction(chat_rate_per_second: float, scenario: CapacityScenario) -> float:
+    """기준을 지키는 전달 비율의 경계를 이분 탐색으로 좁힌다. 아래쪽(통과한 쪽) 끝을 돌려준다."""
     lower, upper = 0.0, 1.0
-    if scenario.criteria.is_met_by(scenario.simulate(chat_rate_per_second)):
-        return 1.0
     for _step in range(BISECTION_STEPS):
         middle = (lower + upper) / 2
-        if scenario.criteria.is_met_by(scenario.simulate(chat_rate_per_second * middle)):
+        if scenario.is_feasible(chat_rate_per_second * middle):
             lower = middle
         else:
             upper = middle
-    return math.floor(lower * 10**FRACTION_DECIMALS) / 10**FRACTION_DECIMALS
+    return lower
+
+
+def find_max_forward_fraction(chat_rate_per_second: float, scenario: CapacityScenario) -> float:
+    """초당 채팅량에서 기준을 지키는 최대 2차 전달 비율(F_max). 0~1, 소수 셋째 자리.
+
+    왜 마지막에 다시 확인하나: 유한한 시뮬레이션의 p95는 비율에 대해 완전히 단조롭지 않다. 이분 탐색 결과를 내림한
+    값도 기준을 넘을 수 있어, 보고할 값 자체가 통과할 때까지 0.001씩 내린다.
+    """
+    if scenario.is_feasible(chat_rate_per_second):
+        return 1.0
+    step = 10**-FRACTION_DECIMALS
+    fraction = math.floor(bisect_feasible_fraction(chat_rate_per_second, scenario) / step) * step
+    while fraction > 0 and not scenario.is_feasible(chat_rate_per_second * fraction):
+        fraction = max(0.0, fraction - step)
+    return round(fraction, FRACTION_DECIMALS)
 
 
 @dataclass(frozen=True)
@@ -243,19 +271,19 @@ class CapacityRow:
 
 
 def build_capacity_row(chat_rate_per_second: float, scenario: CapacityScenario) -> CapacityRow:
-    """F_max를 찾고, 그 비율에서의 2차 도착률·이용률·버림·대기 p95·p99를 함께 기록한다."""
+    """F_max를 찾고, 그 비율에서의 2차 도착률·이용률과 반복 중 가장 나쁜 버림·대기 p95·p99를 기록한다."""
     fraction = find_max_forward_fraction(chat_rate_per_second, scenario)
     stage2_rate = chat_rate_per_second * fraction
-    result = scenario.simulate(stage2_rate)
+    results = scenario.simulate_all(stage2_rate)
     utilization = stage2_rate * scenario.service.mean_seconds()
     return CapacityRow(
         chat_rate_per_second,
         fraction,
         round(stage2_rate, 3),
         round(utilization, 3),
-        round(result.drop_rate, 4),
-        round(result.wait_p95_seconds, 3),
-        round(result.wait_p99_seconds, 3),
+        round(max(result.drop_rate for result in results), 4),
+        round(max(result.wait_p95_seconds for result in results), 3),
+        round(max(result.wait_p99_seconds for result in results), 3),
     )
 
 
@@ -271,6 +299,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-wait-p95-seconds", type=positive_float, default=DEFAULT_MAX_WAIT_P95_SECONDS, help="허용 대기 p95(초)")
     parser.add_argument("--duration-seconds", type=positive_float, default=DEFAULT_DURATION_SECONDS, help="시뮬레이션 길이(초)")
     parser.add_argument("--seed", type=positive_integer, default=DEFAULT_SEED, help="난수 시드")
+    parser.add_argument("--replications", type=positive_integer, default=DEFAULT_REPLICATIONS, help="독립 반복 횟수(모두 기준을 지켜야 통과)")
     parser.add_argument("--output", type=Path, help="결과 JSON을 쓸 경로(없으면 표만 출력)")
     return parser
 
@@ -283,6 +312,7 @@ def build_scenario(arguments: argparse.Namespace) -> CapacityScenario:
         criteria=Criteria(arguments.max_drop_rate, arguments.max_wait_p95_seconds),
         duration_seconds=arguments.duration_seconds,
         seed=arguments.seed,
+        replications=arguments.replications,
     )
 
 
