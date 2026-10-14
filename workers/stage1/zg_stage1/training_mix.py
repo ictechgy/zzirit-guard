@@ -84,12 +84,19 @@ HARD_NEGATIVE_VERSIONS: dict[str, HardNegativeVersion] = {
 DEFAULT_HARD_NEGATIVE_VERSION = "v1"
 DEFAULT_EXTRA_REPEAT = 3
 DEFAULT_SEED = 20261014
+DEFAULT_GENERATED_REPEAT = 1
 
 # 섞은 문장의 id 접두사. K-HATERS의 숫자 id와 겹치지 않게 한다.
 HARD_NEGATIVE_ID_PREFIX = "hn-"
+GENERATED_HARMFUL_ID_PREFIX = "gh:"
+GENERATED_ALLOW_ID_PREFIX = "ga:"
 
 # 섞은 문장에 붙이는 K-HATERS 라벨. 이진 변환에서 0(정상)이 되는 값이다.
 NORMAL_LABEL = "normal"
+OFFENSIVE_LABEL = "offensive"
+
+# 봉인 제외 집계의 키 순서. 범주별 정보가 아니라 학습 출처만 남겨 보류셋 구성을 드러내지 않는다.
+TRAINING_SOURCES: tuple[str, ...] = ("khaters", "hard_negative", "generated_harmful", "generated_allow")
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,25 @@ class HardNegative:
     item_id: str
     category: str
     text: str
+
+
+@dataclass(frozen=True)
+class GeneratedExample:
+    """외부에서 만든 학습 문장 한 줄. 원문은 학습 행에만 쓰고 오류·manifest에는 넣지 않는다."""
+
+    item_id: str
+    text: str
+
+
+@dataclass(frozen=True)
+class GeneratedSelection:
+    """평가 겹침을 뺀 생성 입력과 출처 기록. 옵션이 없을 때 기존 manifest를 유지하려고 enabled를 둔다."""
+
+    harmful: tuple[GeneratedExample, ...]
+    allow: tuple[GeneratedExample, ...]
+    excluded_ids: tuple[str, ...]
+    inputs: dict[str, dict]
+    enabled: bool
 
 
 @dataclass(frozen=True)
@@ -145,6 +171,36 @@ def parse_hard_negative_lines(located_lines: Iterable[tuple[str, str]], source_n
 def load_hard_negatives(path: Path) -> list[HardNegative]:
     """학습용 허용 문장 파일 전체를 읽는다(운영자가 따로 만든 파일용)."""
     return parse_hard_negative_lines(iterate_nonblank_lines(path, None), path.name)
+
+
+def parse_generated_example(line: str, location: str) -> GeneratedExample:
+    """생성 학습 한 줄을 읽는다. 왜 id를 제한하나: manifest에 원문 대신 안전하게 기록해야 하기 때문이다."""
+    record = parse_json_object(line, location)
+    identifier = require_string_field(record, "id", location)
+    if SAFE_EXTERNAL_IDENTIFIER_PATTERN.fullmatch(identifier) is None:
+        raise DatasetFormatError(f"{location}: 'id' 형식이 안전하지 않습니다. 1~64자의 영문·숫자·_:- 조합으로 고치세요.")
+    text = require_string_field(record, "text", location)
+    if not text.strip():
+        raise DatasetFormatError(f"{location}: 'text'가 비어 있습니다. 비어 있지 않은 문자열을 넣으세요.")
+    return GeneratedExample(identifier, text)
+
+
+def ensure_unique_generated_ids(located_items: Sequence[tuple[str, GeneratedExample]]) -> None:
+    """한 생성 파일의 id가 고유한지 확인한다. 왜: 제외 기록과 원본 줄을 모호하지 않게 대응시키기 위해서다."""
+    first_locations: dict[str, str] = {}
+    for location, item in located_items:
+        first = first_locations.setdefault(item.item_id, location)
+        if first != location:
+            raise DatasetFormatError(f"{location}: id {item.item_id!r}가 {first}에 이미 있습니다. 각 줄에 고유한 id를 넣으세요.")
+
+
+def load_generated_examples(path: Path) -> list[GeneratedExample]:
+    """생성 학습 파일 전체를 검증해 읽는다. 빈 파일은 설정 실수를 숨기므로 오류로 알린다."""
+    located = [(location, parse_generated_example(line, location)) for location, line in iterate_nonblank_lines(path, None)]
+    if not located:
+        raise DatasetFormatError(f"{path.name}: 생성 학습 문장이 없습니다. 경로를 확인하고 JSONL 문장을 넣으세요.")
+    ensure_unique_generated_ids(located)
+    return [item for _, item in located]
 
 
 def read_hard_negative_version_lines(path: Path, version_name: str) -> list[tuple[str, str]]:
@@ -195,6 +251,37 @@ def exclude_evaluation_overlaps(records: Sequence[LabeledText], references: Sequ
     return kept, [finding for finding in findings if finding is not None]
 
 
+def exclude_generated_evaluation_overlaps(items: Sequence[GeneratedExample], references: Sequence[OverlapIndex]) -> tuple[list[GeneratedExample], list[str]]:
+    """생성 문장에서 공개 평가 참조와 겹친 줄을 빼고 입력 id만 남긴다. 원문·평가 id는 기록하지 않는다."""
+    overlaps = [find_evaluation_overlap(item.item_id, item.text, references) is not None for item in items]
+    kept = [item for item, overlaps_evaluation in zip(items, overlaps, strict=True) if not overlaps_evaluation]
+    excluded_ids = [item.item_id for item, overlaps_evaluation in zip(items, overlaps, strict=True) if overlaps_evaluation]
+    return kept, excluded_ids
+
+
+def load_generated_source(path: Path, repeat: int, references: Sequence[OverlapIndex]) -> tuple[list[GeneratedExample], list[str], dict]:
+    """생성 파일 하나를 읽고 공개 평가 겹침을 뺀다. 반복 횟수는 설정이 아니라 이 입력의 출처에 붙인다."""
+    kept, excluded = exclude_generated_evaluation_overlaps(load_generated_examples(path), references)
+    return kept, excluded, describe_file_provenance(path) | {"repeat": repeat}
+
+
+def load_generated_selection(arguments: argparse.Namespace, references: Sequence[OverlapIndex]) -> GeneratedSelection:
+    """지정된 생성 입력만 읽는다. 왜 조건부인가: 새 옵션이 없으면 기존 manifest 바이트 구조를 유지해야 한다."""
+    harmful: list[GeneratedExample] = []
+    allow: list[GeneratedExample] = []
+    excluded: list[str] = []
+    inputs: dict[str, dict] = {}
+    for name, path, repeat in (
+        ("generated_harmful", arguments.generated_harmful, arguments.generated_harmful_repeat),
+        ("generated_allow", arguments.generated_allow, arguments.generated_allow_repeat),
+    ):
+        if path is not None:
+            kept, removed, inputs[name] = load_generated_source(path, repeat, references)
+            (harmful if name == "generated_harmful" else allow).extend(kept)
+            excluded.extend(removed)
+    return GeneratedSelection(tuple(harmful), tuple(allow), tuple(excluded), inputs, bool(inputs))
+
+
 def downsample_toxic(records: Sequence[LabeledText], toxic_fraction: float | None, seed: int) -> list[LabeledText]:
     """정상은 모두 두고 유해만 줄여 유해 비율을 toxic_fraction으로 맞춘다. 원래 순서를 지킨다.
 
@@ -213,6 +300,11 @@ def hard_negative_rows(items: Sequence[HardNegative], repeat: int) -> list[dict]
     return [{"id": f"{HARD_NEGATIVE_ID_PREFIX}{item.item_id}-{copy}", "text": item.text, "label": NORMAL_LABEL} for copy in range(repeat) for item in items]
 
 
+def generated_rows(items: Sequence[GeneratedExample], repeat: int, prefix: str, label: str) -> list[dict]:
+    """생성 문장을 반복 가능한 학습 행으로 바꾼다. 출처 접두사로 다른 입력의 같은 id도 충돌하지 않는다."""
+    return [{"id": f"{prefix}{item.item_id}-{copy}", "text": item.text, "label": label} for copy in range(repeat) for item in items]
+
+
 def khaters_rows(records: Sequence[LabeledText]) -> list[dict]:
     """K-HATERS 레코드를 원래 라벨 그대로 줄로 만든다."""
     return [{"id": record.record_id, "text": record.text, "label": record.original_label} for record in records]
@@ -228,6 +320,23 @@ def build_training_rows(khaters: Sequence[LabeledText], hard_negatives: Sequence
     """K-HATERS(필요하면 유해를 줄인 것) 뒤에 허용 문장을 붙인 학습 줄 목록. 섞는 일은 학습의 길이 기준 배치가 한다."""
     kept = downsample_toxic(khaters, settings.toxic_fraction, settings.seed)
     return khaters_rows(kept) + hard_negative_rows(hard_negatives, settings.extra_repeat)
+
+
+def tag_source(source: str, rows: Sequence[dict]) -> list[tuple[str, dict]]:
+    """봉인 제외가 출처별 건수를 낼 수 있게 행에 내부용 출처를 붙인다. 출력 JSON에는 이 값이 들어가지 않는다."""
+    return [(source, row) for row in rows]
+
+
+def build_sourced_training_rows(
+    khaters: Sequence[LabeledText], hard_negatives: Sequence[HardNegative], generated: GeneratedSelection, settings: MixSettings, arguments: argparse.Namespace
+) -> list[tuple[str, dict]]:
+    """모든 학습 행을 만든 뒤 출처와 묶는다. 왜: 봉인 검사는 반복까지 끝난 실제 학습 행 각각을 제외해야 한다."""
+    kept = downsample_toxic(khaters, settings.toxic_fraction, settings.seed)
+    rows = tag_source("khaters", khaters_rows(kept))
+    rows += tag_source("hard_negative", hard_negative_rows(hard_negatives, settings.extra_repeat))
+    rows += tag_source("generated_harmful", generated_rows(generated.harmful, arguments.generated_harmful_repeat, GENERATED_HARMFUL_ID_PREFIX, OFFENSIVE_LABEL))
+    rows += tag_source("generated_allow", generated_rows(generated.allow, arguments.generated_allow_repeat, GENERATED_ALLOW_ID_PREFIX, NORMAL_LABEL))
+    return rows
 
 
 def file_identity(status: os.stat_result) -> tuple[int, int]:
@@ -319,14 +428,70 @@ def describe_excluded_overlap(finding: OverlapFinding) -> dict:
     return asdict(finding) | {"item_id": describe_external_identifier(finding.item_id)}
 
 
-def build_manifest(settings: MixSettings, inputs: Mapping[str, dict], excluded: Sequence[OverlapFinding], rows: Sequence[Mapping[str, str]]) -> dict:
+def load_sealed_holdout_index(path: Path) -> OverlapIndex:
+    """봉인 평가 파일을 한 번 읽어 색인으로 만든다. 형식 오류도 내부 id·원문을 숨긴 채 고치는 방법만 알린다."""
+    try:
+        items = load_chat_eval_set(path)
+    except DatasetFormatError:
+        message = f"{path.name}: 봉인 보류셋 형식이 올바르지 않습니다. chat eval JSONL 형식과 고유 id를 확인하세요."
+        raise DatasetFormatError(message) from None
+    return OverlapIndex.build((item.item_id, item.text) for item in items)
+
+
+def exclude_sealed_holdout_overlaps(sourced_rows: Sequence[tuple[str, dict]], index: OverlapIndex) -> tuple[list[tuple[str, dict]], dict[str, int], list[str]]:
+    """봉인 보류셋과 겹친 실제 학습 행을 뺀다. 왜: 반복된 복사본까지 빠졌는지 출처별로 확인해야 한다."""
+    kept: list[tuple[str, dict]] = []
+    counts = {source: 0 for source in TRAINING_SOURCES}
+    excluded_ids: list[str] = []
+    for source, row in sourced_rows:
+        if index.find_overlap(str(row["id"]), str(row["text"])) is None:
+            kept.append((source, row))
+        else:
+            counts[source] += 1
+            excluded_ids.append(describe_external_identifier(str(row["id"])))
+    return kept, counts, excluded_ids
+
+
+def apply_sealed_holdout(path: Path, sourced_rows: Sequence[tuple[str, dict]]) -> tuple[list[tuple[str, dict]], dict]:
+    """봉인 색인을 한 번 구축해 단방향 제외하고, 허용된 출처별 건수와 학습 id만 요약한다."""
+    kept, counts, excluded_ids = exclude_sealed_holdout_overlaps(sourced_rows, load_sealed_holdout_index(path))
+    summary = {
+        "file_name": path.name,
+        "sha256": compute_file_sha256(path),
+        "excluded_rows": len(excluded_ids),
+        "excluded_by_source": counts,
+        "excluded_training_ids": excluded_ids,
+    }
+    return kept, summary
+
+
+def apply_optional_sealed_holdout(arguments: argparse.Namespace, sourced_rows: Sequence[tuple[str, dict]]) -> tuple[list[tuple[str, dict]], dict | None]:
+    """옵션이 있을 때만 봉인 제외를 적용한다. 없으면 기존 행과 manifest 구조를 그대로 둔다."""
+    if arguments.sealed_holdout is None:
+        return list(sourced_rows), None
+    return apply_sealed_holdout(arguments.sealed_holdout, sourced_rows)
+
+
+def build_manifest(
+    settings: MixSettings,
+    inputs: Mapping[str, dict],
+    excluded: Sequence[OverlapFinding],
+    rows: Sequence[Mapping[str, str]],
+    excluded_generated: Sequence[str] | None = None,
+    sealed_holdout: Mapping[str, object] | None = None,
+) -> dict:
     """설정, 입력 출처, 평가셋과 겹쳐 뺀 K-HATERS 줄(id만), 줄 수. 출력 파일 기록("output")은 학습 파일을 쓴 뒤에 붙인다. 원문은 넣지 않는다."""
-    return {
+    manifest = {
         "settings": asdict(settings),
         "inputs": dict(inputs),
         "excluded_khaters_overlaps": [describe_excluded_overlap(finding) for finding in excluded],
         "counts": count_binary_labels(rows),
     }
+    if excluded_generated is not None:
+        manifest["excluded_generated_overlaps"] = list(excluded_generated)
+    if sealed_holdout is not None:
+        manifest["sealed_holdout"] = dict(sealed_holdout)
+    return manifest
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -341,6 +506,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     source.add_argument("--hard-negatives", type=Path, help="저장소 대신 쓸 허용 문장 JSONL(파일 전체를 쓴다)")
     parser.add_argument("--toxic-fraction", type=fraction_below_one, help="K-HATERS 부분의 유해 비율 목표(기본: 줄이지 않음)")
     parser.add_argument("--extra-repeat", type=non_negative_integer, default=DEFAULT_EXTRA_REPEAT, help="허용 문장 반복 횟수(기본 3, 0이면 넣지 않음)")
+    parser.add_argument("--generated-harmful", type=Path, help="추가할 생성 유해 JSONL(id, text)")
+    parser.add_argument("--generated-harmful-repeat", type=non_negative_integer, default=DEFAULT_GENERATED_REPEAT, help="생성 유해 반복 횟수(기본 1)")
+    parser.add_argument("--generated-allow", type=Path, help="추가할 생성 허용 JSONL(id, text)")
+    parser.add_argument("--generated-allow-repeat", type=non_negative_integer, default=DEFAULT_GENERATED_REPEAT, help="생성 허용 반복 횟수(기본 1)")
+    parser.add_argument("--sealed-holdout", type=Path, help="마지막에 단방향 겹침을 제외할 봉인 chat eval JSONL")
     parser.add_argument("--seed", type=positive_integer, default=DEFAULT_SEED, help="유해 표본 시드")
     return parser
 
@@ -378,7 +548,13 @@ def stage_and_publish_outputs(output_path: Path, rows: Sequence[Mapping[str, str
 
 
 def write_training_outputs(
-    output_path: Path, rows: Sequence[Mapping[str, str]], settings: MixSettings, inputs: Mapping[str, dict], excluded: Sequence[OverlapFinding]
+    output_path: Path,
+    rows: Sequence[Mapping[str, str]],
+    settings: MixSettings,
+    inputs: Mapping[str, dict],
+    excluded: Sequence[OverlapFinding],
+    excluded_generated: Sequence[str] | None = None,
+    sealed_holdout: Mapping[str, object] | None = None,
 ) -> dict:
     """학습 파일과 그 sha256을 담은 manifest를 함께 쓴다. 둘 다 생기거나 둘 다 생기지 않는다.
 
@@ -389,14 +565,15 @@ def write_training_outputs(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     created: list[CreatedFile] = []
     try:
-        return stage_and_publish_outputs(output_path, rows, build_manifest(settings, inputs, excluded, rows), created)
+        manifest = build_manifest(settings, inputs, excluded, rows, excluded_generated, sealed_holdout)
+        return stage_and_publish_outputs(output_path, rows, manifest, created)
     except BaseException:
         remove_created_files(created)
         raise
 
 
 def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | None = None) -> None:
-    """입력 읽기 → 평가셋 겹침 확인(허용 문장은 오류, K-HATERS는 빼기) → 섞기 → 학습 파일과 manifest 쓰기 → 줄 수 출력."""
+    """모든 입력을 섞고 공개 평가·봉인 보류 겹침을 단방향으로 뺀 뒤 트랜잭션으로 쓴다."""
     arguments = build_argument_parser().parse_args(argv)
     ensure_outputs_absent(arguments.out)
     khaters_path = resolve_khaters_path(arguments, os.environ if environment is None else environment)
@@ -404,12 +581,18 @@ def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | Non
     references = load_evaluation_references()
     ensure_no_evaluation_overlap(hard_negatives, references)
     khaters, excluded = exclude_evaluation_overlaps(load_labeled_texts(khaters_path), references)
+    generated = load_generated_selection(arguments, references)
     settings = MixSettings(arguments.toxic_fraction, arguments.extra_repeat, arguments.seed)
-    rows = build_training_rows(khaters, hard_negatives, settings)
-    inputs = {"khaters_train": describe_file_provenance(khaters_path), "hard_negatives": hard_negative_source}
-    manifest = write_training_outputs(arguments.out, rows, settings, inputs, excluded)
+    sourced_rows = build_sourced_training_rows(khaters, hard_negatives, generated, settings, arguments)
+    sourced_rows, sealed_summary = apply_optional_sealed_holdout(arguments, sourced_rows)
+    rows = [row for _, row in sourced_rows]
+    inputs = {"khaters_train": describe_file_provenance(khaters_path), "hard_negatives": hard_negative_source} | generated.inputs
+    generated_excluded = generated.excluded_ids if generated.enabled else None
+    manifest = write_training_outputs(arguments.out, rows, settings, inputs, excluded, generated_excluded, sealed_summary)
     counts = manifest["counts"]
-    print(f"학습 파일 {len(rows)}줄(정상 {counts['normal']}, 유해 {counts['toxic']}, 평가셋과 겹쳐 뺀 K-HATERS {len(excluded)}줄) → {arguments.out.name}")
+    sealed_text = "" if sealed_summary is None else f", 봉인 보류셋과 겹쳐 뺀 {sealed_summary['excluded_rows']}줄"
+    summary = f"학습 파일 {len(rows)}줄(정상 {counts['normal']}, 유해 {counts['toxic']}, 평가셋과 겹쳐 뺀 K-HATERS {len(excluded)}줄"
+    print(f"{summary}{sealed_text}) → {arguments.out.name}")
 
 
 if __name__ == "__main__":
