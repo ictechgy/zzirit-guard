@@ -37,6 +37,21 @@ function problemsOf(status: ServerStatus | null, realtimeConnected: boolean, isR
   if (!status.channelConnected) problems.push("연결된 채널이 없습니다. 스트리머가 채널을 연결해야 합니다.");
   else if (status.writeLocked) problems.push("치지직 토큰이 만료돼 숨김·제재를 할 수 없습니다. 스트리머가 다시 연결해야 합니다.");
   if (status.channelConnected && !status.chatConnected) problems.push("치지직 채팅 연결이 끊겼습니다. 다시 연결하는 중입니다(끊긴 동안의 채팅은 놓칩니다).");
+  return [...problems, ...aiProblemsOf(status)];
+}
+
+/**
+ * AI 단계의 문제(스펙 6장 "AI 상태, 미검사 건수", 10장 "AI 중지"). AI를 끈 배포에서는 보이지 않는다.
+ * @param status 서버 상태
+ */
+function aiProblemsOf(status: ServerStatus): string[] {
+  const { ai } = status;
+  if (!ai.enabled) return [];
+  const problems: string[] = [];
+  const downStages = [ai.stage1.state === "down" ? "1차" : null, ai.stage2.state === "down" ? "2차" : null].filter((stage) => stage !== null);
+  if (downStages.length > 0) problems.push(`AI 중지(${downStages.join("·")} 워커 응답 없음). 규칙은 계속 동작합니다.`);
+  const { dropped, unchecked } = ai.uncheckedLastMinute;
+  if (dropped + unchecked > 0) problems.push(`최근 1분 AI 미검사 ${dropped + unchecked}건(과부하 ${dropped}, 장애·너무 긴 문장 ${unchecked}).`);
   return problems;
 }
 

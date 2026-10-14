@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MainScreen } from "../../src/screens/MainScreen";
 import { initialServerState, type ServerState } from "../../src/state/serverReducer";
 import { json, stubFetch } from "../helpers/stubFetch";
+import { AI_OFF, NO_AI } from "../helpers/aiFixtures";
 
 /** 훅이 돌려줄 서버 상태. 테스트마다 바꾼다. */
 const hookState = vi.hoisted(() => ({ current: null as ServerState | null }));
@@ -30,7 +31,7 @@ const switchManager = { ...me, permissions: ["disable_auto_hide" as const] };
 /** 자동 숨김을 끌 수 있고 감사 기록도 볼 수 있는 채널 관리자. */
 const auditManager = { ...switchManager, role: "STREAMING_CHANNEL_MANAGER" as const, permissions: ["disable_auto_hide" as const, "view_audit" as const] };
 /** 정상 서버 상태(자동 숨김 켜짐). */
-const enabledStatus: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: true, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const enabledStatus: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: true, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 /** 작업 결과 알림(성공·안내 토스트)을 찾는다. 알림에는 이름을 붙이지 않으므로(W4) 역할과 클래스로 찾는다. */
 function actionToast(): HTMLElement | null {
   return screen.queryAllByRole("status").find((element) => element.classList.contains("toast")) ?? null;
@@ -178,7 +179,7 @@ describe("MainScreen 시스템이 자동 숨김을 껐을 때(F8·B19-3, 스모�
 
 describe("MainScreen 기본 성공 안내(F9)", () => {
   it("서버가 안내(note)를 주지 않으면 숨기기·무시에 기본 안내를 보여 준다", async () => {
-    const verdict = (id: number) => ({ id, chatChannelId: "c", senderChannelId: `s${id}`, senderNickname: `시청자${id}`, content: `메시지${id}`, messageTime: id, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() - id });
+    const verdict = (id: number) => ({ id, chatChannelId: "c", senderChannelId: `s${id}`, senderNickname: `시청자${id}`, content: `메시지${id}`, messageTime: id, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() - id, ...NO_AI });
     stubFetch({ "POST /api/verdicts/1/hide": () => json(200, { ok: true, note: null }), "POST /api/verdicts/2/ignore": () => json(200, { ok: true }) });
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict(1), verdict(2)] };
     render(<MainScreen me={{ ...me, permissions: ["hide_message"] }} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
@@ -191,7 +192,7 @@ describe("MainScreen 기본 성공 안내(F9)", () => {
 
 describe("MainScreen 임시 제한 요청(S13)", () => {
   it("판정 번호만 보내고 채팅 채널은 보내지 않는다(서버가 판정에서 읽는다)", async () => {
-    const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() };
+    const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now(), ...NO_AI };
     const fetchMock = stubFetch({ "POST /api/senders/bad/temporary-restrict": () => json(200, { ok: true, note: null }) });
     hookState.current = { ...initialServerState, status: { ...enabledStatus, autoHideEnabled: false }, verdicts: [verdict] };
     render(<MainScreen me={{ ...me, permissions: ["temporary_restrict"] }} onSignedOut={vi.fn()} onRefreshMe={noRefresh} />);
@@ -255,7 +256,7 @@ describe("MainScreen 네트워크 오류로 끝난 되돌릴 수 없는 조치(K
   /** 숨기기·임시 제한·무시를 할 수 있는 채팅 운영자. */
   const actor = { ...me, permissions: ["hide_message" as const, "temporary_restrict" as const] };
   /** 판정 예시. */
-  const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now() };
+  const verdict = { id: 7, chatChannelId: "chat-1", senderChannelId: "bad", senderNickname: "악플러", content: "나쁜 말", messageTime: 1, decision: "candidate" as const, reason: "rule:weak:1", status: "pending" as const, createdAt: Date.now(), ...NO_AI };
   /** 서버에 닿지 못한 fetch 거절(브라우저는 TypeError로 거절한다). */
   const networkFailure = (): Response => {
     throw new TypeError("Failed to fetch");

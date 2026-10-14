@@ -1,4 +1,4 @@
-import type { ServerStatus } from "@zzirit-guard/shared";
+import type { AiWorkerStatus, ServerStatus } from "@zzirit-guard/shared";
 import { useApiResource } from "../api/useApiResource";
 import { formatDateTime } from "../domain/timeFormat";
 
@@ -18,6 +18,28 @@ function rowsOf(status: ServerStatus): Array<[string, string]> {
     ["토큰 만료 예정", formatDateTime(status.accessExpiresAt)],
     ["마지막 채팅 수신", formatDateTime(status.lastChatAt)],
     ["처리 대기 중인 조치", `${status.pendingActions}건`],
+    ...aiRowsOf(status),
+  ];
+}
+
+/** 워커 상태 문구. */
+const WORKER_STATE_LABELS: Record<AiWorkerStatus["state"], string> = { ok: "정상", down: "중지", unknown: "확인 전" };
+
+/** 워커 한 줄: 상태와 모델. */
+function workerRow(worker: AiWorkerStatus): string {
+  return `${WORKER_STATE_LABELS[worker.state]}${worker.model ? ` (${worker.model})` : ""} · ${formatDateTime(worker.since)}부터`;
+}
+
+/** AI 단계 행(스펙 6장 상태 점검의 워커·대기열). AI를 끈 배포에서는 보이지 않는다. */
+function aiRowsOf(status: ServerStatus): Array<[string, string]> {
+  const { ai } = status;
+  if (!ai.enabled) return [];
+  const { dropped, unchecked } = ai.uncheckedLastMinute;
+  return [
+    ["AI 1차 워커", workerRow(ai.stage1)],
+    ["AI 2차 워커", workerRow(ai.stage2)],
+    ["AI 2차 대기열", `${ai.queueLength}건`],
+    ["최근 1분 AI 미검사", `과부하 ${dropped}건, 장애·너무 긴 문장 ${unchecked}건`],
   ];
 }
 

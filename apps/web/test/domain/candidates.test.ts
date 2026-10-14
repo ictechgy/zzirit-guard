@@ -1,12 +1,13 @@
 import type { VerdictDto } from "@zzirit-guard/shared";
 import { describe, expect, it } from "vitest";
 import { addVerdictIfAbsent, applyVerdictStatus, buildSections, countActionable, mergeVerdicts, pruneVerdicts, VERDICT_KEEP_MS } from "../../src/domain/candidates";
+import { NO_AI } from "../helpers/aiFixtures";
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
   return {
     id, chatChannelId: "chat-1", senderChannelId: "viewer-1", senderNickname: "시청자1", content: `메시지${id}`,
-    messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: id * 1000, ...overrides,
+    messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: id * 1000, ...NO_AI, ...overrides,
   };
 }
 

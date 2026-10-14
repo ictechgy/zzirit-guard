@@ -8,6 +8,7 @@ import { RulesSection } from "../../src/settings/RulesSection";
 import { StatsSection } from "../../src/settings/StatsSection";
 import { StatusSection } from "../../src/settings/StatusSection";
 import { json, stubFetch } from "../helpers/stubFetch";
+import { AI_OFF, NO_AI } from "../helpers/aiFixtures";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -90,7 +91,7 @@ describe("StatsSection", () => {
 describe("StatusSection", () => {
   it("열릴 때 상태를 읽고 15초마다 다시 읽는다(마지막 채팅 수신·처리 대기는 실시간으로 오지 않는다, R-7)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 2 };
+    const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 2, ai: AI_OFF };
     const fetchMock = stubFetch({ "GET /api/status": () => json(200, status) });
     render(<StatusSection />);
     expect(await screen.findByText("2건")).toBeTruthy();
@@ -104,7 +105,7 @@ describe("StatusSection", () => {
 describe("FalsePositiveSection", () => {
   it("오판이 나온 규칙을 규칙 내용과 건수로, 최근 오판을 이유와 함께 보여 준다(스펙 5.5, R-16)", async () => {
     const review: FalsePositiveReviewDto = {
-      recent: [{ id: 9, chatChannelId: "c", senderChannelId: "s", senderNickname: "시청자", content: "정상 문장", messageTime: 1, decision: "candidate", reason: "rule:strong_spanning:3", status: "false_positive", createdAt: 0 }],
+      recent: [{ id: 9, chatChannelId: "c", senderChannelId: "s", senderNickname: "시청자", content: "정상 문장", messageTime: 1, decision: "candidate", reason: "rule:strong_spanning:3", status: "false_positive", createdAt: 0, ...NO_AI }],
       byReason: [{ reason: "rule:strong_spanning:3", count: 2 }, { reason: "rule:link", count: 1 }],
     };
     stubFetch({

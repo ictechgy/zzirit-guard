@@ -4,20 +4,39 @@ import { apiSend, describeApiError } from "../api/client";
 import { useApiResource } from "../api/useApiResource";
 import { useBusyTask } from "../api/useBusyTask";
 
+/** 정수 설정(한도·보관 기간). */
+type IntegerKey = "breakerPerMinute" | "retentionDaysContent" | "retentionDaysAudit";
+
+/** AI 임계값(비율). */
+type FractionKey = "stage1Threshold" | "candidateThreshold" | "sureThreshold";
+
 /**
- * 설정 항목 이름과 허용 범위. 범위는 서버 SETTING_RULES(apps/server/src/records/settingsRepository.ts)와 같아야 한다.
+ * 정수 설정 항목 이름과 허용 범위. 범위는 서버 SETTING_RULES(apps/server/src/records/settingsRepository.ts)와 같아야 한다.
  * shared는 타입만 내보내 런타임 값을 옮길 수 없어 복사했다(R-20). 서버가 다시 검사하므로 어긋나도 400 문구가 보인다.
  */
-const FIELDS: ReadonlyArray<{ key: keyof SettingsDto; label: string; min: number; max: number }> = [
+const FIELDS: ReadonlyArray<{ key: IntegerKey; label: string; min: number; max: number }> = [
   { key: "breakerPerMinute", label: "자동 숨김 1분 한도(넘으면 스위치가 꺼짐)", min: 1, max: 1000 },
   { key: "retentionDaysContent", label: "원문 보관 기간(일)", min: 1, max: 365 },
   { key: "retentionDaysAudit", label: "감사 기록 보관 기간(일)", min: 1, max: 365 },
 ];
 
-/** 값이 범위 안의 정수가 아닌 첫 항목의 안내 문구. 모두 맞으면 null. 서버에 보내기 전에 걸러 400 왕복을 줄인다. */
+/**
+ * AI 임계값 항목과 이름(로드맵 2단계 계획 R10). 0보다 크고 1보다 작다(확실은 1 이하). 범위는 서버와 같아야 한다.
+ * 1차 임계값은 모델마다 맞는 값이 달라 운영자가 정한다(운영 안내서). AI를 켠 배포에서만 보인다.
+ */
+const AI_FIELDS: ReadonlyArray<{ key: FractionKey; label: string; includesOne: boolean }> = [
+  { key: "stage1Threshold", label: "AI 1차 임계값(이 점수 이상이면 2차로 보냄)", includesOne: false },
+  { key: "candidateThreshold", label: "AI 후보 임계값(2차 확률이 이 값 이상이면 후보)", includesOne: false },
+  { key: "sureThreshold", label: "AI '확실' 임계값(2차 확률이 이 값 이상이면 확실 배지)", includesOne: true },
+];
+
+/** 값이 맞지 않는 첫 항목의 안내 문구. 모두 맞으면 null. 서버에 보내기 전에 걸러 400 왕복을 줄인다. */
 function findInvalidField(draft: SettingsDto): string | null {
   const field = FIELDS.find(({ key, min, max }) => !Number.isInteger(draft[key]) || draft[key] < min || draft[key] > max);
-  return field ? `${field.label}은(는) ${field.min}에서 ${field.max} 사이의 정수여야 합니다.` : null;
+  if (field) return `${field.label}은(는) ${field.min}에서 ${field.max} 사이의 정수여야 합니다.`;
+  const fraction = AI_FIELDS.find(({ key, includesOne }) => !Number.isFinite(draft[key]) || draft[key] <= 0 || (includesOne ? draft[key] > 1 : draft[key] >= 1));
+  if (fraction) return `${fraction.label}은(는) 0보다 크고 1${fraction.includesOne ? " 이하" : "보다 작은"} 수여야 합니다.`;
+  return draft.candidateThreshold > draft.sureThreshold ? "AI 후보 임계값은 확실 임계값보다 클 수 없습니다." : null;
 }
 
 /** 바꾼 항목이 없을 때의 안내. 보내지 않는다(빈 저장도 서버 감사 기록에 남는다). */
@@ -32,7 +51,7 @@ const NO_CHANGES_MESSAGE = "바꾼 값이 없습니다.";
  */
 function changedFields(baseline: SettingsDto, draft: SettingsDto): Partial<SettingsDto> {
   const patch: Partial<SettingsDto> = {};
-  for (const { key } of FIELDS) if (draft[key] !== baseline[key]) patch[key] = draft[key];
+  for (const { key } of [...FIELDS, ...AI_FIELDS]) if (draft[key] !== baseline[key]) patch[key] = draft[key];
   return patch;
 }
 
@@ -42,6 +61,8 @@ export interface LimitsSectionProps {
   me: MeDto;
   /** 바뀌면 서버에서 다시 읽는다(설정 탭을 다시 열거나 '새로 고침', F6). 생략하면 처음 한 번만 읽는다. */
   refreshKey?: number;
+  /** 서버가 AI 단계를 켰는지. 켜져 있을 때만 AI 임계값 칸을 보인다. 생략하면 꺼짐으로 본다. */
+  aiEnabled?: boolean;
 }
 
 /**
@@ -49,7 +70,7 @@ export interface LimitsSectionProps {
  * 다시 읽으면 저장하지 않은 입력은 서버 값으로 바뀐다(탭을 떠났다 돌아온 경우라 최신 값이 낫다).
  * 저장은 바꾼 항목만 보내고, 성공하면 응답(서버의 지금 값)을 새 기준과 입력으로 삼는다(K19).
  */
-export function LimitsSection({ me, refreshKey = 0 }: LimitsSectionProps) {
+export function LimitsSection({ me, refreshKey = 0, aiEnabled = false }: LimitsSectionProps) {
   const settings = useApiResource<SettingsDto>("/api/settings", null, refreshKey);
   // 서버에서 마지막으로 받은 값. 바꾼 항목을 가려내는 기준이다(K19).
   const [baseline, setBaseline] = useState<SettingsDto | null>(null);
@@ -81,6 +102,13 @@ export function LimitsSection({ me, refreshKey = 0 }: LimitsSectionProps) {
         <label key={field.key} className="field">
           {field.label}
           <input type="number" min={field.min} max={field.max} value={draft[field.key]} disabled={!canEdit || busy.isBusy}
+            onChange={(event) => { setMessage(null); setDraft({ ...draft, [field.key]: Number(event.target.value) }); }} />
+        </label>
+      ))}
+      {aiEnabled && AI_FIELDS.map((field) => (
+        <label key={field.key} className="field">
+          {field.label}
+          <input type="number" min={0} max={1} step={0.001} value={draft[field.key]} disabled={!canEdit || busy.isBusy}
             onChange={(event) => { setMessage(null); setDraft({ ...draft, [field.key]: Number(event.target.value) }); }} />
         </label>
       ))}

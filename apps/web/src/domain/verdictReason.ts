@@ -17,6 +17,13 @@ const DOWNGRADE_SUFFIXES: ReadonlyArray<{ suffix: string; note: string }> = [
   { suffix: ":privileged", note: " · 스트리머·매니저 메시지라 후보로 낮춤" },
   { suffix: ":unknown_role", note: " · 보낸 사람의 역할을 알 수 없어 후보로 낮춤" },
 ];
+/**
+ * AI(2차, kanana-safeguard) 범주 이름. 키는 서버 판정 이유 "ai:<범주>"의 <범주>다(apps/server/src/actions/decisionHandler.ts).
+ * 이름은 모델 카드를 따른다.
+ */
+const AI_CATEGORY_LABELS: ReadonlyMap<string, string> = new Map([
+  ["S1", "증오"], ["S2", "괴롭힘"], ["S3", "성적 콘텐츠"], ["S4", "범죄"], ["S5", "아동 성착취"], ["S6", "자살·자해"], ["S7", "잘못된 정보"],
+]);
 /** 규칙 번호가 든 이유의 모양: rule:<종류>:<번호>[:privileged|:unknown_role]. */
 const RULE_ID_PATTERN = /^rule:[a-z_]+:(\d+)(?::privileged|:unknown_role)?$/;
 
@@ -27,11 +34,23 @@ const RULE_ID_PATTERN = /^rule:[a-z_]+:(\d+)(?::privileged|:unknown_role)?$/;
  * @returns 예: "금칙어 강 #12", "떼도배 · 스트리머·매니저 메시지라 후보로 낮춤"
  */
 export function describeReason(reason: string): string {
+  const aiLabel = describeAiReason(reason);
+  if (aiLabel) return aiLabel;
   const downgrade = DOWNGRADE_SUFFIXES.find(({ suffix }) => reason.endsWith(suffix));
   const [prefix, kind, ruleId] = (downgrade ? reason.slice(0, -downgrade.suffix.length) : reason).split(":");
   const label = prefix === "rule" && kind ? RULE_LABELS.get(kind) : undefined;
   if (!label) return reason;
   return `${label}${ruleId ? ` #${ruleId}` : ""}${downgrade?.note ?? ""}`;
+}
+
+/**
+ * AI 판정 이유("ai:S2")를 "AI · 괴롭힘(S2)"로 바꾼다. AI 판정 이유가 아니거나 모르는 범주면 null.
+ * @param reason 서버 판정 이유
+ */
+function describeAiReason(reason: string): string | null {
+  const [prefix, category] = reason.split(":");
+  const label = prefix === "ai" && category ? AI_CATEGORY_LABELS.get(category) : undefined;
+  return label ? `AI · ${label}(${category})` : null;
 }
 
 /** 이유에서 규칙 번호를 꺼낸다. 규칙 번호가 없는 이유(떼도배·링크 등)면 null. 오판 검토 목록이 규칙 내용을 찾을 때 쓴다. */

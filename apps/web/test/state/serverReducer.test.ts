@@ -2,9 +2,10 @@ import type { ChatLine, RealtimeEvent, ServerStatus, VerdictDto } from "@zzirit-
 import { describe, expect, it } from "vitest";
 import { VERDICT_KEEP_MS } from "../../src/domain/candidates";
 import { initialServerState, MAX_CHAT_LINES, serverReducer, type ServerAction, type ServerState } from "../../src/state/serverReducer";
+import { AI_OFF, NO_AI } from "../helpers/aiFixtures";
 
 /** 상태 예시. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 
 /** 채팅 줄 예시. */
 function line(index: number): ChatLine {
@@ -13,7 +14,7 @@ function line(index: number): ChatLine {
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
-  return { id, chatChannelId: "c", senderChannelId: "s", senderNickname: "n", content: "x", messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: id, ...overrides };
+  return { id, chatChannelId: "c", senderChannelId: "s", senderNickname: "n", content: "x", messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: id, ...NO_AI, ...overrides };
 }
 
 /** 동작을 차례로 적용한다. */

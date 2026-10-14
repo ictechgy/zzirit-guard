@@ -2,13 +2,14 @@ import type { VerdictDto } from "@zzirit-guard/shared";
 import { describe, expect, it } from "vitest";
 import { buildMessageLabels, messageLabelOf } from "../../src/domain/messageLabels";
 import { formatClockTime } from "../../src/domain/timeFormat";
+import { NO_AI } from "../helpers/aiFixtures";
 
 /** 기준 시각. */
 const NOW = 1_000_000;
 
 /** 판정 예시. */
 function verdict(id: number, overrides: Partial<VerdictDto> = {}): VerdictDto {
-  return { id, chatChannelId: "c", senderChannelId: "s", senderNickname: "닉", content: "x", messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: NOW, ...overrides };
+  return { id, chatChannelId: "c", senderChannelId: "s", senderNickname: "닉", content: "x", messageTime: id, decision: "candidate", reason: "rule:weak:1", status: "pending", createdAt: NOW, ...NO_AI, ...overrides };
 }
 
 describe("buildMessageLabels(K22)", () => {

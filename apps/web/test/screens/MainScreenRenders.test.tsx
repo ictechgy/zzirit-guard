@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MainScreen } from "../../src/screens/MainScreen";
 import { initialServerState, type ServerState } from "../../src/state/serverReducer";
 import { stubFetch } from "../helpers/stubFetch";
+import { AI_OFF } from "../helpers/aiFixtures";
 
 /** 훅이 돌려줄 서버 상태와, 렌더마다 같은 함수(실제 훅의 useCallback처럼). 테스트마다 상태를 바꾼다. */
 const hook = vi.hoisted(() => ({ state: null as ServerState | null, reload: () => undefined, reconnect: () => undefined, applyAutoHide: (_enabled: boolean) => undefined, statusEventCount: () => 0 }));
@@ -27,7 +28,7 @@ const noRefresh = () => undefined;
 /** 채팅 운영자. */
 const me: MeDto = { channelId: "m1", channelName: "매니저1", role: "STREAMING_CHAT_MANAGER", permissions: ["disable_auto_hide", "hide_message"] };
 /** 정상 상태. */
-const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const status: ServerStatus = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 
 afterEach(() => {
   vi.unstubAllGlobals();

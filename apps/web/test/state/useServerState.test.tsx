@@ -3,9 +3,10 @@ import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useServerState } from "../../src/state/useServerState";
 import { json } from "../helpers/stubFetch";
+import { AI_OFF } from "../helpers/aiFixtures";
 
 /** 정상 서버 상태. */
-const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 };
+const status = { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: AI_OFF };
 
 /** 테스트가 열림·닫힘을 직접 일으키는 가짜 WebSocket. 만든 소켓은 sockets에 쌓인다. */
 class ControlledSocket {

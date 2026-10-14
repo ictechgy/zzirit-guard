@@ -19,9 +19,10 @@ export interface FakeWorker {
  * 가짜 워커를 띄운다.
  * @param handler 처음 쓸 응답 방법
  * @param socketName 소켓 파일 이름
+ * @param sharedDirectory 소켓을 둘 이미 있는 0700 디렉터리(두 워커를 한 디렉터리에 둘 때). 없으면 새로 만들고 close가 지운다.
  */
-export async function startFakeWorker(handler: FakeWorkerHandler, socketName = "stage1.sock"): Promise<FakeWorker> {
-  const directory = mkdtempSync("/tmp/zgw-");
+export async function startFakeWorker(handler: FakeWorkerHandler, socketName = "stage1.sock", sharedDirectory?: string): Promise<FakeWorker> {
+  const directory = sharedDirectory ?? mkdtempSync("/tmp/zgw-");
   chmodSync(directory, 0o700);
   const socketPath = join(directory, socketName);
   const requests: FakeWorker["requests"] = [];
@@ -49,7 +50,7 @@ export async function startFakeWorker(handler: FakeWorkerHandler, socketName = "
     close: async () => {
       pending.forEach((response) => response.destroy());
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      rmSync(directory, { recursive: true, force: true });
+      if (!sharedDirectory) rmSync(directory, { recursive: true, force: true });
     },
   };
 }
@@ -64,5 +65,22 @@ export function stage1Reply(probability: number, model = "kcelectra-fake@0123456
     if (path === "/health") return { status: 200, body: JSON.stringify({ contract: 1, model, ready: true }) };
     const items = (JSON.parse(body) as { items: Array<{ id: string }> }).items;
     return { status: 200, body: JSON.stringify({ contract: 1, model, items: items.map(({ id }) => ({ id, unsafe_probability: probability, category: null })) }) };
+  };
+}
+
+/**
+ * 계약대로 답하는 가짜 2차 판정: 원문마다 정한 확률·범주를 주고, 정하지 않은 원문은 안전(0.01, S1)이다.
+ * @param verdicts 원문 → [확률, 범주]
+ * @param model 모델 식별자
+ */
+export function stage2Reply(verdicts: Record<string, [number, string]>, model = "kanana-fake@0123456789ab"): FakeWorkerHandler {
+  return ({ path, body }) => {
+    if (path === "/health") return { status: 200, body: JSON.stringify({ contract: 1, model, ready: true }) };
+    const items = (JSON.parse(body) as { items: Array<{ id: string; text: string }> }).items;
+    const entries = items.map(({ id, text }) => {
+      const [probability, category] = verdicts[text] ?? [0.01, "S1"];
+      return { id, unsafe_probability: probability, category };
+    });
+    return { status: 200, body: JSON.stringify({ contract: 1, model, items: entries }) };
   };
 }
