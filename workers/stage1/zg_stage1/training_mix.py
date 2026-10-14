@@ -17,6 +17,7 @@ CLI 사용 예:
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -46,7 +47,7 @@ from zg_stage1.data import (
     parse_json_object,
     require_string_field,
 )
-from zg_stage1.errors import DatasetFormatError, OutputExistsError, run_command_line
+from zg_stage1.errors import DatasetFormatError, OutputExistsError, OutputLocationError, run_command_line
 from zg_stage1.paths import KHATERS_RELATIVE_PATH, KHATERS_TRAIN_FILE_NAME, ML_DIRECTORY_VARIABLE, ensure_outside_repository, resolve_ml_directory
 
 # 저장소에 넣은 학습용 허용 문장과 평가셋 위치. 평가셋과 겹치지 않는지 만들 때마다 확인한다.
@@ -58,6 +59,10 @@ SAFE_EXTERNAL_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9_:-]{1,64}")
 # 학습 파일·manifest를 최종 이름에 넣기 전에 쓰는 임시 파일의 이름 앞뒤. 강제 종료로 남으면 이 이름으로 찾아 지운다.
 STAGED_FILE_PREFIX = ".training-mix-"
 STAGED_FILE_SUFFIX = ".tmp"
+# 학습 파일·manifest의 권한(mkstemp가 주는 값). 데이터 원문이 든 파일이라 만든 사용자만 읽고 쓴다. 학습도 같은 사용자가 한다.
+OUTPUT_FILE_MODE = 0o600
+# 하드 링크를 만들 수 없는 파일 시스템(exFAT, 일부 네트워크·FUSE)에서 os.link가 내는 errno.
+LINK_UNSUPPORTED_ERRNOS = frozenset({errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV})
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,14 @@ class HardNegative:
     item_id: str
     category: str
     text: str
+
+
+@dataclass(frozen=True)
+class CreatedFile:
+    """이번 실행이 만든 파일 하나: 경로와 그 파일의 (장치, inode). 지울 때 그 경로가 아직 이 파일인지 확인하는 데 쓴다."""
+
+    path: Path
+    identity: tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -217,31 +230,53 @@ def build_training_rows(khaters: Sequence[LabeledText], hard_negatives: Sequence
     return khaters_rows(kept) + hard_negative_rows(hard_negatives, settings.extra_repeat)
 
 
-def stage_text_file(directory: Path, text: str, created: list[Path]) -> Path:
-    """directory에 고유한 이름의 임시 파일을 만들어 text를 쓴다.
+def file_identity(status: os.stat_result) -> tuple[int, int]:
+    """파일의 (장치, inode). 두 경로의 값이 같으면 같은 파일이다."""
+    return (status.st_dev, status.st_ino)
+
+
+def stage_text_file(directory: Path, text: str, created: list[CreatedFile]) -> CreatedFile:
+    """directory에 고유한 이름의 임시 파일(권한 OUTPUT_FILE_MODE)을 만들어 text를 쓴다.
 
     created: 이번 실행이 만든 파일 목록. 쓰기 전에 먼저 적어 두어, 쓰다 실패해도 호출한 쪽이 지울 수 있게 한다.
     """
     descriptor, name = tempfile.mkstemp(dir=directory, prefix=STAGED_FILE_PREFIX, suffix=STAGED_FILE_SUFFIX)
-    created.append(Path(name))
+    staged = CreatedFile(Path(name), file_identity(os.fstat(descriptor)))
+    created.append(staged)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(text)
-    return Path(name)
+    return staged
 
 
-def publish_without_overwrite(staged_path: Path, destination: Path, created: list[Path]) -> None:
+def publish_without_overwrite(staged: CreatedFile, destination: Path, created: list[CreatedFile]) -> None:
     """임시 파일을 최종 이름에 하드 링크로 넣는다.
 
     왜 링크인가: 이름 바꾸기(os.replace)와 달리, 시작할 때 확인한 뒤에 같은 이름의 파일이 생겼어도 덮어쓰지 않고 FileExistsError를 낸다.
+    하드 링크를 못 만드는 파일 시스템이면 출력 위치를 바꾸라는 오류를 낸다.
     """
-    os.link(staged_path, destination)
-    created.append(destination)
+    try:
+        os.link(staged.path, destination)
+    except OSError as error:
+        if error.errno in LINK_UNSUPPORTED_ERRNOS:
+            message = f"{destination.name}을 넣을 파일 시스템이 하드 링크를 지원하지 않습니다. APFS 같은 로컬 디스크의 경로를 --out으로 주세요."
+            raise OutputLocationError(message) from error
+        raise
+    created.append(CreatedFile(destination, staged.identity))
 
 
-def remove_created_files(paths: Sequence[Path]) -> None:
-    """이번 실행이 만든 파일(임시·최종)을 지운다. 이미 없는 파일은 넘어간다."""
-    for path in paths:
-        path.unlink(missing_ok=True)
+def is_still_created_file(created_file: CreatedFile) -> bool:
+    """경로가 아직 이번 실행이 만든 파일을 가리키는지. 경로가 없거나 다른 파일로 바뀌었으면 False다."""
+    try:
+        return file_identity(os.stat(created_file.path)) == created_file.identity
+    except FileNotFoundError:
+        return False
+
+
+def remove_created_files(files: Sequence[CreatedFile]) -> None:
+    """이번 실행이 만든 파일(임시·최종)을 지운다. 그 사이 다른 파일로 바뀐 경로는 남이 넣은 파일이므로 지우지 않는다."""
+    for created_file in files:
+        if is_still_created_file(created_file):
+            created_file.path.unlink(missing_ok=True)
 
 
 def manifest_path_for(output_path: Path) -> Path:
@@ -321,10 +356,10 @@ def load_selected_hard_negatives(arguments: argparse.Namespace) -> tuple[list[Ha
     return load_hard_negative_version(version_name), describe_hard_negative_source(DEFAULT_HARD_NEGATIVES_PATH, version_name)
 
 
-def stage_and_publish_outputs(output_path: Path, rows: Sequence[Mapping[str, str]], manifest_body: Mapping[str, object], created: list[Path]) -> dict:
+def stage_and_publish_outputs(output_path: Path, rows: Sequence[Mapping[str, str]], manifest_body: Mapping[str, object], created: list[CreatedFile]) -> dict:
     """학습 파일과 manifest를 모두 임시 파일로 써 둔 뒤 학습 파일, manifest 순으로 최종 이름에 넣고 임시 파일을 지운다."""
     staged_data = stage_text_file(output_path.parent, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), created)
-    manifest = dict(manifest_body) | {"output": {"file_name": output_path.name, "sha256": compute_file_sha256(staged_data)}}
+    manifest = dict(manifest_body) | {"output": {"file_name": output_path.name, "sha256": compute_file_sha256(staged_data.path)}}
     staged_manifest = stage_text_file(output_path.parent, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", created)
     publish_without_overwrite(staged_data, output_path, created)
     publish_without_overwrite(staged_manifest, manifest_path_for(output_path), created)
@@ -338,11 +373,11 @@ def write_training_outputs(
     """학습 파일과 그 sha256을 담은 manifest를 함께 쓴다. 둘 다 생기거나 둘 다 생기지 않는다.
 
     왜: 출처 기록 없는 학습 파일이 남으면 그 파일로 학습할 수 있고, 다음 실행도 "이미 있음"으로 막힌다. 그래서 도중에 실패하면 이번 실행이
-    만든 파일(임시·최종)을 모두 지우고 오류를 그대로 올린다. 프로세스가 강제로 죽으면(SIGKILL, 전원) 정리할 수 없다. 그때 남은
-    학습 파일, manifest, `.training-mix-*.tmp`는 지우고 다시 만든다.
+    만든 파일(임시·최종)을 모두 지우고 오류를 그대로 올린다. 두 최종 이름은 차례로 넣으므로 그 사이에는 학습 파일만 보인다.
+    프로세스가 강제로 죽으면(SIGKILL, 전원) 정리할 수 없다. 그때 남은 학습 파일, manifest, `.training-mix-*.tmp`는 지우고 다시 만든다.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    created: list[Path] = []
+    created: list[CreatedFile] = []
     try:
         return stage_and_publish_outputs(output_path, rows, build_manifest(settings, inputs, excluded, rows), created)
     except BaseException:

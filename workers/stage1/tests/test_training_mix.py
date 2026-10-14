@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from zg_stage1.chat_eval_data import OverlapFinding
 from zg_stage1.training_mix import (
     DEFAULT_HARD_NEGATIVES_PATH,
     HARD_NEGATIVE_VERSIONS,
+    OUTPUT_FILE_MODE,
     MixSettings,
     build_training_rows,
     count_binary_labels,
@@ -243,3 +246,46 @@ def test_publish_does_not_overwrite_existing_output(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         write_training_outputs(existing, [{"id": "1", "text": "가", "label": "normal"}], MixSettings(None, 1, 1), {}, [])
     assert existing.read_text(encoding="utf-8") == "앞선 학습 파일\n" and staged_or_published_files(tmp_path) == ["mix.jsonl"]
+
+
+def write_one_row(output_path: Path) -> dict:
+    """한 줄짜리 학습 파일과 manifest를 쓴다(쓰기 경로 테스트용)."""
+    return write_training_outputs(output_path, [{"id": "1", "text": "가", "label": "normal"}], MixSettings(None, 1, 1), {}, [])
+
+
+def test_outputs_are_private_files(tmp_path: Path) -> None:
+    """학습 파일과 manifest는 만든 사용자만 읽고 쓴다(OUTPUT_FILE_MODE). 데이터 원문이 든 파일이기 때문이다."""
+    output_path = tmp_path / "mix.jsonl"
+    write_one_row(output_path)
+    for path in (output_path, manifest_path_for(output_path)):
+        assert stat.S_IMODE(path.stat().st_mode) == OUTPUT_FILE_MODE == 0o600
+
+
+def test_cleanup_keeps_file_replaced_by_another_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """학습 파일을 넣은 뒤 누가 그 이름을 다른 파일로 바꿔 넣고 manifest 넣기가 실패하면, 바뀐 파일은 지우지 않는다."""
+    output_path = tmp_path / "mix.jsonl"
+    real_link = os.link
+
+    def replace_first_then_fail(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
+        if Path(destination) != output_path:
+            output_path.unlink()
+            output_path.write_text("다른 프로세스의 파일\n", encoding="utf-8")
+            raise OSError(errno.EIO, "I/O error")
+        real_link(source, destination)
+
+    monkeypatch.setattr(os, "link", replace_first_then_fail)
+    with pytest.raises(OSError, match="I/O"):
+        write_one_row(output_path)
+    assert output_path.read_text(encoding="utf-8") == "다른 프로세스의 파일\n" and staged_or_published_files(tmp_path) == ["mix.jsonl"]
+
+
+def test_unsupported_hard_link_gives_actionable_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """하드 링크를 못 만드는 파일 시스템이면 출력 위치를 바꾸라는 오류를 내고, 임시 파일을 남기지 않는다."""
+
+    def refuse_link(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
+        raise OSError(errno.ENOTSUP, "Operation not supported")
+
+    monkeypatch.setattr(os, "link", refuse_link)
+    with pytest.raises(OutputLocationError, match="하드 링크"):
+        write_one_row(tmp_path / "mix.jsonl")
+    assert staged_or_published_files(tmp_path) == []
