@@ -1,0 +1,446 @@
+{
+ "contract": 1,
+ "description": "서버 클라이언트가 받아들일(accept true) 응답과 거절할 응답. request_ids는 보낸 요청의 id 순서다.",
+ "cases": [
+  {
+   "name": "stage1_valid",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": true
+  },
+  {
+   "name": "stage2_valid",
+   "stage": "stage2",
+   "request_ids": [
+    "m-1"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kanana@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.97,
+      "category": "S6"
+     }
+    ]
+   },
+   "accept": true
+  },
+  {
+   "name": "stage1_zero_probability",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": true
+  },
+  {
+   "name": "contract_2",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 2,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "missing_contract",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "model_empty",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "model_201_characters",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "extra_top_level_key",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ],
+    "debug": true
+   },
+   "accept": false
+  },
+  {
+   "name": "fewer_items",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2",
+    "m-3"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "swapped_order",
+   "stage": "stage1",
+   "request_ids": [
+    "m-2",
+    "m-1"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "unknown_id",
+   "stage": "stage2",
+   "request_ids": [
+    "m-9"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kanana@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.97,
+      "category": "S6"
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "probability_above_one",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 1.0000001,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "probability_negative",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": -0.01,
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "probability_string",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": "0.5",
+      "category": null
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "probability_nan_token",
+   "stage": "stage2",
+   "request_ids": [
+    "m-1"
+   ],
+   "raw_body": "{\"contract\": 1, \"model\": \"kanana@0123456789ab\", \"items\": [{\"id\": \"m-1\", \"unsafe_probability\": NaN, \"category\": \"S1\"}]}",
+   "accept": false
+  },
+  {
+   "name": "stage1_category_not_null",
+   "stage": "stage1",
+   "request_ids": [
+    "m-1",
+    "m-2"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kcelectra@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.031,
+      "category": "S1"
+     },
+     {
+      "id": "m-2",
+      "unsafe_probability": 1,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "stage2_category_null",
+   "stage": "stage2",
+   "request_ids": [
+    "m-1"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kanana@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.97,
+      "category": null
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "stage2_category_s8",
+   "stage": "stage2",
+   "request_ids": [
+    "m-1"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kanana@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.97,
+      "category": "S8"
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "extra_item_key",
+   "stage": "stage2",
+   "request_ids": [
+    "m-1"
+   ],
+   "body": {
+    "contract": 1,
+    "model": "kanana@0123456789ab",
+    "items": [
+     {
+      "id": "m-1",
+      "unsafe_probability": 0.97,
+      "category": "S6",
+      "text": "원문"
+     }
+    ]
+   },
+   "accept": false
+  },
+  {
+   "name": "not_json",
+   "stage": "stage2",
+   "request_ids": [
+    "m-1"
+   ],
+   "raw_body": "<html>",
+   "accept": false
+  }
+ ]
+}

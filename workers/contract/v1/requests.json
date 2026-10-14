@@ -1,0 +1,555 @@
+{
+ "contract": 1,
+ "description": "워커 요청 사례. status는 워커별 기대 상태 코드, error는 오류 본문의 코드다. generate는 항목 수(items)와 각 text의 코드 포인트 수(text_length, 글자 character 기본 '가')로 본문을 만든다. generate_raw_bytes는 그 길이의 JSON 아닌 본문을 보낸다.",
+ "cases": [
+  {
+   "name": "one_item",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 200
+   }
+  },
+  {
+   "name": "four_items",
+   "body": {
+    "items": [
+     {
+      "id": "m-0",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-2",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-3",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 200
+   }
+  },
+  {
+   "name": "five_items",
+   "body": {
+    "items": [
+     {
+      "id": "m-0",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-2",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-3",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-4",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 400
+   },
+   "error": "too_many_items"
+  },
+  {
+   "name": "thirty_two_items",
+   "generate": {
+    "items": 32,
+    "text_length": 5
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 400
+   },
+   "error": "too_many_items"
+  },
+  {
+   "name": "thirty_three_items",
+   "generate": {
+    "items": 33,
+    "text_length": 5
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "too_many_items"
+  },
+  {
+   "name": "control_characters_allowed",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "가\u0000나\u001f다\n"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 200
+   }
+  },
+  {
+   "name": "text_1000_code_points",
+   "generate": {
+    "items": 1,
+    "text_length": 1000
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 200
+   }
+  },
+  {
+   "name": "text_1000_astral_code_points",
+   "generate": {
+    "items": 1,
+    "text_length": 1000,
+    "character": "😀"
+   },
+   "status": {
+    "stage1": 200,
+    "stage2": 200
+   }
+  },
+  {
+   "name": "text_1001_code_points",
+   "generate": {
+    "items": 1,
+    "text_length": 1001
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_text"
+  },
+  {
+   "name": "empty_items",
+   "body": {
+    "items": []
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "top_level_array",
+   "body": [
+    {
+     "id": "m-1",
+     "text": "안녕하세요 반가워요"
+    }
+   ],
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "extra_top_level_key",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ],
+    "debug": true
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "extra_item_key",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "가",
+      "user": "x"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "missing_text",
+   "body": {
+    "items": [
+     {
+      "id": "m-1"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "items_not_list",
+   "body": {
+    "items": {
+     "id": "m-1",
+     "text": "가"
+    }
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "item_not_object",
+   "body": {
+    "items": [
+     "가"
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "duplicate_json_key",
+   "raw_body": "{\"items\": [{\"id\": \"m-1\", \"text\": \"가\"}], \"items\": [{\"id\": \"m-2\", \"text\": \"나\"}]}",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_body"
+  },
+  {
+   "name": "id_number",
+   "body": {
+    "items": [
+     {
+      "id": 1,
+      "text": "가"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_id"
+  },
+  {
+   "name": "id_with_space",
+   "body": {
+    "items": [
+     {
+      "id": "m 1",
+      "text": "가"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_id"
+  },
+  {
+   "name": "id_empty",
+   "body": {
+    "items": [
+     {
+      "id": "",
+      "text": "가"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_id"
+  },
+  {
+   "name": "id_65_characters",
+   "body": {
+    "items": [
+     {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "text": "가"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_id"
+  },
+  {
+   "name": "duplicate_id",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     },
+     {
+      "id": "m-1",
+      "text": "나"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "duplicate_id"
+  },
+  {
+   "name": "text_empty",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": ""
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_text"
+  },
+  {
+   "name": "text_number",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": 12
+     }
+    ]
+   },
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_text"
+  },
+  {
+   "name": "text_lone_surrogate",
+   "raw_body": "{\"items\": [{\"id\": \"m-1\", \"text\": \"가\\ud800나\"}]}",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "bad_text"
+  },
+  {
+   "name": "invalid_json",
+   "raw_body": "{\"items\": [",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_json"
+  },
+  {
+   "name": "nan_constant",
+   "raw_body": "{\"items\": [{\"id\": \"m-1\", \"text\": \"가\"}], \"x\": NaN}",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_json"
+  },
+  {
+   "name": "invalid_utf8",
+   "raw_body_hex": "7b226974656d73223a5b7b226964223a226d2d31222c2274657874223a22ff227d5d7d",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "invalid_json"
+  },
+  {
+   "name": "text_plain_content_type",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "content_type": "text/plain",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "content_type"
+  },
+  {
+   "name": "json_with_charset",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "content_type": "application/json; charset=utf-8",
+   "status": {
+    "stage1": 200,
+    "stage2": 200
+   }
+  },
+  {
+   "name": "missing_content_length",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "omit_content_length": true,
+   "status": {
+    "stage1": 411,
+    "stage2": 411
+   },
+   "error": "length_required"
+  },
+  {
+   "name": "chunked_transfer_encoding",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "transfer_encoding": "chunked",
+   "status": {
+    "stage1": 400,
+    "stage2": 400
+   },
+   "error": "transfer_encoding"
+  },
+  {
+   "name": "body_over_limit",
+   "generate_raw_bytes": 65537,
+   "status": {
+    "stage1": 413,
+    "stage2": 413
+   },
+   "error": "payload_too_large"
+  },
+  {
+   "name": "unknown_path",
+   "path": "/score",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 404,
+    "stage2": 404
+   },
+   "error": "not_found"
+  },
+  {
+   "name": "get_classify",
+   "method": "GET",
+   "path": "/classify",
+   "status": {
+    "stage1": 405,
+    "stage2": 405
+   },
+   "error": "method_not_allowed"
+  },
+  {
+   "name": "put_classify",
+   "method": "PUT",
+   "path": "/classify",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 405,
+    "stage2": 405
+   },
+   "error": "method_not_allowed"
+  },
+  {
+   "name": "post_health",
+   "method": "POST",
+   "path": "/health",
+   "body": {
+    "items": [
+     {
+      "id": "m-1",
+      "text": "안녕하세요 반가워요"
+     }
+    ]
+   },
+   "status": {
+    "stage1": 405,
+    "stage2": 405
+   },
+   "error": "method_not_allowed"
+  }
+ ]
+}
