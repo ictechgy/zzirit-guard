@@ -1,28 +1,40 @@
-"""1차 분류기 학습 파일을 만든다: K-HATERS train의 유해 비율을 낮추고, 채팅 형식의 '허용 어려운 예제'를 섞는다.
+"""1차 분류기 학습 파일을 만든다: K-HATERS train에 채팅 형식의 '허용 어려운 예제'를 섞고, 필요하면 유해 비율을 낮춘다.
 
 왜 필요한가(docs/ml/2026-10-14-chat-eval-baseline.md):
-- K-HATERS train은 73%가 유해라 점수가 전반적으로 높다. 유해를 줄여 사전 확률을 낮춘다.
 - 뉴스 댓글에는 칭찬 비속어·게임 표현·인용/신고 같은 방송 채팅이 없어, 이런 문장을 유해로 본다. 그 문장들을 정상(normal)으로 넣는다.
+- K-HATERS train은 73%가 유해라 점수가 전반적으로 높다. --toxic-fraction으로 유해를 줄여 볼 수 있다.
 결과 파일은 K-HATERS와 같은 형식(id·text·label)이라 train의 --train-file로 그대로 쓴다. 옆에 만든 manifest에 입력 파일의
-sha256과 설정을 남겨, 같은 입력·설정이면 같은 파일이 나오게 한다. 데이터 원문은 저장소에 넣지 않는다(출력은 ML 디렉터리에 둔다).
+sha256과 설정, 평가셋과 겹쳐 뺀 줄을 남겨, 같은 입력·설정이면 같은 파일이 나오게 한다. 데이터 원문은 저장소에 넣지 않는다(출력은 ML 디렉터리에 둔다).
+
+기본값은 M2 1차 후보(kcelectra-hn-f73-r3)의 설정이다: 허용 문장 v1, K-HATERS 유해 비율 그대로, 3번 반복
+(docs/ml/2026-10-14-stage1-retrain-results.md).
 
 CLI 사용 예:
-  uv run python -m zg_stage1.training_mix --out "$ZG_DATA_DIR/ml/data/mix/train-hn-f50-r3.jsonl" --toxic-fraction 0.5 --extra-repeat 3
+  uv run python -m zg_stage1.training_mix --out "$ZG_DATA_DIR/ml/data/mix/train-hn-v1-r3.jsonl"
+  uv run python -m zg_stage1.training_mix --out "$ZG_DATA_DIR/ml/data/mix/train-hn2-f50-r3.jsonl" --hard-negative-version v2 --toxic-fraction 0.5
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from zg_stage1.arguments import fraction_below_one, non_negative_integer, positive_integer
-from zg_stage1.chat_eval_data import ALLOW_CATEGORIES, OverlapIndex, ensure_sealed_regression_unchanged, load_chat_eval_set, load_sealed_regression_index
+from zg_stage1.chat_eval_data import (
+    ALLOW_CATEGORIES,
+    OverlapFinding,
+    OverlapIndex,
+    ensure_sealed_regression_unchanged,
+    load_chat_eval_set,
+    load_sealed_regression_index,
+)
 from zg_stage1.data import (
     LabeledText,
     compute_file_sha256,
@@ -40,8 +52,24 @@ STAGE1_DIRECTORY = Path(__file__).resolve().parents[1]
 DEFAULT_HARD_NEGATIVES_PATH = STAGE1_DIRECTORY / "train_data" / "hard-negatives-v2.jsonl"
 EVAL_SET_PATHS: tuple[Path, ...] = (STAGE1_DIRECTORY / "eval_data" / "chat-dev-v2.jsonl", STAGE1_DIRECTORY / "eval_data" / "chat-holdout-v2.jsonl")
 
-# 기본 설정: 유해 50%(정상과 같은 수), 허용 어려운 예제 3번 반복. 2천여 문장을 한 번만 넣으면 9만여 문장 속에서 효과가 묻힌다.
-DEFAULT_TOXIC_FRACTION = 0.5
+
+@dataclass(frozen=True)
+class HardNegativeVersion:
+    """저장소 허용 문장 파일의 판(version) 하나: 파일 앞에서부터 몇 줄인지와 그 줄들(줄바꿈 포함)의 sha256."""
+
+    line_count: int
+    sha256: str
+
+
+# 판별 줄 수와 sha256. v2는 v1(앞 2,934줄) 뒤에 734줄을 덧붙인 파일이다.
+# 왜 해시로 확인하나: v1으로 학습한 후보 모델을 v2 파일에서 정확히 다시 만들 수 있어야 하고, 파일 앞부분이 바뀌면 알아차려야 하기 때문이다.
+HARD_NEGATIVE_VERSIONS: dict[str, HardNegativeVersion] = {
+    "v1": HardNegativeVersion(2934, "335e2c188bac7fad4ac7a162874c150e47d5734be9268c68c37cf2f361431e40"),
+    "v2": HardNegativeVersion(3668, "3b7ef3e4c896767859b060e325356bbdd151f8c031e9a29ae3066cdae92e9e47"),
+}
+
+# 기본 설정: 후보 모델의 설정(허용 문장 v1, 유해 비율 그대로, 3번 반복). 2천여 문장을 한 번만 넣으면 효과가 묻혔다(B1b).
+DEFAULT_HARD_NEGATIVE_VERSION = "v1"
 DEFAULT_EXTRA_REPEAT = 3
 DEFAULT_SEED = 20261014
 
@@ -63,9 +91,9 @@ class HardNegative:
 
 @dataclass(frozen=True)
 class MixSettings:
-    """혼합 설정. manifest에 그대로 남긴다."""
+    """혼합 설정. manifest에 그대로 남긴다. toxic_fraction이 None이면 K-HATERS의 유해 비율을 그대로 둔다."""
 
-    toxic_fraction: float = DEFAULT_TOXIC_FRACTION
+    toxic_fraction: float | None = None
     extra_repeat: int = DEFAULT_EXTRA_REPEAT
     seed: int = DEFAULT_SEED
 
@@ -83,38 +111,77 @@ def parse_hard_negative(line: str, location: str) -> HardNegative:
     return HardNegative(require_string_field(record, "id", location), category, require_string_field(record, "text", location))
 
 
-def load_hard_negatives(path: Path) -> list[HardNegative]:
-    """학습용 허용 문장 파일을 모두 읽는다. 비었거나 id가 겹치면 오류다."""
-    items = [parse_hard_negative(line, location) for location, line in iterate_nonblank_lines(path, None)]
+def parse_hard_negative_lines(located_lines: Iterable[tuple[str, str]], source_name: str) -> list[HardNegative]:
+    """('파일:줄번호', 줄) 목록을 허용 문장으로 읽는다. 비었거나 id가 겹치면 오류다."""
+    items = [parse_hard_negative(line, location) for location, line in located_lines]
     if not items:
-        raise DatasetFormatError(f"{path.name}: 학습용 허용 문장이 없습니다.")
+        raise DatasetFormatError(f"{source_name}: 학습용 허용 문장이 없습니다.")
     duplicated = sorted(identifier for identifier, count in Counter(item.item_id for item in items).items() if count > 1)
     if duplicated:
-        raise DatasetFormatError(f"{path.name}: id가 겹칩니다({', '.join(duplicated[:5])}).")
+        raise DatasetFormatError(f"{source_name}: id가 겹칩니다({', '.join(duplicated[:5])}).")
     return items
 
 
-def ensure_no_evaluation_overlap(items: Sequence[HardNegative], eval_paths: Sequence[Path] = EVAL_SET_PATHS) -> None:
-    """학습 문장이 평가셋(개발·보류)이나 봉인한 72문장과 같거나 거의 같으면 오류를 낸다.
+def load_hard_negatives(path: Path) -> list[HardNegative]:
+    """학습용 허용 문장 파일 전체를 읽는다(운영자가 따로 만든 파일용)."""
+    return parse_hard_negative_lines(iterate_nonblank_lines(path, None), path.name)
 
-    왜: 평가 문장을 학습하면 평가 숫자가 부풀려진다. 학습 파일을 만들 때마다 확인해, 평가셋이 바뀌어도 누수가 생기지 않게 한다.
-    """
+
+def read_hard_negative_version_lines(path: Path, version_name: str) -> list[tuple[str, str]]:
+    """저장소 파일에서 한 판의 앞쪽 줄만 꺼내고 sha256이 기록과 같은지 확인한다. 빈 줄은 건너뛴다."""
+    version = HARD_NEGATIVE_VERSIONS[version_name]
+    lines = path.read_bytes().splitlines(keepends=True)[: version.line_count]
+    if len(lines) != version.line_count or hashlib.sha256(b"".join(lines)).hexdigest() != version.sha256:
+        message = f"{path.name}: 허용 문장 {version_name}의 앞 {version.line_count}줄이 기록한 sha256과 다릅니다."
+        raise DatasetFormatError(f"{message} 앞선 판의 줄은 고치지 말고, 새 문장은 파일 뒤에 덧붙이세요.")
+    decoded = ((f"{path.name}:{number}", line.decode("utf-8")) for number, line in enumerate(lines, start=1))
+    return [(location, line) for location, line in decoded if line.strip()]
+
+
+def load_hard_negative_version(version_name: str, path: Path = DEFAULT_HARD_NEGATIVES_PATH) -> list[HardNegative]:
+    """저장소 허용 문장의 한 판을 읽는다."""
+    return parse_hard_negative_lines(read_hard_negative_version_lines(path, version_name), f"{path.name}({version_name})")
+
+
+def load_evaluation_references(eval_paths: Sequence[Path] = EVAL_SET_PATHS) -> list[OverlapIndex]:
+    """평가셋(개발·보류)과 봉인한 72문장의 겹침 색인. 72문장 파일이 바뀌었으면 오류를 낸다."""
     ensure_sealed_regression_unchanged()
     eval_items = [item for path in eval_paths for item in load_chat_eval_set(path)]
-    references = [OverlapIndex.build((item.item_id, item.text) for item in eval_items), load_sealed_regression_index()]
-    overlapping = [item.item_id for item in items if any(index.find_overlap(item.item_id, item.text) for index in references)]
+    return [OverlapIndex.build((item.item_id, item.text) for item in eval_items), load_sealed_regression_index()]
+
+
+def find_evaluation_overlap(item_id: str, text: str, references: Sequence[OverlapIndex]) -> OverlapFinding | None:
+    """한 문장이 평가 문장과 같거나 거의 같으면 그 겹침 하나(없으면 None)."""
+    return next((finding for index in references if (finding := index.find_overlap(item_id, text)) is not None), None)
+
+
+def ensure_no_evaluation_overlap(items: Sequence[HardNegative], references: Sequence[OverlapIndex]) -> None:
+    """저장소 허용 문장이 평가 문장과 겹치면 오류를 낸다.
+
+    왜 오류인가: 이 파일은 우리가 쓰고 검토한 파일이라, 겹치는 문장은 파일에서 빼는 것이 맞다. 평가 문장을 학습하면 평가 숫자가 부풀려진다.
+    """
+    overlapping = [item.item_id for item in items if find_evaluation_overlap(item.item_id, item.text, references)]
     if overlapping:
         raise DatasetFormatError(f"학습 문장 {len(overlapping)}건이 평가셋과 겹칩니다({', '.join(overlapping[:10])}). 해당 문장을 빼세요.")
 
 
-def downsample_toxic(records: Sequence[LabeledText], toxic_fraction: float, seed: int) -> list[LabeledText]:
+def exclude_evaluation_overlaps(records: Sequence[LabeledText], references: Sequence[OverlapIndex]) -> tuple[list[LabeledText], list[OverlapFinding]]:
+    """K-HATERS에서 평가 문장과 겹치는 줄을 빼고, 뺀 겹침 목록을 함께 돌려준다.
+
+    왜 빼기만 하나: 외부 데이터라 고칠 수 없고, "감사합니다!"처럼 흔한 짧은 문장이 우연히 같은 경우가 대부분이다.
+    """
+    findings = [find_evaluation_overlap(record.record_id, record.text, references) for record in records]
+    kept = [record for record, finding in zip(records, findings, strict=True) if finding is None]
+    return kept, [finding for finding in findings if finding is not None]
+
+
+def downsample_toxic(records: Sequence[LabeledText], toxic_fraction: float | None, seed: int) -> list[LabeledText]:
     """정상은 모두 두고 유해만 줄여 유해 비율을 toxic_fraction으로 맞춘다. 원래 순서를 지킨다.
 
-    이미 유해 비율이 목표 이하이면 그대로 둔다(늘리지는 않는다).
+    toxic_fraction이 None이거나 이미 유해 비율이 목표 이하이면 그대로 둔다(늘리지는 않는다).
     """
     toxic_indices = [index for index, record in enumerate(records) if record.binary_label == 1]
-    normal_count = len(records) - len(toxic_indices)
-    target = round(normal_count * toxic_fraction / (1 - toxic_fraction))
+    target = len(toxic_indices) if toxic_fraction is None else round((len(records) - len(toxic_indices)) * toxic_fraction / (1 - toxic_fraction))
     if target >= len(toxic_indices):
         return list(records)
     kept_toxic = set(random.Random(seed).sample(toxic_indices, target))
@@ -138,23 +205,40 @@ def count_binary_labels(rows: Sequence[Mapping[str, str]]) -> dict[str, int]:
 
 
 def build_training_rows(khaters: Sequence[LabeledText], hard_negatives: Sequence[HardNegative], settings: MixSettings) -> list[dict]:
-    """K-HATERS(유해를 줄인 것) 뒤에 허용 문장을 붙인 학습 줄 목록. 섞는 일은 학습의 길이 기준 배치가 한다."""
+    """K-HATERS(필요하면 유해를 줄인 것) 뒤에 허용 문장을 붙인 학습 줄 목록. 섞는 일은 학습의 길이 기준 배치가 한다."""
     kept = downsample_toxic(khaters, settings.toxic_fraction, settings.seed)
     return khaters_rows(kept) + hard_negative_rows(hard_negatives, settings.extra_repeat)
 
 
-def write_jsonl_atomically(path: Path, rows: Sequence[Mapping[str, str]]) -> None:
-    """JSONL을 임시 파일에 쓴 뒤 이름을 바꿔 넣는다. 중간에 멈춰도 반쯤 쓴 학습 파일이 남지 않게 하기 위해서다."""
+def write_text_atomically(path: Path, text: str) -> None:
+    """임시 파일에 쓴 뒤 이름을 바꿔 넣는다. 중간에 멈춰도 반쯤 쓴 학습 파일·manifest가 남지 않게 하기 위해서다."""
     temporary_path = path.with_name(f".{path.name}.tmp")
-    temporary_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+    temporary_path.write_text(text, encoding="utf-8")
     os.replace(temporary_path, path)
 
 
-def build_manifest(settings: MixSettings, input_paths: Mapping[str, Path], rows: Sequence[Mapping[str, str]], output_path: Path) -> dict:
-    """설정, 입력 파일 출처(이름·크기·sha256), 줄 수, 출력 sha256. 원문은 넣지 않는다."""
+def manifest_path_for(output_path: Path) -> Path:
+    """학습 파일의 manifest 경로: 파일 이름 전체 뒤에 .manifest.json을 붙인다. 확장자만 다른 두 학습 파일이 manifest를 나눠 쓰지 않게 하기 위해서다."""
+    return output_path.with_name(f"{output_path.name}.manifest.json")
+
+
+def describe_hard_negative_source(path: Path, version_name: str | None) -> dict:
+    """허용 문장 입력의 출처. 저장소 판을 쓰면 판 이름과 줄 수, 그 줄들의 sha256을 덧붙인다."""
+    provenance = describe_file_provenance(path)
+    if version_name is None:
+        return provenance
+    version = HARD_NEGATIVE_VERSIONS[version_name]
+    return provenance | {"version": version_name, "line_count": version.line_count, "selected_sha256": version.sha256}
+
+
+def build_manifest(
+    settings: MixSettings, inputs: Mapping[str, dict], excluded: Sequence[OverlapFinding], rows: Sequence[Mapping[str, str]], output_path: Path
+) -> dict:
+    """설정, 입력 출처, 평가셋과 겹쳐 뺀 K-HATERS 줄(id만), 줄 수, 출력 sha256. 원문은 넣지 않는다."""
     return {
         "settings": asdict(settings),
-        "inputs": {name: describe_file_provenance(path) for name, path in input_paths.items()},
+        "inputs": dict(inputs),
+        "excluded_khaters_overlaps": [asdict(finding) for finding in excluded],
         "counts": count_binary_labels(rows),
         "output": {"file_name": output_path.name, "sha256": compute_file_sha256(output_path)},
     }
@@ -163,11 +247,14 @@ def build_manifest(settings: MixSettings, input_paths: Mapping[str, Path], rows:
 def build_argument_parser() -> argparse.ArgumentParser:
     """CLI 인자."""
     parser = argparse.ArgumentParser(prog="python -m zg_stage1.training_mix", description="1차 분류기 학습 파일 만들기(K-HATERS + 허용 어려운 예제)")
-    parser.add_argument("--out", type=Path, required=True, help="만들 학습 JSONL 경로(이미 있으면 거부). 저장소 밖에 둔다")
+    parser.add_argument("--out", type=Path, required=True, help="만들 학습 JSONL 경로(학습 파일이나 manifest가 이미 있으면 거부). 저장소 밖에 둔다")
     default_khaters = f"${ML_DIRECTORY_VARIABLE}/{KHATERS_RELATIVE_PATH}/{KHATERS_TRAIN_FILE_NAME}"
     parser.add_argument("--khaters-train", type=Path, help=f"K-HATERS train JSONL(기본: {default_khaters})")
-    parser.add_argument("--hard-negatives", type=Path, default=DEFAULT_HARD_NEGATIVES_PATH, help="학습용 허용 문장 JSONL(기본: 저장소의 v1)")
-    parser.add_argument("--toxic-fraction", type=fraction_below_one, default=DEFAULT_TOXIC_FRACTION, help="K-HATERS 부분의 유해 비율 목표(기본 0.5)")
+    source = parser.add_mutually_exclusive_group()
+    versions = sorted(HARD_NEGATIVE_VERSIONS)
+    source.add_argument("--hard-negative-version", choices=versions, default=DEFAULT_HARD_NEGATIVE_VERSION, help="저장소 허용 문장의 판(기본 v1)")
+    source.add_argument("--hard-negatives", type=Path, help="저장소 대신 쓸 허용 문장 JSONL(파일 전체를 쓴다)")
+    parser.add_argument("--toxic-fraction", type=fraction_below_one, help="K-HATERS 부분의 유해 비율 목표(기본: 줄이지 않음)")
     parser.add_argument("--extra-repeat", type=non_negative_integer, default=DEFAULT_EXTRA_REPEAT, help="허용 문장 반복 횟수(기본 3, 0이면 넣지 않음)")
     parser.add_argument("--seed", type=positive_integer, default=DEFAULT_SEED, help="유해 표본 시드")
     return parser
@@ -178,22 +265,48 @@ def resolve_khaters_path(arguments: argparse.Namespace, environment: Mapping[str
     return arguments.khaters_train or resolve_ml_directory(None, environment) / KHATERS_RELATIVE_PATH / KHATERS_TRAIN_FILE_NAME
 
 
+def ensure_outputs_absent(output_path: Path) -> None:
+    """학습 파일과 manifest가 둘 다 없어야 한다. 앞선 학습 파일과 그 출처 기록을 지키기 위해서다."""
+    for path in (output_path, manifest_path_for(output_path)):
+        if path.exists():
+            raise OutputExistsError(f"{path.name}이 이미 있습니다. 앞선 학습 파일과 출처 기록을 지키려고 덮어쓰지 않습니다. 다른 이름을 주세요.")
+    ensure_outside_repository(output_path)
+
+
+def load_selected_hard_negatives(arguments: argparse.Namespace) -> tuple[list[HardNegative], dict]:
+    """인자로 고른 허용 문장과 그 출처. --hard-negatives가 있으면 그 파일 전체, 없으면 저장소 파일의 한 판이다."""
+    if arguments.hard_negatives is not None:
+        return load_hard_negatives(arguments.hard_negatives), describe_hard_negative_source(arguments.hard_negatives, None)
+    version_name = arguments.hard_negative_version
+    return load_hard_negative_version(version_name), describe_hard_negative_source(DEFAULT_HARD_NEGATIVES_PATH, version_name)
+
+
+def write_training_outputs(
+    output_path: Path, rows: Sequence[Mapping[str, str]], settings: MixSettings, inputs: Mapping[str, dict], excluded: Sequence[OverlapFinding]
+) -> dict:
+    """학습 파일을 쓰고 그 sha256을 담은 manifest를 쓴다. 둘 다 임시 파일을 거쳐 넣는다."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_text_atomically(output_path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
+    manifest = build_manifest(settings, inputs, excluded, rows, output_path)
+    write_text_atomically(manifest_path_for(output_path), json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+    return manifest
+
+
 def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | None = None) -> None:
-    """입력 읽기 → 평가셋 겹침 확인 → 유해 줄이기·허용 문장 섞기 → 학습 파일과 manifest 쓰기 → 줄 수 출력."""
+    """입력 읽기 → 평가셋 겹침 확인(허용 문장은 오류, K-HATERS는 빼기) → 섞기 → 학습 파일과 manifest 쓰기 → 줄 수 출력."""
     arguments = build_argument_parser().parse_args(argv)
-    if arguments.out.exists():
-        raise OutputExistsError(f"{arguments.out.name}이 이미 있습니다. 앞선 학습 파일을 지키려고 덮어쓰지 않습니다. 다른 이름을 주세요.")
-    ensure_outside_repository(arguments.out)
+    ensure_outputs_absent(arguments.out)
     khaters_path = resolve_khaters_path(arguments, os.environ if environment is None else environment)
-    hard_negatives = load_hard_negatives(arguments.hard_negatives)
-    ensure_no_evaluation_overlap(hard_negatives)
+    hard_negatives, hard_negative_source = load_selected_hard_negatives(arguments)
+    references = load_evaluation_references()
+    ensure_no_evaluation_overlap(hard_negatives, references)
+    khaters, excluded = exclude_evaluation_overlaps(load_labeled_texts(khaters_path), references)
     settings = MixSettings(arguments.toxic_fraction, arguments.extra_repeat, arguments.seed)
-    rows = build_training_rows(load_labeled_texts(khaters_path), hard_negatives, settings)
-    arguments.out.parent.mkdir(parents=True, exist_ok=True)
-    write_jsonl_atomically(arguments.out, rows)
-    manifest = build_manifest(settings, {"khaters_train": khaters_path, "hard_negatives": arguments.hard_negatives}, rows, arguments.out)
-    arguments.out.with_suffix(".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"학습 파일 {len(rows)}줄(정상 {manifest['counts']['normal']}, 유해 {manifest['counts']['toxic']}) → {arguments.out.name}")
+    rows = build_training_rows(khaters, hard_negatives, settings)
+    inputs = {"khaters_train": describe_file_provenance(khaters_path), "hard_negatives": hard_negative_source}
+    manifest = write_training_outputs(arguments.out, rows, settings, inputs, excluded)
+    counts = manifest["counts"]
+    print(f"학습 파일 {len(rows)}줄(정상 {counts['normal']}, 유해 {counts['toxic']}, 평가셋과 겹쳐 뺀 K-HATERS {len(excluded)}줄) → {arguments.out.name}")
 
 
 if __name__ == "__main__":

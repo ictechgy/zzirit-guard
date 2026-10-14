@@ -133,6 +133,29 @@ def test_finds_exact_and_near_duplicates_against_reference(tmp_path: Path) -> No
     assert findings[0].similarity == 1.0
 
 
+def find_overlap_by_full_scan(index: OverlapIndex, item_id: str, text: str) -> tuple[str, float] | None:
+    """역색인 없이 모든 항목과 비교하는 기준 구현. 역색인이 결과를 바꾸지 않는지 비교하려고 둔다."""
+    normalized = normalize_for_overlap(text)
+    best: tuple[str, float] | None = None
+    for reference_id, reference_text, reference_ngrams in index.entries:
+        similarity = 1.0 if normalized == reference_text else jaccard_similarity(character_ngrams(normalized), reference_ngrams)
+        if similarity >= 0.5 and (best is None or similarity > best[1]):
+            best = (reference_id, round(similarity, 3))
+    return best
+
+
+def test_inverted_index_matches_full_scan() -> None:
+    """역색인으로 후보만 비교해도, 모든 항목과 비교할 때와 같은 참조·유사도를 고른다(짧은 문장·같은 유사도 포함)."""
+    generator = random.Random(7)
+    alphabet = "가나다라마바사ㅋ"
+    references = [(f"r{index}", "".join(generator.choice(alphabet) for _ in range(generator.randint(1, 8)))) for index in range(200)]
+    index = OverlapIndex.build(references)
+    for number in range(500):
+        text = "".join(generator.choice(alphabet) for _ in range(generator.randint(1, 8)))
+        finding = index.find_overlap(f"q{number}", text)
+        assert (None if finding is None else (finding.reference_id, finding.similarity)) == find_overlap_by_full_scan(index, f"q{number}", text)
+
+
 def test_symbol_only_texts_are_not_compared(tmp_path: Path) -> None:
     """정규화하면 비는 문장(기호만)은 겹침 비교에서 뺀다. 모든 기호 문장이 서로 같다고 나오지 않게 하기 위해서다."""
     index = OverlapIndex.build([("r1", "!!!")])

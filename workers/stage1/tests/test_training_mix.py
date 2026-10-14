@@ -1,4 +1,4 @@
-"""training_mix 모듈 테스트: 허용 문장 형식, 평가셋 겹침 차단, 유해 줄이기, 학습 파일·manifest 생성."""
+"""training_mix 모듈 테스트: 허용 문장 형식·판(version), 평가셋 겹침 차단·제외, 유해 줄이기, 학습 파일·manifest 생성."""
 
 from __future__ import annotations
 
@@ -11,14 +11,20 @@ from tests.conftest import write_jsonl
 from zg_stage1.data import LabeledText, load_labeled_texts
 from zg_stage1.errors import DatasetFormatError, OutputExistsError, OutputLocationError
 from zg_stage1.training_mix import (
+    DEFAULT_HARD_NEGATIVES_PATH,
+    HARD_NEGATIVE_VERSIONS,
     MixSettings,
     build_training_rows,
     count_binary_labels,
     downsample_toxic,
     ensure_no_evaluation_overlap,
+    exclude_evaluation_overlaps,
     hard_negative_rows,
+    load_evaluation_references,
+    load_hard_negative_version,
     load_hard_negatives,
     main,
+    manifest_path_for,
 )
 
 
@@ -59,22 +65,53 @@ def test_rejects_duplicate_ids(tmp_path: Path) -> None:
         load_hard_negatives(path)
 
 
+def write_eval_set(tmp_path: Path, text: str) -> Path:
+    """문장 하나짜리 개발셋 파일."""
+    record = {"id": "d1", "split": "dev", "label": "allow", "category": "long_normal", "family": "x", "author": "a", "reviewer": "b", "text": text}
+    return write_jsonl(tmp_path / "dev.jsonl", [record])
+
+
 def test_blocks_overlap_with_evaluation_sets(tmp_path: Path) -> None:
     """평가셋 문장과 같은 학습 문장은 막는다. 겹치지 않는 문장은 통과한다."""
-    eval_record = {"id": "d1", "split": "dev", "label": "allow", "category": "long_normal", "family": "x", "author": "a", "reviewer": "b"}
-    eval_path = write_jsonl(tmp_path / "dev.jsonl", [eval_record | {"text": "오늘 방송 몇시까지"}])
+    references = load_evaluation_references([write_eval_set(tmp_path, "오늘 방송 몇시까지")])
     items = load_hard_negatives(write_jsonl(tmp_path / "hn.jsonl", [hard_negative("1", "오늘 방송 몇 시까지?")]))
     with pytest.raises(DatasetFormatError, match="평가셋과 겹칩니다"):
-        ensure_no_evaluation_overlap(items, [eval_path])
+        ensure_no_evaluation_overlap(items, references)
     clean = load_hard_negatives(write_jsonl(tmp_path / "ok.jsonl", [hard_negative("2", "저녁 메뉴 추천해 주세요")]))
-    ensure_no_evaluation_overlap(clean, [eval_path])
+    ensure_no_evaluation_overlap(clean, references)
 
 
-def test_committed_hard_negatives_do_not_overlap_evaluation_sets() -> None:
-    """저장소의 학습용 허용 문장은 개발셋·보류셋·72문장과 겹치지 않는다."""
-    from zg_stage1.training_mix import DEFAULT_HARD_NEGATIVES_PATH
+def test_excludes_khaters_rows_that_overlap_evaluation_sets(tmp_path: Path) -> None:
+    """K-HATERS에서 평가 문장과 같은 줄은 빼고, 뺀 줄의 id와 평가 문장 id를 돌려준다. 순서는 지킨다."""
+    references = load_evaluation_references([write_eval_set(tmp_path, "오늘 방송 몇시까지")])
+    texts = [("1", "전혀 다른 문장이다", "normal"), ("2", "오늘 방송 몇 시까지!!", "normal"), ("3", "또 다른 문장", "offensive")]
+    records = [LabeledText(identifier, text, label, 0 if label == "normal" else 1) for identifier, text, label in texts]
+    kept, excluded = exclude_evaluation_overlaps(records, references)
+    assert [record.record_id for record in kept] == ["1", "3"]
+    assert [(finding.item_id, finding.reference_id) for finding in excluded] == [("2", "d1")]
 
-    ensure_no_evaluation_overlap(load_hard_negatives(DEFAULT_HARD_NEGATIVES_PATH))
+
+@pytest.mark.parametrize("version_name", sorted(HARD_NEGATIVE_VERSIONS))
+def test_committed_hard_negative_versions_load_and_do_not_overlap(version_name: str) -> None:
+    """저장소 허용 문장의 각 판은 기록한 줄 수·sha256과 맞고, 개발셋·보류셋·72문장과 겹치지 않는다."""
+    items = load_hard_negative_version(version_name)
+    assert len(items) == HARD_NEGATIVE_VERSIONS[version_name].line_count
+    ensure_no_evaluation_overlap(items, load_evaluation_references())
+
+
+def test_hard_negative_version_detects_edited_prefix(tmp_path: Path) -> None:
+    """판의 앞쪽 줄이 바뀌면 오류다. 그 판으로 학습한 모델을 다시 만들 수 없게 되기 때문이다."""
+    lines = DEFAULT_HARD_NEGATIVES_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    edited = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("x", "바꾼 첫 줄")])
+    edited.write_text(edited.read_text(encoding="utf-8") + "".join(lines[1:]), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="sha256"):
+        load_hard_negative_version("v1", edited)
+
+
+def test_downsample_none_keeps_khaters_ratio() -> None:
+    """유해 비율 목표가 없으면 그대로 둔다."""
+    records = [labeled("1", "normal"), labeled("2", "offensive"), labeled("3", "offensive")]
+    assert downsample_toxic(records, None, seed=1) == records
 
 
 def test_downsample_toxic_keeps_all_normals_and_order() -> None:
@@ -120,11 +157,37 @@ def test_cli_writes_training_file_and_manifest(tmp_path: Path, khaters_records: 
     main(arguments, environment={})
     records = load_labeled_texts(out)
     assert sum(1 for record in records if record.record_id.startswith("hn-")) == 4
-    manifest = json.loads(out.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path_for(out).read_text(encoding="utf-8"))
     assert manifest["settings"]["extra_repeat"] == 2 and manifest["counts"]["normal"] + manifest["counts"]["toxic"] == len(records)
+    assert manifest["excluded_khaters_overlaps"] == [] and "version" not in manifest["inputs"]["hard_negatives"]
     assert "크앙" not in json.dumps(manifest, ensure_ascii=False)
     with pytest.raises(OutputExistsError):
         main(arguments, environment={})
+
+
+def test_cli_uses_committed_version_by_default(tmp_path: Path, khaters_records: list[dict]) -> None:
+    """--hard-negatives가 없으면 저장소 파일의 v1을 쓰고, manifest에 판과 그 sha256을 남긴다. 유해 비율은 그대로다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", khaters_records)
+    out = tmp_path / "train-default.jsonl"
+    main(["--out", str(out), "--khaters-train", str(khaters), "--extra-repeat", "1"], environment={})
+    manifest = json.loads(manifest_path_for(out).read_text(encoding="utf-8"))
+    assert manifest["inputs"]["hard_negatives"]["version"] == "v1"
+    assert manifest["inputs"]["hard_negatives"]["selected_sha256"] == HARD_NEGATIVE_VERSIONS["v1"].sha256
+    assert manifest["settings"]["toxic_fraction"] is None
+    assert manifest["counts"] == {"normal": 2 + HARD_NEGATIVE_VERSIONS["v1"].line_count, "toxic": 4}
+
+
+def test_cli_refuses_existing_manifest(tmp_path: Path, khaters_records: list[dict]) -> None:
+    """학습 파일이 없어도 manifest가 이미 있으면 거부한다. 확장자만 다른 학습 파일은 manifest를 따로 쓴다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", khaters_records)
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("1", "테스트용 첫째 문장 크앙")])
+    out = tmp_path / "mix.jsonl"
+    manifest_path_for(out).write_text("{}", encoding="utf-8")
+    with pytest.raises(OutputExistsError):
+        main(["--out", str(out), "--khaters-train", str(khaters), "--hard-negatives", str(hard)], environment={})
+    other = tmp_path / "mix.data"
+    main(["--out", str(other), "--khaters-train", str(khaters), "--hard-negatives", str(hard)], environment={})
+    assert manifest_path_for(other).exists() and manifest_path_for(out).read_text(encoding="utf-8") == "{}"
 
 
 def test_cli_refuses_output_inside_repository(tmp_path: Path, khaters_records: list[dict]) -> None:
