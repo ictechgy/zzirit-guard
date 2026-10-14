@@ -244,4 +244,4 @@ def test_cli_passes_clean_files(tmp_path: Path, capsys) -> None:
 def test_committed_eval_sets_are_clean() -> None:
     """저장소에 커밋한 개발셋·보류셋이 모든 검사(72문장·셋 사이·셋 안·계열·범주 구성·애매 비율)를 통과한다."""
     eval_directory = Path(__file__).resolve().parents[1] / "eval_data"
-    main([str(eval_directory / "chat-dev-v1.jsonl"), str(eval_directory / "chat-holdout-v1.jsonl")])
+    main([str(eval_directory / "chat-dev-v2.jsonl"), str(eval_directory / "chat-holdout-v2.jsonl")])
