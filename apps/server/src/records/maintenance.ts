@@ -12,6 +12,8 @@ export interface RetentionResult {
   audits: number;
   stats: number;
   sessions: number;
+  /** 지운 메시지 숨김 장부 행 수(원문 없음, 감사 기록과 같은 기간). */
+  hides: number;
 }
 
 /** runRetention 의존성. */
@@ -78,6 +80,7 @@ function deleteExpiredRecords(deps: RetentionDeps): RetentionResult {
     audits: deps.auditLog.deleteOlderThan(auditCutoff),
     stats: deps.database.prepare("DELETE FROM minute_stat WHERE minute < ?").run(auditCutoff).changes,
     sessions: deps.sessions.deleteExpired(),
+    hides: deps.database.prepare("DELETE FROM message_hide WHERE updated_at < ?").run(auditCutoff).changes,
   };
 }
 

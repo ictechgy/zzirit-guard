@@ -80,11 +80,24 @@ describe("AuditSection", () => {
 
 describe("StatsSection", () => {
   it("최근 1시간 합계와 가장 바빴던 분을 초당으로 보여 준다", async () => {
-    const minute = (received: number) => ({ minute: 0, received, skipped: 10, deduplicated: 5, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0, candidates: 2, auto_hidden: 0, shadow: 1, invalid_events: 0 });
+    const minute = (received: number) => ({ minute: 0, received, skipped: 10, deduplicated: 5, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0, ai_unchecked: 0, candidates: 2, auto_hidden: 0, shadow: 1, invalid_events: 0 });
     stubFetch({ "GET /api/stats?sinceMinutes=60": () => json(200, [minute(600), minute(3000)]) });
     render(<StatsSection />);
     expect(await screen.findByText("3600")).toBeTruthy();
     expect(screen.getByText("50.0")).toBeTruthy();
+  });
+
+  it("AI를 켠 배포에서만 AI 항목을 보인다(0이어도 보여 꺼짐과 구분된다)", async () => {
+    const row = { minute: 0, received: 10, skipped: 0, deduplicated: 0, stage1_forwarded: 4, stage2_done: 3, stage2_dropped: 0, ai_unchecked: 1, candidates: 1, auto_hidden: 0, shadow: 0, invalid_events: 0 };
+    stubFetch({ "GET /api/stats?sinceMinutes=60": () => json(200, [row]) });
+    const { unmount } = render(<StatsSection aiEnabled />);
+    expect((await screen.findByText("AI 2차로 보낸 채팅")).nextElementSibling?.textContent).toBe("4");
+    expect(screen.getByText("AI 미검사(과부하)").nextElementSibling?.textContent).toBe("0");
+    expect(screen.getByText("AI 미검사(장애·너무 긴 문장)").nextElementSibling?.textContent).toBe("1");
+    unmount();
+    render(<StatsSection />);
+    await screen.findByText("받은 채팅");
+    expect(screen.queryByText("AI 2차로 보낸 채팅")).toBeNull();
   });
 });
 

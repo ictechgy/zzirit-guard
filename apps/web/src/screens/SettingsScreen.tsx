@@ -34,7 +34,7 @@ export function SettingsScreen({ me, onSignedOut, refreshKey, onRefresh, aiEnabl
         <button type="button" onClick={onRefresh}>새로 고침</button>
       </div>
       <StatusSection />
-      <StatsSection refreshKey={refreshKey} />
+      <StatsSection refreshKey={refreshKey} aiEnabled={aiEnabled} />
       <FalsePositiveSection refreshKey={refreshKey} />
       <RulesSection me={me} refreshKey={refreshKey} />
       <p className="hint">영구 제한·해제는 치지직 기본 도구에서 합니다.</p>

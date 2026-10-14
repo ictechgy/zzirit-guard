@@ -63,12 +63,20 @@ export interface AiTiming {
   batchWindowMs: number;
   batchSize: number;
   stage1Backlog: number;
+  /** 두 워커를 번갈아 확인하는 간격(ms). 워커마다 이 값의 두 배마다 확인하고, 두 워커는 이만큼 어긋난다(계획 R15). */
   probeIntervalMs: number;
   maxContentCodePoints: number;
+  /** 1차 요청 본문 바이트 상한. 워커 계약(65,536바이트)보다 조금 작게 둔다. */
+  maxRequestBytes: number;
 }
 
 /** 시간·크기 기본값. */
-export const AI_TIMING_DEFAULTS: AiTiming = { batchWindowMs: 25, batchSize: 16, stage1Backlog: 512, probeIntervalMs: 5_000, maxContentCodePoints: 1_000 };
+export const AI_TIMING_DEFAULTS: AiTiming = {
+  batchWindowMs: 25, batchSize: 16, stage1Backlog: 512, probeIntervalMs: 5_000, maxContentCodePoints: 1_000, maxRequestBytes: 60_000,
+};
+
+/** 요청 본문의 겉(`{"items":[]}`) 바이트. */
+const REQUEST_ENVELOPE_BYTES = 12;
 
 /** AI 단계. */
 export interface AiStage {
@@ -118,6 +126,22 @@ function isWellFormed(text: string): boolean {
 }
 
 /**
+ * 워커에 보낼 수 있는 문장인지: 코드 포인트 수가 상한 이하이고 올바른 유니코드다.
+ * 왜 이렇게 세나: 공격자가 아주 긴 채팅을 보내도 해시·배열 펼치기로 메모리를 쓰지 않게, 길이로 먼저 거르고 상한을 넘는 순간 멈춘다.
+ * @param text 채팅 원문
+ * @param maxCodePoints 코드 포인트 상한
+ */
+function isAcceptableContent(text: string, maxCodePoints: number): boolean {
+  if (text.length > maxCodePoints * 2) return false;
+  let count = 0;
+  for (const _codePoint of text) {
+    count += 1;
+    if (count > maxCodePoints) return false;
+  }
+  return isWellFormed(text);
+}
+
+/**
  * AI 단계를 만든다.
  * @param deps 워커·시계·임계값·결과 처리
  * @param timing 시간·크기 설정(기본값을 덮어쓴다)
@@ -141,6 +165,7 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   let probeTimer: ReturnType<typeof setInterval> | null = null;
   let isStage2Busy = false;
+  let probeTick = 0;
   const pending = new Set<Promise<unknown>>();
 
   /** 진행 중인 비동기 작업을 기억한다(stop이 끝나기를 기다린다). */
@@ -168,12 +193,12 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     }
   };
 
-  /** 2차 대기열에 넣는다. 넣기 전에 만료를 거르고, 넣지 못하거나 밀려난 메시지는 stage2_dropped다. */
+  /** 2차 대기열에 넣는다. 넣기 전에 만료를 거르고, 넣지 못하거나 밀려난 메시지는 stage2_dropped다. 실제로 들어간 메시지만 forwarded로 센다. */
   const enqueueStage2 = (tracked: Tracked, priority: QueuePriority): void => {
-    deps.onOutcome(tracked.submission.channelId, "forwarded");
     dropExpired();
     const outcome = queue.add(tracked.contentKey, tracked.submission.ref.content, tracked, priority, deps.clock());
     if (outcome.kind === "rejected" || outcome.kind === "overflow") settle(tracked, "stage2_dropped");
+    else deps.onOutcome(tracked.submission.channelId, "forwarded");
     if (outcome.kind === "evicted") outcome.evicted.members.forEach((member) => settle(member, "stage2_dropped"));
     scheduleExpiry();
     pumpStage2();
@@ -200,22 +225,40 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     }, Math.max(0, next - deps.clock()));
   };
 
-  /** 1차 묶음을 보낸다. 요청은 한 번에 하나만 보내고, 끝나면 남은 것을 이어 보낸다. */
+  /** 대기 중인 1차 항목에서 한 묶음을 꺼낸다: 16건과 요청 본문 바이트 상한을 함께 지킨다(남은 것은 다음 묶음으로). */
+  const takeStage1Batch = (): Tracked[] => {
+    const batch: Tracked[] = [];
+    let bytes = REQUEST_ENVELOPE_BYTES;
+    for (const tracked of buffer) {
+      const size = Buffer.byteLength(JSON.stringify({ id: tracked.workerId, text: tracked.submission.ref.content })) + 1;
+      if (batch.length >= settings.batchSize || (batch.length > 0 && bytes + size > settings.maxRequestBytes)) break;
+      batch.push(tracked);
+      bytes += size;
+    }
+    buffer = buffer.slice(batch.length);
+    return batch;
+  };
+  /**
+   * 1차 묶음을 보낸다. 요청은 한 번에 하나만 보내고, 끝나면 남은 것을 이어 보낸다.
+   * 응답이 왔을 때 세대가 바뀌었으면(세션 초기화·종료) 상태·캐시·결과를 하나도 바꾸지 않는다.
+   */
   const flushStage1 = (): void => {
     if (batchTimer) clearTimeout(batchTimer);
     batchTimer = null;
     if (stage1InFlight.length > 0 || buffer.length === 0 || isStopped) return;
-    const batch = buffer.slice(0, settings.batchSize);
-    buffer = buffer.slice(batch.length);
+    const batch = takeStage1Batch();
     stage1InFlight = batch;
+    const requestGeneration = generation;
+    const isCurrent = () => requestGeneration === generation;
     const items: WorkerItem[] = batch.map((tracked) => ({ id: tracked.workerId, text: tracked.submission.ref.content }));
     track(
       deps.stage1
         .classify(items, controller.signal)
-        .then((result) => applyStage1(batch, result.model, result.verdicts.map((verdict) => verdict.unsafeProbability)))
-        .catch((error: unknown) => failBatch("stage1", batch, error))
+        .then((result) => isCurrent() && applyStage1(batch, result.model, result.verdicts.map((verdict) => verdict.unsafeProbability)))
+        .catch((error: unknown) => isCurrent() && failBatch("stage1", batch, error))
         .finally(() => {
-          if (stage1InFlight === batch) stage1InFlight = [];
+          if (!isCurrent()) return;
+          stage1InFlight = [];
           if (buffer.length > 0) scheduleStage1(buffer.length >= settings.batchSize);
         }),
     );
@@ -245,7 +288,10 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     members.forEach((member) => settle(member, "ai_unchecked"));
   };
 
-  /** 2차를 하나씩 처리한다: 만료를 거르고 가장 높은 항목을 보낸다. 끝나면 다음 항목으로 이어 간다. */
+  /**
+   * 2차를 하나씩 처리한다: 만료를 거르고 가장 높은 항목을 보낸다. 끝나면 다음 항목으로 이어 간다.
+   * 응답이 왔을 때 세대가 바뀌었으면 상태·캐시·대기열·결과를 하나도 바꾸지 않는다(같은 원문의 새 항목을 건드리지 않게, 항목 번호로도 가린다).
+   */
   const pumpStage2 = (): void => {
     if (isStage2Busy || isStopped) return;
     dropExpired();
@@ -253,13 +299,14 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     if (!entry) return;
     isStage2Busy = true;
     const requestGeneration = generation;
+    const isCurrent = () => requestGeneration === generation;
     track(
       deps.stage2
         .classify([{ id: `q${(nextWorkerId += 1)}`, text: entry.text }], controller.signal)
-        .then((result) => applyStage2(entry, result.model, result.verdicts[0]))
-        .catch((error: unknown) => failBatch("stage2", queue.finish(entry.key)?.members ?? entry.members, error))
+        .then((result) => isCurrent() && applyStage2(entry, result.model, result.verdicts[0]))
+        .catch((error: unknown) => isCurrent() && failBatch("stage2", queue.finish(entry.key, entry.token)?.members ?? entry.members, error))
         .finally(() => {
-          if (requestGeneration !== generation) return;
+          if (!isCurrent()) return;
           isStage2Busy = false;
           scheduleExpiry();
           pumpStage2();
@@ -269,7 +316,7 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
   /** 2차 결과를 캐시에 넣고, 처리 중에 붙은 메시지까지 모두에게 넘긴다. */
   const applyStage2 = (entry: QueueEntry<Tracked>, model: string, verdict: { unsafeProbability: number; category: AiCategory | null } | undefined): void => {
     health.stage2.recordSuccess(model, deps.clock());
-    const members = queue.finish(entry.key)?.members ?? entry.members;
+    const members = queue.finish(entry.key, entry.token)?.members ?? entry.members;
     if (!verdict?.category) {
       members.forEach((member) => settle(member, "ai_unchecked"));
       return;
@@ -279,10 +326,8 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     members.forEach((member) => deliver(member, result));
   };
 
-  /** 들어온 채팅의 길을 정한다: 너무 긴 문장 → 미검사, 2차 캐시 → 결과, 키워드 경로 → 2차, 1차 캐시 → 점수로, 나머지 → 1차 묶음. */
+  /** 들어온 채팅의 길을 정한다: 2차 캐시 → 결과, 키워드 경로 → 2차, 1차 캐시 → 점수로, 나머지 → 1차 묶음. */
   const route = (tracked: Tracked): void => {
-    const content = tracked.submission.ref.content;
-    if ([...content].length > settings.maxContentCodePoints || !isWellFormed(content)) return settle(tracked, "ai_unchecked");
     const cached2 = cache2.get(health.stage2.status().model, tracked.contentKey, deps.clock());
     if (cached2) return deliver(tracked, cached2);
     if (tracked.submission.keywordRouteId !== null) return enqueueStage2(tracked, { keyword: true, firstChatter: tracked.firstChatter, score: -1 });
@@ -293,13 +338,15 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     scheduleStage1(buffer.length >= settings.batchSize);
   };
 
-  /** 아무 호출이 없던 워커의 상태를 확인하고, 중지가 오래가면 한 번 알린다. */
+  /**
+   * 워커를 번갈아 하나씩 확인한다(두 워커가 probeIntervalMs만큼 어긋나게, 계획 R15). 아무 호출이 없던 워커만 확인하고,
+   * 중지가 오래간 워커는 한 번 알린다.
+   */
   const probeWorkers = (): void => {
-    for (const stage of ["stage1", "stage2"] as const) {
-      const client = stage === "stage1" ? deps.stage1 : deps.stage2;
-      if (health[stage].needsProbe(deps.clock())) probe(stage, client);
-      if (health[stage].takeDownNotice(deps.clock())) deps.onWorkerDown(stage);
-    }
+    const stage: WorkerStage = probeTick % 2 === 0 ? "stage1" : "stage2";
+    probeTick += 1;
+    if (health[stage].needsProbe(deps.clock())) probe(stage, stage === "stage1" ? deps.stage1 : deps.stage2);
+    for (const each of ["stage1", "stage2"] as const) if (health[each].takeDownNotice(deps.clock())) deps.onWorkerDown(each);
   };
   /** 상태 확인 한 번. */
   const probe = (stage: WorkerStage, client: WorkerClient): void => {
@@ -343,6 +390,12 @@ export function createAiStage(deps: AiStageDeps, timing: Partial<AiTiming> = {})
     },
     submit(submission) {
       if (isStopped) return;
+      if (!isAcceptableContent(submission.ref.content, settings.maxContentCodePoints)) {
+        // 너무 길거나 올바르지 않은 문장은 해시하지도 추적하지도 않고 미검사로 센다(자르지 않는다).
+        unchecked.add(deps.clock());
+        deps.onOutcome(submission.channelId, "ai_unchecked");
+        return;
+      }
       route({
         submission,
         workerId: `m${(nextWorkerId += 1)}`,

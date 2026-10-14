@@ -145,3 +145,15 @@ describe("serverReducer", () => {
     expect(serverReducer(rejected, { type: "connection", connected: true }).realtimeRejected).toBe(false);
   });
 });
+
+describe("AI 칸이 없는 상태(이전 서버, Codex PR C 리뷰)", () => {
+  /** AI 단계 이전 서버가 보내던 상태. */
+  const legacy = { ...status, ai: undefined } as unknown as ServerStatus;
+
+  it("조회 결과와 실시간 상태 모두 AI 꺼짐으로 채운다(화면이 깨지지 않게)", () => {
+    const loaded = serverReducer(initialServerState, { type: "snapshot_loaded", status: legacy, verdicts: [] });
+    expect(loaded.status?.ai.enabled).toBe(false);
+    const updated = serverReducer(loaded, { type: "event", event: { type: "status", status: legacy } });
+    expect(updated.status?.ai).toMatchObject({ enabled: false, queueLength: 0 });
+  });
+});

@@ -2,6 +2,7 @@ import type { ManagerRole } from "@zzirit-guard/shared";
 import { vi } from "vitest";
 import { createAutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
 import { createMessageHideGuard } from "../../src/actions/messageHideGuard.js";
+import { createMessageHideLedger } from "../../src/records/messageHideLedger.js";
 import { createSenderActionGuard } from "../../src/actions/senderActionGuard.js";
 import { disabledAiStatus } from "../../src/ai/aiStatus.js";
 import { createVerdictClaims } from "../../src/actions/verdictClaims.js";
@@ -52,7 +53,7 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
     verdicts, auditLog, settings, clock,
     claims: createVerdictClaims(),
     senderActions: createSenderActionGuard(clock),
-    hideGuard: createMessageHideGuard(clock, (target) => verdicts.isMessageHidden(target)),
+    hideGuard: createMessageHideGuard(createMessageHideLedger(database, clock)),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ database, settings, auditLog, clock, logger: silentLogger }),
     rules: createRuleRepository(database, clock),

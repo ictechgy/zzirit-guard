@@ -2,6 +2,7 @@ import type { RealtimeEvent } from "@zzirit-guard/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAutoHideSwitch, type AutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
 import { createMessageHideGuard, type MessageHideGuard } from "../../src/actions/messageHideGuard.js";
+import { createMessageHideLedger } from "../../src/records/messageHideLedger.js";
 import { createVerdictClaims, type VerdictClaims } from "../../src/actions/verdictClaims.js";
 import type { AiResult, AiSubmission } from "../../src/ai/aiStage.js";
 import { createDecisionHandler, type DecisionHandler } from "../../src/actions/decisionHandler.js";
@@ -38,7 +39,7 @@ beforeEach(() => {
   events = [];
   chatLines = [];
   claims = createVerdictClaims();
-  hideGuard = createMessageHideGuard(() => 0, (target) => verdicts.isMessageHidden(target));
+  hideGuard = createMessageHideGuard(createMessageHideLedger(database, () => 0));
   handler = createDecisionHandler({
     verdicts, autoHide, stats, claims, logger: silentLogger, hideGuard, settings: createSettingsRepository(database),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined } as Executor,
@@ -154,7 +155,7 @@ describe("DecisionHandler", () => {
     settingsBreaker(1);
     autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
     handler.handle(chat("첫 금칙어"), result("auto_hide", "첫 금칙어"));
-    handler.handle(chat("둘째 금칙어"), result("auto_hide", "둘째 금칙어"));
+    handler.handle(chat("둘째 금칙어"), result("auto_hide", "둘째 금칙어", { ref: { ...ref("viewer-1", "둘째 금칙어"), messageTime: 2 } }));
     expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.decision)).toEqual(["auto_hide", "shadow"]);
     expect(chatLines).toEqual(["auto_hide:첫 금칙어", "shadow:둘째 금칙어"]);
   });
@@ -332,3 +333,39 @@ describe("같은 메시지 숨김 한 번(로드맵 2단계 계획 R4)", () => {
     expect(hideGuard.blockOf({ chatChannelId: "chat-1", messageTime: 1, senderChannelId: "viewer-1" })).toBe("hidden");
   });
 });
+
+describe("메시지 숨김 장부(Codex PR C 리뷰)", () => {
+  it("이미 숨긴 메시지가 다시 전달되면(재시작 뒤) 폭주 한도·판정을 쓰지 않고 숨김도 보내지 않는다", () => {
+    settingsBreaker(1);
+    autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
+    const target = { chatChannelId: "chat-1", messageTime: 1, senderChannelId: "viewer-1" };
+    createMessageHideLedger(database, () => 0).record(target, "hidden");
+    handler.handle(chat("느금마"), result("auto_hide", "느금마"));
+    handler.handle(chat("다른 금칙어"), result("auto_hide", "다른 금칙어", { ref: { ...ref("viewer-1", "다른 금칙어"), messageTime: 2 } }));
+    expect(submit.mock.calls.map((call) => call[1].target.messageTime)).toEqual([2]);
+    expect(verdicts.listRecent("c1", 0).map((verdict) => verdict.messageTime)).toEqual([2]);
+    expect(chatLines[0]).toBe("auto_hide:느금마");
+  });
+
+  it("결과를 알 수 없는 숨김은 기한 없이 막고, 한 번 숨긴 메시지는 결과 모름으로 되돌리지 않는다", () => {
+    const ledger = createMessageHideLedger(database, () => 0);
+    const guard = createMessageHideGuard(ledger);
+    const target = { chatChannelId: "chat-1", messageTime: 9, senderChannelId: "x" };
+    expect(guard.tryAcquire(target)).toBeNull();
+    guard.settle(target, { ok: false, message: "모름", isResultUnknown: true });
+    expect(guard.tryAcquire(target)).toBe("result_unknown");
+    ledger.record(target, "hidden");
+    ledger.record(target, "result_unknown");
+    expect(ledger.stateOf(target)).toBe("hidden");
+  });
+
+  it("보내지 않았거나 실패한 숨김은 막지 않는다", () => {
+    const guard = createMessageHideGuard(createMessageHideLedger(database, () => 0));
+    const target = { chatChannelId: "chat-1", messageTime: 10, senderChannelId: "x" };
+    expect(guard.tryAcquire(target)).toBeNull();
+    expect(guard.tryAcquire(target)).toBe("in_flight");
+    guard.settle(target, { ok: false, message: "실패" });
+    expect(guard.tryAcquire(target)).toBeNull();
+  });
+});
+

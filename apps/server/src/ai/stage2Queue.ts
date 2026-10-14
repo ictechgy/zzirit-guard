@@ -17,6 +17,8 @@ export interface QueuePriority {
 
 /** 대기열 항목: 같은 원문을 가진 메시지 묶음. */
 export interface QueueEntry<M> {
+  /** 항목마다 다른 번호. 같은 원문의 다른 항목(세션 초기화 뒤 새로 넣은 것)과 가린다. */
+  token: number;
   /** 원문 sha256. */
   key: string;
   /** 2차에 보낼 원문. */
@@ -50,8 +52,11 @@ export interface Stage2Queue<M> {
   purgeExpired(now: number): QueueEntry<M>[];
   /** 가장 높은 항목을 꺼내 '처리 중'으로 옮긴다. 비었으면 null. */
   takeNext(): QueueEntry<M> | null;
-  /** 처리가 끝난 항목을 '처리 중'에서 빼고 돌려준다(처리 중에 붙은 메시지 포함). */
-  finish(key: string): QueueEntry<M> | null;
+  /**
+   * 처리가 끝난 항목을 '처리 중'에서 빼고 돌려준다(처리 중에 붙은 메시지 포함).
+   * token이 다르면(세션 초기화로 비운 뒤 같은 원문의 새 항목이 들어왔으면) 건드리지 않고 null이다.
+   */
+  finish(key: string, token: number): QueueEntry<M> | null;
   /** 대기 중·처리 중 항목을 모두 꺼낸다(세션 초기화). */
   drain(): QueueEntry<M>[];
   /** 가장 이른 만료 시각. 비었으면 null. */
@@ -77,9 +82,12 @@ export function comparePriority(a: Pick<QueueEntry<unknown>, "priority" | "enque
   );
 }
 
-/** 두 우선순위 중 높은 쪽(칸마다). 같은 문장에 붙은 메시지 중 가장 높은 이유로 줄을 선다. */
+/**
+ * 두 우선순위 중 높은 쪽을 통째로 고른다. 같은 문장에 붙은 메시지 중 가장 높은 메시지의 우선순위로 줄을 선다.
+ * 왜 칸마다 섞지 않나: 섞으면 '키워드 경로이면서 1차 점수 0.9'처럼 어느 메시지에도 없던 우선순위가 생겨 진짜 키워드 항목을 밀어낸다.
+ */
 function higherPriority(a: QueuePriority, b: QueuePriority): QueuePriority {
-  return { keyword: a.keyword || b.keyword, firstChatter: a.firstChatter || b.firstChatter, score: Math.max(a.score, b.score) };
+  return comparePriority({ priority: a, enqueuedAt: 0 }, { priority: b, enqueuedAt: 0 }) >= 0 ? a : b;
 }
 
 /**
@@ -90,6 +98,7 @@ export function createStage2Queue<M>(options: Partial<typeof STAGE2_QUEUE_DEFAUL
   const settings = { ...STAGE2_QUEUE_DEFAULTS, ...options };
   const queued = new Map<string, QueueEntry<M>>();
   const inFlight = new Map<string, QueueEntry<M>>();
+  let nextToken = 0;
   /** 같은 원문 항목에 붙인다. 꽉 찼으면 overflow. */
   const attach = (entry: QueueEntry<M>, member: M, priority: QueuePriority): AddOutcome<M> => {
     if (entry.members.length >= settings.maxMembers) return { kind: "overflow" };
@@ -109,7 +118,7 @@ export function createStage2Queue<M>(options: Partial<typeof STAGE2_QUEUE_DEFAUL
     add(key, text, member, priority, now) {
       const existing = inFlight.get(key) ?? queued.get(key);
       if (existing) return attach(existing, member, priority);
-      const entry: QueueEntry<M> = { key, text, members: [member], priority, enqueuedAt: now, expiresAt: now + settings.ttlMs };
+      const entry: QueueEntry<M> = { token: (nextToken += 1), key, text, members: [member], priority, enqueuedAt: now, expiresAt: now + settings.ttlMs };
       if (queued.size >= settings.capacity) return replaceLowest(entry);
       queued.set(key, entry);
       return { kind: "queued" };
@@ -126,8 +135,9 @@ export function createStage2Queue<M>(options: Partial<typeof STAGE2_QUEUE_DEFAUL
       inFlight.set(best.key, best);
       return best;
     },
-    finish(key) {
-      const entry = inFlight.get(key) ?? null;
+    finish(key, token) {
+      const entry = inFlight.get(key);
+      if (!entry || entry.token !== token) return null;
       inFlight.delete(key);
       return entry;
     },

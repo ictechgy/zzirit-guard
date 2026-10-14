@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { createAutoHideSwitch } from "../actions/autoHideSwitch.js";
 import { createDecisionHandler } from "../actions/decisionHandler.js";
 import { createMessageHideGuard } from "../actions/messageHideGuard.js";
+import { createMessageHideLedger } from "../records/messageHideLedger.js";
 import type { Executor } from "../actions/executor.js";
 import { createVerdictClaims } from "../actions/verdictClaims.js";
 import type { ChatEvent } from "../chat/chatEvent.js";
@@ -132,7 +133,7 @@ function buildPipeline() {
   const settings = createSettingsRepository(database);
   const handler = createDecisionHandler({
     verdicts, executor, claims: createVerdictClaims(), stats: createMinuteStats(database, clock), logger: silentLogger, settings,
-    hideGuard: createMessageHideGuard(clock, (target) => verdicts.isMessageHidden(target)),
+    hideGuard: createMessageHideGuard(createMessageHideLedger(database, clock)),
     autoHide: createAutoHideSwitch({ database, settings, auditLog, clock, logger: silentLogger }),
     broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
   });

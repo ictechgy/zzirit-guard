@@ -50,8 +50,6 @@ export interface VerdictRepository {
    * 왜: AI 결과는 늦게 오므로, 그 사이 떼도배 소급 숨김 등으로 판정이 생긴 메시지에 후보를 또 만들지 않기 위해서다.
    */
   existsForMessage(channelId: string, target: MessageTarget): boolean;
-  /** 같은 메시지에 숨김이 끝난(hidden) 판정이 있는지 본다. 서버를 다시 시작해도 같은 메시지를 두 번 숨기지 않기 위해서다. */
-  isMessageHidden(target: MessageTarget): boolean;
 }
 
 /** verdict 행. */
@@ -97,10 +95,6 @@ export function createVerdictRepository(database: Database, clock: Clock): Verdi
       database
         .prepare("SELECT 1 FROM verdict WHERE channel_id = ? AND chat_channel_id = ? AND sender_channel_id = ? AND message_time = ? LIMIT 1")
         .get(channelId, target.chatChannelId, target.senderChannelId, target.messageTime) !== undefined,
-    isMessageHidden: (target) =>
-      database
-        .prepare("SELECT 1 FROM verdict WHERE chat_channel_id = ? AND sender_channel_id = ? AND message_time = ? AND status = 'hidden' LIMIT 1")
-        .get(target.chatChannelId, target.senderChannelId, target.messageTime) !== undefined,
   };
 }
 

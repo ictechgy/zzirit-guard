@@ -80,6 +80,8 @@ export interface WorkerClientOptions {
   timeoutMs?: number;
   /** 이 프로세스의 사용자 번호(테스트에서 바꾼다). */
   userId?: number;
+  /** 경로의 lstat(테스트에서 소유자를 바꿔 보려고 주입한다). 없으면 null. */
+  statPath?: (path: string) => Stats | null;
 }
 
 /** 응답 시간 제한 기본값(ms, 스펙 10장). */
@@ -90,6 +92,11 @@ const MAX_RESPONSE_BYTES = 256 * 1024;
 const CONTRACT_VERSION = 1;
 /** 모델 식별자 길이 상한. */
 const MAX_MODEL_LENGTH = 200;
+/**
+ * 모델 식별자 모양(계약 v1): `<모델 디렉터리 이름>@<sha256 앞 12자(소문자 16진수)>`. 줄바꿈은 받지 않는다.
+ * 왜 모양까지 보나: 모델이 바뀌면 식별자의 해시가 바뀌어야 점수 캐시가 비워진다. 해시가 없는 식별자는 그 약속을 지키지 못한다.
+ */
+const MODEL_IDENTIFIER_PATTERN = /^[^\r\n]+@[0-9a-f]{12}$/;
 /** 2차 범주. */
 const STAGE2_CATEGORIES: ReadonlySet<string> = new Set(["S1", "S2", "S3", "S4", "S5", "S6", "S7"]);
 /** 소켓 디렉터리 권한. 이 사용자만 들어갈 수 있어야 한다. */
@@ -100,7 +107,7 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
  * @param options 소켓 경로·단계·시간 제한
  */
 export function createWorkerClient(options: WorkerClientOptions): WorkerClient {
-  const settings = { timeoutMs: WORKER_TIMEOUT_MS, userId: process.getuid?.() ?? -1, ...options };
+  const settings = { timeoutMs: WORKER_TIMEOUT_MS, userId: process.getuid?.() ?? -1, statPath: lstatOrNull, ...options };
   return {
     async classify(items, signal) {
       const body = JSON.stringify({ items: items.map(({ id, text }) => ({ id, text })) });
@@ -127,7 +134,7 @@ interface WorkerRequest {
  * @param signal 서버가 스스로 중단할 때 쓰는 신호
  */
 async function callWorker(settings: Required<WorkerClientOptions>, workerRequest: WorkerRequest, signal?: AbortSignal): Promise<string> {
-  ensureSafeSocket(settings.socketPath, settings.userId);
+  ensureSafeSocket(settings.socketPath, settings.userId, settings.statPath);
   const { status, body } = await sendRequest(settings, workerRequest, signal);
   if (status === 200) return body;
   throw failureForStatus(status, body);
@@ -137,13 +144,14 @@ async function callWorker(settings: Required<WorkerClientOptions>, workerRequest
  * 소켓 디렉터리가 이 사용자 소유의 0700 디렉터리(링크 아님)이고 소켓이 이 사용자의 소켓인지 본다. 아니면 보내지 않는다.
  * @param socketPath 워커 소켓 경로
  * @param userId 이 프로세스의 사용자 번호
+ * @param statPath 경로의 lstat(없으면 null)
  */
-export function ensureSafeSocket(socketPath: string, userId: number): void {
-  const directory = lstatOrNull(dirname(socketPath));
+export function ensureSafeSocket(socketPath: string, userId: number, statPath: (path: string) => Stats | null = lstatOrNull): void {
+  const directory = statPath(dirname(socketPath));
   if (!directory || !directory.isDirectory() || directory.uid !== userId || (directory.mode & 0o777) !== PRIVATE_DIRECTORY_MODE) {
     throw new WorkerCallError("unavailable", "unsafe_directory");
   }
-  const socket = lstatOrNull(socketPath);
+  const socket = statPath(socketPath);
   if (!socket) throw new WorkerCallError("unavailable", "socket_missing");
   if (!socket.isSocket() || socket.uid !== userId) throw new WorkerCallError("unavailable", "unsafe_socket");
 }
@@ -297,7 +305,7 @@ function parseJsonObject(body: string): Record<string, unknown> {
 function parseEnvelope(document: Record<string, unknown>): string {
   if (document["contract"] !== CONTRACT_VERSION) throw contractViolation("bad_contract");
   const model = document["model"];
-  if (typeof model !== "string" || model.length < 1 || model.length > MAX_MODEL_LENGTH) throw contractViolation("bad_model");
+  if (typeof model !== "string" || model.length > MAX_MODEL_LENGTH || !MODEL_IDENTIFIER_PATTERN.test(model)) throw contractViolation("bad_model");
   return model;
 }
 

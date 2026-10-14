@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, symlinkSync, unlinkSync, renameSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, renameSync, symlinkSync, unlinkSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorkerClient, parseClassifyResponse, WorkerCallError, type WorkerStage } from "../../src/ai/workerClient.js";
@@ -115,9 +115,28 @@ describe("소켓 확인", () => {
     renameSync(realPath, worker.socketPath);
   });
 
-  it("소유자가 다른 소켓이면 보내지 않는다", async () => {
+  it("디렉터리 소유자가 다르면 보내지 않는다", async () => {
     worker = await startFakeWorker(stage1Reply(0.1));
     const client = createWorkerClient({ socketPath: worker.socketPath, stage: "stage1", userId: 99_999 });
     expect(await failureOf(client.classify([{ id: "a", text: "가" }]))).toMatchObject({ code: "unsafe_directory" });
+  });
+
+  it("디렉터리는 내 것인데 소켓 소유자만 다르면 보내지 않는다", async () => {
+    worker = await startFakeWorker(stage1Reply(0.1));
+    const socketPath = worker.socketPath;
+    const statPath = (path: string): Stats | null => {
+      const real = lstatSync(path);
+      return path === socketPath ? Object.assign(Object.create(Object.getPrototypeOf(real) as object) as Stats, real, { uid: 99_999 }) : real;
+    };
+    const client = createWorkerClient({ socketPath, stage: "stage1", statPath });
+    expect(await failureOf(client.classify([{ id: "a", text: "가" }]))).toMatchObject({ code: "unsafe_socket" });
+    expect(worker.requests).toHaveLength(0);
+  });
+
+  it("모델 식별자에 해시(@ 뒤 12자 16진수)가 없으면 계약 위반으로 본다", async () => {
+    worker = await startFakeWorker(stage1Reply(0.1, "kanana"));
+    const client = createWorkerClient({ socketPath: worker.socketPath, stage: "stage1" });
+    expect(await failureOf(client.health())).toMatchObject({ kind: "unavailable", code: "bad_model" });
+    expect(await failureOf(client.classify([{ id: "a", text: "가" }]))).toMatchObject({ code: "bad_model" });
   });
 });

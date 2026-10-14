@@ -290,3 +290,24 @@ describe("StatusSection AI 행(로드맵 2단계)", () => {
     expect(screen.getByText("최근 1분 AI 미검사").nextElementSibling?.textContent).toBe("과부하 1건, 장애·너무 긴 문장 2건");
   });
 });
+
+describe("이전 서버와의 호환(Codex PR C 리뷰)", () => {
+  it("임계값이 없는 이전 설정 응답이어도 다른 설정은 저장하고, AI 키를 보내지 않는다", async () => {
+    const legacy = { breakerPerMinute: 30, retentionDaysContent: 7, retentionDaysAudit: 90 } as unknown as SettingsDto;
+    const fetchMock = stubFetch({ "GET /api/settings": () => json(200, legacy), "PUT /api/settings": () => json(200, { ...legacy, retentionDaysContent: 71 }) });
+    render(<LimitsSection me={manager} aiEnabled />);
+    expect(screen.queryByLabelText(/AI 1차 임계값/)).toBeNull();
+    await userEvent.type(await screen.findByLabelText(/원문 보관 기간/), "1");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장했습니다.")).toBeTruthy();
+    const bodies = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PUT").map(([, init]) => JSON.parse(String((init as RequestInit).body)) as unknown);
+    expect(bodies).toEqual([{ retentionDaysContent: 71 }]);
+  });
+
+  it("상태 점검은 AI 칸이 없는 이전 상태를 AI 꺼짐으로 보인다", async () => {
+    stubFetch({ "GET /api/status": () => json(200, { channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }) });
+    render(<StatusSection />);
+    expect(await screen.findByText("치지직 채팅 연결")).toBeTruthy();
+    expect(screen.queryByText("AI 1차 워커")).toBeNull();
+  });
+});

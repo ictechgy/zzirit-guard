@@ -112,15 +112,33 @@ describe("2차 대기열", () => {
     expect(queue.length()).toBe(1);
   });
 
-  it("같은 원문은 대기 중이든 처리 중이든 한 항목에 붙이고, 우선순위는 높은 쪽이며, 상한을 넘으면 버린다", () => {
+  it("같은 원문은 대기 중이든 처리 중이든 한 항목에 붙이고, 우선순위는 높은 메시지의 것을 통째로 쓰며, 상한을 넘으면 버린다", () => {
     const queue = createStage2Queue<string>({ maxMembers: 2 });
     queue.add("k", "같은 문장", "m1", priority(false, false, 0.2), 0);
     expect(queue.add("k", "같은 문장", "m2", priority(false, true, 0.1), 1)).toEqual({ kind: "merged" });
     const entry = queue.takeNext();
-    expect(entry?.priority).toEqual(priority(false, true, 0.2));
+    expect(entry?.priority).toEqual(priority(false, true, 0.1));
     expect(queue.add("k", "같은 문장", "m3", priority(false, false, 0.1), 2)).toEqual({ kind: "overflow" });
-    expect(queue.finish("k")?.members).toEqual(["m1", "m2"]);
+    expect(queue.finish("k", entry?.token ?? -1)?.members).toEqual(["m1", "m2"]);
     expect(queue.add("k", "같은 문장", "m4", priority(false, false, 0.1), 3)).toEqual({ kind: "queued" });
+  });
+
+  it("키워드 메시지와 점수 높은 메시지를 합쳐도 없던 우선순위(키워드이면서 높은 점수)를 만들지 않는다", () => {
+    const queue = createStage2Queue<string>();
+    queue.add("k", "같은 문장", "keyword", priority(true, false, -1), 0);
+    queue.add("k", "같은 문장", "scored", priority(false, false, 0.9), 1);
+    expect(queue.takeNext()?.priority).toEqual(priority(true, false, -1));
+  });
+
+  it("다른 항목 번호로는 처리 중 항목을 끝내지 않는다(세션 초기화 뒤 같은 원문의 새 항목을 지키기 위해서다)", () => {
+    const queue = createStage2Queue<string>();
+    queue.add("k", "같은 문장", "old", priority(false, false, 0.5), 0);
+    const old = queue.takeNext();
+    queue.drain();
+    queue.add("k", "같은 문장", "new", priority(false, false, 0.5), 1);
+    const fresh = queue.takeNext();
+    expect(queue.finish("k", old?.token ?? -1)).toBeNull();
+    expect(queue.finish("k", fresh?.token ?? -1)?.members).toEqual(["new"]);
   });
 
   it("비우면 대기 중·처리 중 항목을 모두 돌려준다", () => {

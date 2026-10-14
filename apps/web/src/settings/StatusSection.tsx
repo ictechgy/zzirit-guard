@@ -1,5 +1,6 @@
 import type { AiWorkerStatus, ServerStatus } from "@zzirit-guard/shared";
 import { useApiResource } from "../api/useApiResource";
+import { withAiStatus } from "../domain/serverStatus";
 import { formatDateTime } from "../domain/timeFormat";
 
 /**
@@ -52,7 +53,7 @@ export function StatusSection() {
       {status.error && <p className="error" role="alert">{status.error}</p>}
       {status.data ? (
         <dl className="rows">
-          {rowsOf(status.data).map(([label, value]) => (
+          {rowsOf(withAiStatus(status.data)).map(([label, value]) => (
             <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
           ))}
         </dl>

@@ -60,11 +60,14 @@ export function createDecisionHandler(deps: DecisionHandlerDeps): DecisionHandle
   return {
     handle(event, result) {
       recordTraits(deps, event.channelId, result);
+      // 이미 숨겼거나 숨기는 중인 메시지(재시작 뒤 다시 전달된 채팅 등)는 폭주 한도·판정을 쓰지 않는다(계획 R4).
+      const isAlreadyHidden = result.decision === "auto_hide" && deps.hideGuard.blockOf(toTarget(result.ref)) !== null;
       // 자동 숨김 허락(스위치·폭주 한도)을 먼저 정해, 실시간 채팅 줄과 저장되는 판정이 같은 결과를 보이게 한다(S5, M02).
-      const isAutoHideAllowed = result.decision === "auto_hide" && consumeAutoHide(deps, event.channelId);
-      deps.broadcaster.pushChatLine({ senderNickname: event.nickname, content: event.content, messageTime: event.messageTime, decision: displayedDecision(result.decision, isAutoHideAllowed) });
+      const isAutoHideAllowed = result.decision === "auto_hide" && !isAlreadyHidden && consumeAutoHide(deps, event.channelId);
+      const shownDecision = isAlreadyHidden ? "auto_hide" : displayedDecision(result.decision, isAutoHideAllowed);
+      deps.broadcaster.pushChatLine({ senderNickname: event.nickname, content: event.content, messageTime: event.messageTime, decision: shownDecision });
       if (result.decision === "candidate") saveCandidate(deps, event.channelId, result);
-      if (result.decision === "auto_hide") recordAutoHide(deps, event.channelId, result.ref, result.reason, isAutoHideAllowed);
+      if (result.decision === "auto_hide" && !isAlreadyHidden) recordAutoHide(deps, event.channelId, result.ref, result.reason, isAutoHideAllowed);
       // 떼도배 발동은 한 번뿐이라 현재 메시지의 판정과 무관하게 앞선 메시지를 숨긴다(R17). 현재 메시지보다 뒤에 처리한다.
       // 파이프라인이 이미 권한자·역할 모르는 사람을 빼지만, 그들의 자동 숨김 금지(Global Constraints, S18)를 여기서도 한 번 더 막는다.
       // 이미 숨겼거나 숨기는 중인 메시지(예: AI 후보를 매니저가 숨김)는 판정·폭주 한도를 쓰기 전에 뺀다(계획 R4).

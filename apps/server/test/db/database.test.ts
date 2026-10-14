@@ -16,7 +16,7 @@ describe("openDatabase", () => {
       .all()
       .map((row) => (row as { name: string }).name);
     expect(tables).toEqual([
-      "audit_log", "channel", "credential", "manager_session", "minute_stat", "push_subscription", "rule_entry", "setting", "verdict",
+      "audit_log", "channel", "credential", "manager_session", "message_hide", "minute_stat", "push_subscription", "rule_entry", "setting", "verdict",
     ]);
   });
 

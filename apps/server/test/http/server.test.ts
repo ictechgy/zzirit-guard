@@ -1009,3 +1009,19 @@ describe("판정 DTO의 AI 칸", () => {
 function ruleVerdictFirst<T extends { id: number }>(a: T, b: T): T[] {
   return [a, b].sort((left, right) => left.id - right.id);
 }
+
+describe("매니저 숨김의 막기 순서(Codex PR C 리뷰)", () => {
+  it("숨김 장부를 읽다 실패해도 판정 붙잡기가 남지 않아, 다시 누를 수 있다", async () => {
+    const verdict = insertCandidate();
+    const original = harness.services.hideGuard.tryAcquire;
+    harness.services.hideGuard.tryAcquire = () => {
+      throw new Error("SQLITE_IOERR");
+    };
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    expect((await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers })).statusCode).toBe(500);
+    expect(harness.services.claims.isClaimed(verdict.id)).toBe(false);
+    harness.services.hideGuard.tryAcquire = original;
+    expect((await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdict.id}/hide`, headers })).statusCode).toBe(200);
+  });
+});
+

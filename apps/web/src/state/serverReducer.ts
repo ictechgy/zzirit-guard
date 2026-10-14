@@ -1,5 +1,6 @@
 import type { ChatLine, RealtimeEvent, ServerStatus, VerdictDto } from "@zzirit-guard/shared";
 import { addVerdictIfAbsent, applyVerdictStatus, mergeVerdicts, pruneVerdicts } from "../domain/candidates";
+import { withAiStatus } from "../domain/serverStatus";
 
 /** 실시간 채팅 화면에 남길 최대 줄 수. 초당 수십 건이어도 휴대폰이 버티게 한다. */
 export const MAX_CHAT_LINES = 300;
@@ -105,7 +106,7 @@ export function serverReducer(state: ServerState, action: ServerAction): ServerS
 
 /** 조회 결과를 합치고, 조회 중에 받은 이벤트를 그 위에 다시 적용한다. */
 function applySnapshot(state: ServerState, status: ServerStatus, verdicts: readonly VerdictDto[]): ServerState {
-  const base: ServerState = { ...state, status, verdicts: pruneVerdicts(mergeVerdicts(state.verdicts, verdicts)), loadError: null, replayLog: null };
+  const base: ServerState = { ...state, status: withAiStatus(status), verdicts: pruneVerdicts(mergeVerdicts(state.verdicts, verdicts)), loadError: null, replayLog: null };
   return (state.replayLog ?? []).reduce(applyChange, base);
 }
 
@@ -141,7 +142,7 @@ function applyEvent(state: ServerState, event: RealtimeEvent): ServerState {
     case "chat_batch":
       return appendChatLines(state, event.lines);
     case "status":
-      return { ...state, status: event.status };
+      return { ...state, status: withAiStatus(event.status) };
     case "session_ended":
       return { ...state, sessionEndedReason: event.reason };
     default:

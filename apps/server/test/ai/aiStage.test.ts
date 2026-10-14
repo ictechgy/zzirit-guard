@@ -161,12 +161,14 @@ describe("장애", () => {
     expect(ai.status().stage2.state).toBe("ok");
   });
 
-  it("조용한 채널에서도 상태 확인으로 중지를 알아채고, 30초 넘게 이어지면 한 번만 알린다", async () => {
+  it("조용한 채널에서도 상태 확인으로 중지를 알아채고(두 워커는 5초 어긋나게 확인), 30초 넘게 이어지면 한 번만 알린다", async () => {
     stage2.healthResponse = async () => {
       throw new WorkerCallError("unavailable", "socket_missing");
     };
     ai.start();
     await vi.advanceTimersByTimeAsync(1);
+    expect([ai.status().stage1.state, ai.status().stage2.state]).toEqual(["ok", "unknown"]);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(ai.status().stage2.state).toBe("down");
     await vi.advanceTimersByTimeAsync(35_000);
     expect(downs).toEqual(["stage2"]);
@@ -238,6 +240,8 @@ describe("2차 대기열", () => {
     stage2.respond = hanging;
     const small = build({ batchSize: 4 });
     for (let index = 0; index < 320; index += 1) small.submit(submission(`키워드${index}`, { keyword: 1, sender: `v${index}` }));
+    // 처리 중 1건 + 대기열 300건만 들어가고(forwarded), 나머지 19건은 넣지 못해 버린다(forwarded로 세지 않는다).
+    expect(outcomes.filter((outcome) => outcome === "forwarded")).toHaveLength(301);
     await vi.advanceTimersByTimeAsync(16_000);
     await small.stop();
     expect(terminal()).toHaveLength(320);
@@ -281,3 +285,40 @@ describe("수명 주기", () => {
     expect(terminal()).toEqual(["stage2_done", "stage2_done"]);
   });
 });
+
+describe("리뷰 반영(Codex PR C)", () => {
+  it("세션 초기화 뒤 늦게 온 이전 요청의 응답은 새 세션의 같은 문장 항목을 건드리지 않는다", async () => {
+    const releases: Array<(result: WorkerResult) => void> = [];
+    stage2.respond = () => new Promise((resolve) => releases.push(resolve));
+    ai.submit(submission("같은 문장", { keyword: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    ai.resetSession();
+    ai.submit(submission("같은 문장", { keyword: 1, sender: "v2" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(releases).toHaveLength(2);
+    releases[0]?.({ model: "stage2@old", verdicts: [{ id: "x", unsafeProbability: 0.99, category: "S1" }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(results).toHaveLength(0);
+    releases[1]?.({ model: "stage2@new", verdicts: [{ id: "y", unsafeProbability: 0.6, category: "S2" }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(results.map((entry) => entry.result)).toEqual([{ unsafeProbability: 0.6, category: "S2", model: "stage2@new" }]);
+    expect(ai.status().stage2.model).toBe("stage2@new");
+  });
+
+  it("1차 묶음은 요청 본문 바이트 상한을 넘지 않게 나눈다(제어 문자는 JSON에서 6바이트로 늘어난다)", async () => {
+    const heavy = "\u0001".repeat(1_000);
+    for (let index = 0; index < 16; index += 1) ai.submit(submission(`${heavy}${index}`.slice(0, 1_000), { sender: `v${index}` }));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(stage1.calls.length).toBeGreaterThan(1);
+    for (const call of stage1.calls) expect(Buffer.byteLength(JSON.stringify({ items: call }))).toBeLessThanOrEqual(60_000);
+    expect(stage1.calls.flat()).toHaveLength(16);
+  });
+
+  it("아주 긴 채팅(1천만 자)은 워커에 보내지 않고 바로 미검사로 센다", async () => {
+    ai.submit(submission("가".repeat(10_000_000)));
+    await vi.advanceTimersByTimeAsync(30);
+    expect([stage1.calls.length, stage2.calls.length]).toEqual([0, 0]);
+    expect(terminal()).toEqual(["ai_unchecked"]);
+  });
+});
+

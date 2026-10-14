@@ -40,7 +40,7 @@ describe("runRetention", () => {
     sessions.create({ channelId: "m", channelName: "m", role: "STREAMING_CHAT_MANAGER" });
     now = 31 * DAY;
     verdicts.insert(verdict);
-    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toEqual({ verdicts: 1, audits: 0, stats: 0, sessions: 1 });
+    expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toEqual({ verdicts: 1, audits: 0, stats: 0, sessions: 1, hides: 0 });
     now = 181 * DAY;
     expect(runRetention({ database, verdicts, auditLog, sessions, clock: () => now })).toMatchObject({ audits: 1, stats: 1 });
   });

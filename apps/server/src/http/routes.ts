@@ -241,12 +241,13 @@ function registerVerdictRoutes(app: FastifyInstance, services: RouteServices): v
 async function hideVerdict(services: RouteServices, { request, reply, manager, channelId }: GuardedContext) {
   const verdict = findVerdict(services, request.params, channelId);
   if (!HIDE_ALLOWED_FROM.includes(verdict.status)) throw new RouteError(409, "already_handled", ALREADY_HANDLED_MESSAGE);
-  if (!services.claims.tryClaim(verdict.id, "manager")) throw claimConflict(services, verdict.id);
   const target = { chatChannelId: verdict.chatChannelId, messageTime: verdict.messageTime, senderChannelId: verdict.senderChannelId };
+  // 메시지 막기를 먼저 잡는다(장부를 읽다 실패해도 판정 붙잡기가 남지 않게). 판정 붙잡기가 실패하면 메시지 막기를 푼다.
   const blocked = services.hideGuard.tryAcquire(target);
-  if (blocked) {
-    services.claims.release(verdict.id);
-    throw messageHideConflict(blocked);
+  if (blocked) throw messageHideConflict(blocked);
+  if (!services.claims.tryClaim(verdict.id, "manager")) {
+    services.hideGuard.settle(target, null);
+    throw claimConflict(services, verdict.id);
   }
   let outcome: ActionOutcome | null = null;
   try {
