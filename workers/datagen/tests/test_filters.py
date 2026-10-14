@@ -39,6 +39,16 @@ def test_invisible_symbol_and_combining_insertions_do_not_bypass(tmp_path: Path)
     assert detect_drop_reason("평범한 중립 문장", lists) is None
 
 
+def test_pattern_rules_keep_digit_boundaries(tmp_path: Path) -> None:
+    """구분자를 지워 이웃한 숫자가 붙으면 나이·전화 규칙이 깨지던 회귀를 막는다(보안 검토)."""
+    lists = load_private_lists(make_lists(tmp_path / "lists"))
+    assert detect_drop_reason("100 15살 금칙가", lists) == "minor_sexual"
+    assert detect_drop_reason("3/15살 금칙가", lists) == "minor_sexual"
+    assert detect_drop_reason("번호 2 010-1234-5678", lists) == "pii_like"
+    assert detect_drop_reason("0\u200b1\u200b0 1234 5678", lists) == "pii_like"
+    assert detect_drop_reason("2024년 3월 15일 금칙가", lists) is None
+
+
 def test_missing_or_empty_list_is_an_error(tmp_path: Path) -> None:
     """안전 목록이 덜 로드된 상태를 정상으로 오해하지 않도록 즉시 중단한다."""
     directory = make_lists(tmp_path / "lists")
