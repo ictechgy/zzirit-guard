@@ -7,13 +7,23 @@ import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 
+# 범주마다 문장에 꼭 들어갈 의미 칸. 파일럿 1회차(2026-10-14)에서 칸이 추상적이면 생성 모델이 '경고'·'걱정' 같은
+# 순화된 값으로 채워 유효 비율이 낮았다(협박 0.07, 자해 0.08). 그래서 칸마다 구체적인 요소를 적는다.
 HARMFUL_SLOTS: dict[str, tuple[str, ...]] = {
-    "threat": ("화자의 해칠 의도", "대상", "조건이나 결과"),
+    "threat": (
+        "화자가 할 구체적인 위해 행동(때리기·찾아가기·기다렸다 해치기·뒤쫓기 등)",
+        "그 행동의 대상(스트리머나 특정 시청자)",
+        "언제·어떤 조건에서 하겠다는 말",
+    ),
     "minors": ("미성년 단서", "개인 연락으로 옮기기나 사적 만남 요청"),
-    "sexual": ("외모 칭찬이 아닌 비동의 성적 대상화",),
-    "doxxing": ("실명·직장·학교·사는 곳을 특정해 드러내거나 드러내겠다는 말",),
-    "self_harm": ("화자 본인의 의도",),
+    "sexual": ("상대의 몸이나 성적 행위를 원치 않게 언급하거나 요구하는 말(외모 칭찬·옷 칭찬이 아님)", "상대를 성적 대상으로 깎아내리는 태도"),
+    "doxxing": ("특정한 사람의 실명·직장·학교·사는 곳 중 하나를 안다며 드러내거나 퍼뜨리겠다는 말", "실제가 아닌 지어낸 단서(가짜 동네 이름·가짜 회사 이름)"),
+    "self_harm": ("화자 본인이 죽고 싶다·사라지고 싶다·스스로 다치고 싶다는 의도를 직접 밝힘", "극복·위로·희망으로 끝내지 않음"),
 }
+
+# 유해 생성에서 나오면 안 되는 출력. 파일럿 1회차에서 성희롱 요청이 '성희롱을 비판·신고하는 말'로, 협박·자해 요청이
+# '일반 대화·위로'로 바뀌었다. 무엇이 아닌지를 함께 적어 순화를 줄인다.
+NOT_HARMFUL_OUTPUTS = "칭찬, 걱정·위로·응원, 유해한 말을 비판·인용·신고·말리는 문장, 농담으로 끝나는 말, 일반 대화"
 
 SITUATIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "sexual": (
@@ -134,6 +144,8 @@ def build_harmful_messages(cell: Cell, count: int) -> list[dict[str, str]]:
     user = (
         f"범주={CATEGORY_NAMES[cell.category]}({cell.category}), 상황={description}, 길이={LENGTH_GUIDANCE[cell.length]}, "
         f"말투={cell.register}, 직접성={cell.directness}, 표기 잡음={cell.noise}. 필수 의미 칸={slots}. "
+        "이 문장들은 '유해' 라벨로 쓰이므로, 매니저가 보면 바로 숨기거나 조치할 수준이어야 한다. "
+        f"다음은 유해가 아니므로 쓰지 마라: {NOT_HARMFUL_OUTPUTS}. "
         f"각 항목에서 의미 칸을 먼저 채운 뒤 채팅 한 줄 하나로 바꿔라. 서로 다른 항목 {count}개를 만들고, "
         '각 줄에 JSON 객체 하나만 써라: {"slots": {"칸": "값"}, "text": "채팅 한 줄"}. 설명이나 번호는 쓰지 마라.'
     )
