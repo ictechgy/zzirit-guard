@@ -25,9 +25,22 @@
    - 평가셋·72문장·기존 문장과 겹치는 66줄을 빼고 734줄을 더했다. Codex 검토에서 뺀 줄은 없다.
 5. 보류셋을 쓴 모델(Codex)은 이 문장을 쓰지 않았다. 그래서 보류셋으로 '다른 모델이 쓴 문장에도 효과가 남는지'를 볼 수 있다. 개발셋의 허용 문장은 같은 Claude가 써서 개발셋 숫자는 좋게 나올 수 있다.
 
+## 판(version)
+
+v2 파일은 v1(앞 2,934줄, `hn-0001`~`hn-2934`) 뒤에 734줄을 덧붙인 것이다. `zg_stage1.training_mix`는 판별 줄 수와 sha256을 기록해 두고, 파일에서 그 판의 줄만 꺼낼 때 sha256을 확인한다.
+- 앞선 판의 줄은 고치지 않는다. 고치면 그 판으로 학습한 모델을 다시 만들 수 없다. 새 문장은 파일 뒤에 덧붙이고 새 판을 기록한다.
+- M2 1차 후보(`kcelectra-hn-f73-r3`)는 v1로 학습했다. v2는 결과가 나빠 기본값이 아니다([재학습 결과](../../../docs/ml/2026-10-14-stage1-retrain-results.md)).
+
 ## 쓰는 법
 
-`zg_stage1.training_mix`가 K-HATERS train과 이 파일을 섞어 학습 파일을 만든다. 만들 때마다 평가셋과 겹치지 않는지 다시 확인한다. 학습 파일은 저장소 밖에 쓴다.
+`zg_stage1.training_mix`가 K-HATERS train과 이 파일을 섞어 학습 파일을 만든다. 학습 파일과 manifest(`<학습 파일 이름>.manifest.json`)는 저장소 밖에 쓴다.
+- 만들 때마다 평가셋(개발·보류)·72문장과 겹치는지 다시 확인한다. 이 파일의 문장이 겹치면 오류를 낸다. K-HATERS 줄이 겹치면 빼고 manifest에 id만 남긴다. 공식 train_v2에서는 짧은 인사·감사 문장 25줄이 빠진다(평가 문장 9개와 같은 문장).
+- 기본값은 후보 설정(v1, K-HATERS 유해 비율 그대로, 3번 반복, 시드 20261014)이다.
+
+```bash
+uv run python -m zg_stage1.training_mix --out "$ZG_DATA_DIR/ml/data/mix/train-hn-v1-r3.jsonl"
+uv run python -m zg_stage1.train --train-file "$ZG_DATA_DIR/ml/data/mix/train-hn-v1-r3.jsonl" --epochs 2
+```
 
 ## 라이선스
 
