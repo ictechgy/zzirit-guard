@@ -1,4 +1,5 @@
-import type { Decision, FalsePositiveReasonCountDto, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
+import type { AiCategory, Decision, FalsePositiveReasonCountDto, VerdictDto, VerdictStatus } from "@zzirit-guard/shared";
+import type { MessageTarget } from "../chzzk/apiClient.js";
 import type { Database } from "../db/database.js";
 import type { Clock } from "../time.js";
 
@@ -12,8 +13,12 @@ export interface NewVerdict {
   content: string;
   decision: Exclude<Decision, "pass">;
   reason: string;
+  /** AI(2차) 유해 확률. 규칙 판정이면 비운다. */
   unsafeProbability?: number | null;
-  category?: string | null;
+  /** AI(2차) 범주. 규칙 판정이면 비운다. */
+  category?: AiCategory | null;
+  /** 결과가 나온 때의 '확실' 임계값 이상이었는지. 규칙 판정이면 비운다(false). */
+  sure?: boolean;
 }
 
 /** 판정 저장소. */
@@ -40,6 +45,13 @@ export interface VerdictRepository {
   /** 오판으로 신고된 판정을 이유(규칙 번호)별로 센다. 많은 순, 같으면 이유 순. 고칠 규칙을 고르는 데 쓴다. */
   countFalsePositivesByReason(channelId: string): FalsePositiveReasonCountDto[];
   deleteOlderThan(cutoffMs: number): number;
+  /**
+   * 같은 메시지(채널·채팅 채널·보낸 사람·보낸 시각)의 판정이 이미 있는지 본다.
+   * 왜: AI 결과는 늦게 오므로, 그 사이 떼도배 소급 숨김 등으로 판정이 생긴 메시지에 후보를 또 만들지 않기 위해서다.
+   */
+  existsForMessage(channelId: string, target: MessageTarget): boolean;
+  /** 같은 메시지에 숨김이 끝난(hidden) 판정이 있는지 본다. 서버를 다시 시작해도 같은 메시지를 두 번 숨기지 않기 위해서다. */
+  isMessageHidden(target: MessageTarget): boolean;
 }
 
 /** verdict 행. */
@@ -55,6 +67,9 @@ interface VerdictRow {
   reason: string;
   status: VerdictStatus;
   created_at: number;
+  unsafe_probability: number | null;
+  category: string | null;
+  sure: number;
 }
 
 /** SQLite 기반 판정 저장소를 만든다. */
@@ -78,6 +93,14 @@ export function createVerdictRepository(database: Database, clock: Clock): Verdi
         .prepare("SELECT reason, COUNT(*) AS count FROM verdict WHERE channel_id = ? AND status = 'false_positive' GROUP BY reason ORDER BY count DESC, reason")
         .all(channelId) as FalsePositiveReasonCountDto[],
     deleteOlderThan: (cutoffMs) => database.prepare("DELETE FROM verdict WHERE created_at < ?").run(cutoffMs).changes,
+    existsForMessage: (channelId, target) =>
+      database
+        .prepare("SELECT 1 FROM verdict WHERE channel_id = ? AND chat_channel_id = ? AND sender_channel_id = ? AND message_time = ? LIMIT 1")
+        .get(channelId, target.chatChannelId, target.senderChannelId, target.messageTime) !== undefined,
+    isMessageHidden: (target) =>
+      database
+        .prepare("SELECT 1 FROM verdict WHERE chat_channel_id = ? AND sender_channel_id = ? AND message_time = ? AND status = 'hidden' LIMIT 1")
+        .get(target.chatChannelId, target.senderChannelId, target.messageTime) !== undefined,
   };
 }
 
@@ -104,25 +127,38 @@ function transitionVerdictStatus(database: Database, transition: StatusTransitio
   return changes > 0;
 }
 
-/** 판정을 넣고 DTO로 돌려준다. */
+/**
+ * 판정을 넣고 DTO로 돌려준다. 넣은 값으로 행을 만들어 toDto 하나로 바꾼다.
+ * 왜: 기록 직후 알림(WebSocket)과 나중의 목록·단건 조회(REST)가 같은 변환을 거쳐야 AI 칸이 어긋나지 않는다.
+ */
 function insertVerdict(database: Database, verdict: NewVerdict, now: number): VerdictDto {
+  const row: Omit<VerdictRow, "id"> = {
+    channel_id: verdict.channelId, chat_channel_id: verdict.chatChannelId, message_time: verdict.messageTime,
+    sender_channel_id: verdict.senderChannelId, sender_nickname: verdict.senderNickname, content: verdict.content,
+    decision: verdict.decision, reason: verdict.reason, status: "pending", created_at: now,
+    unsafe_probability: verdict.unsafeProbability ?? null, category: verdict.category ?? null, sure: verdict.sure ? 1 : 0,
+  };
   const result = database
     .prepare(
-      `INSERT INTO verdict (channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason, unsafe_probability, category, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO verdict (channel_id, chat_channel_id, message_time, sender_channel_id, sender_nickname, content, decision, reason, unsafe_probability, category, sure, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      verdict.channelId, verdict.chatChannelId, verdict.messageTime, verdict.senderChannelId, verdict.senderNickname,
-      verdict.content, verdict.decision, verdict.reason, verdict.unsafeProbability ?? null, verdict.category ?? null, now,
+      row.channel_id, row.chat_channel_id, row.message_time, row.sender_channel_id, row.sender_nickname,
+      row.content, row.decision, row.reason, row.unsafe_probability, row.category, row.sure, now,
     );
-  const { channelId: _channelId, unsafeProbability: _probability, category: _category, ...rest } = verdict;
-  return { ...rest, id: Number(result.lastInsertRowid), status: "pending", createdAt: now };
+  return toDto({ ...row, id: Number(result.lastInsertRowid) });
 }
 
-/** 행을 DTO로 바꾼다. */
+/** AI 범주 값. 저장된 값이 S1~S7이 아니면(손으로 고친 DB 등) null로 본다. */
+const AI_CATEGORIES: ReadonlySet<string> = new Set(["S1", "S2", "S3", "S4", "S5", "S6", "S7"]);
+
+/** 행을 DTO로 바꾼다. 기록 직후 알림과 조회가 모두 이 함수를 거친다. */
 function toDto(row: VerdictRow): VerdictDto {
   return {
     id: row.id, chatChannelId: row.chat_channel_id, messageTime: row.message_time, senderChannelId: row.sender_channel_id,
     senderNickname: row.sender_nickname, content: row.content, decision: row.decision, reason: row.reason, status: row.status, createdAt: row.created_at,
+    aiProbability: row.unsafe_probability, aiCategory: row.category !== null && AI_CATEGORIES.has(row.category) ? (row.category as AiCategory) : null,
+    sure: row.sure === 1,
   };
 }

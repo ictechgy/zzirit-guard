@@ -106,7 +106,7 @@ describe("MinuteStats 저장 실패", () => {
         channel_id TEXT NOT NULL, minute INTEGER NOT NULL,
         received INTEGER NOT NULL DEFAULT 0, skipped INTEGER NOT NULL DEFAULT 0,
         deduplicated INTEGER NOT NULL DEFAULT 0, stage1_forwarded INTEGER NOT NULL DEFAULT 0,
-        stage2_done INTEGER NOT NULL DEFAULT 0, stage2_dropped INTEGER NOT NULL DEFAULT 0,
+        stage2_done INTEGER NOT NULL DEFAULT 0, stage2_dropped INTEGER NOT NULL DEFAULT 0, ai_unchecked INTEGER NOT NULL DEFAULT 0,
         candidates INTEGER NOT NULL DEFAULT 0, auto_hidden INTEGER NOT NULL DEFAULT 0,
         shadow INTEGER NOT NULL DEFAULT 0, invalid_events INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (channel_id, minute)
@@ -151,7 +151,7 @@ describe("MinuteStats 행 형태", () => {
     stats.increment("c1", "received");
     stats.flush();
     const expected: MinuteStatDto = {
-      minute: 60_000, received: 1, skipped: 0, deduplicated: 0, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0,
+      minute: 60_000, received: 1, skipped: 0, deduplicated: 0, stage1_forwarded: 0, stage2_done: 0, stage2_dropped: 0, ai_unchecked: 0,
       candidates: 0, auto_hidden: 0, shadow: 0, invalid_events: 0,
     };
     expect(stats.recent("c1", 0)).toEqual([expected]);

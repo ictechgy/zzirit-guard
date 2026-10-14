@@ -32,6 +32,7 @@ export function buildTestConfig(fake: FakeChzzk, dataDirectory: string, channelI
     chzzkApiBase: fake.baseUrl, chzzkAuthorizeUrl: "https://chzzk.example/account-interlock", dataDirectory,
     databasePath: join(dataDirectory, "zzirit-guard.sqlite"), backupDirectory: join(dataDirectory, "backups"), keychainService: "unused",
     webDistDirectory: join(dataDirectory, "no-web"), vapidPublicKey: TEST_VAPID.publicKey, vapidPrivateKey: TEST_VAPID.privateKey, vapidSubject: TEST_VAPID.subject,
+    aiEnabled: false, aiRunDirectory: join(dataDirectory, "run"),
   };
 }
 

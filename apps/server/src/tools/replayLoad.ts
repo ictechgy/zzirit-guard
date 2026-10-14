@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createAutoHideSwitch } from "../actions/autoHideSwitch.js";
 import { createDecisionHandler } from "../actions/decisionHandler.js";
+import { createMessageHideGuard } from "../actions/messageHideGuard.js";
 import type { Executor } from "../actions/executor.js";
 import { createVerdictClaims } from "../actions/verdictClaims.js";
 import type { ChatEvent } from "../chat/chatEvent.js";
@@ -127,9 +128,12 @@ function buildPipeline() {
   const auditLog = createAuditLog(database, clock);
   const executor: Executor = { submit: async () => ({ ok: true, note: null }), pendingCount: () => 0, onFailureRateExceeded: () => undefined };
   const pipeline = createDetectionPipeline({ rules, auditLog, groupFlood: createGroupFloodDetector(), personalFlood: createPersonalFloodDetector(), duplicates: createDuplicateTracker() });
+  const verdicts = createVerdictRepository(database, clock);
+  const settings = createSettingsRepository(database);
   const handler = createDecisionHandler({
-    verdicts: createVerdictRepository(database, clock), executor, claims: createVerdictClaims(), stats: createMinuteStats(database, clock), logger: silentLogger,
-    autoHide: createAutoHideSwitch({ database, settings: createSettingsRepository(database), auditLog, clock, logger: silentLogger }),
+    verdicts, executor, claims: createVerdictClaims(), stats: createMinuteStats(database, clock), logger: silentLogger, settings,
+    hideGuard: createMessageHideGuard(clock, (target) => verdicts.isMessageHidden(target)),
+    autoHide: createAutoHideSwitch({ database, settings, auditLog, clock, logger: silentLogger }),
     broadcaster: { broadcast: () => undefined, pushChatLine: () => undefined },
   });
   return { pipeline, handler };

@@ -4,7 +4,7 @@ import { floorToMinute, type Clock } from "../time.js";
 
 /** 분당 통계 항목(minute_stat 열 이름과 같다). */
 export const STAT_FIELDS = [
-  "received", "skipped", "deduplicated", "stage1_forwarded", "stage2_done", "stage2_dropped", "candidates", "auto_hidden", "shadow", "invalid_events",
+  "received", "skipped", "deduplicated", "stage1_forwarded", "stage2_done", "stage2_dropped", "ai_unchecked", "candidates", "auto_hidden", "shadow", "invalid_events",
 ] as const;
 
 /** 통계 항목 이름. */

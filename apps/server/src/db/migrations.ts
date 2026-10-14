@@ -127,6 +127,14 @@ export const MIGRATIONS: readonly string[] = [
     ) WHERE seq IS NOT NULL HAVING COUNT(*) > 0;
   DROP TABLE rule_entry_sequence;
   `,
+  // v3: AI 단계(로드맵 2단계). AI가 보지 못한 건수(장애·시간 초과·너무 긴 문장 등)를 과부하(stage2_dropped)와 나눠 센다.
+  // '확실' 배지는 결과가 나온 때의 임계값으로 정해 저장한다(나중에 임계값을 바꿔도 이미 올린 배지가 바뀌지 않게).
+  // 같은 메시지의 판정을 찾는 색인: AI 결과를 기록하기 전 겹침 확인과, 숨김이 끝난 메시지를 다시 숨기지 않는 확인에 쓴다.
+  `
+  ALTER TABLE minute_stat ADD COLUMN ai_unchecked INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE verdict ADD COLUMN sure INTEGER NOT NULL DEFAULT 0 CHECK (sure IN (0, 1));
+  CREATE INDEX verdict_message ON verdict (channel_id, chat_channel_id, sender_channel_id, message_time);
+  `,
 ];
 
 /**

@@ -40,3 +40,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...validEnvironment, ZG_VAPID_SUBJECT: "owner@example.com" })).toThrow(/ZG_VAPID_SUBJECT/);
   });
 });
+
+describe("loadConfig AI 단계", () => {
+  it("기본은 꺼짐이고, 1·true만 켠다. 소켓 디렉터리는 데이터 디렉터리 아래 run이다", () => {
+    expect(loadConfig(validEnvironment)).toMatchObject({ aiEnabled: false, aiRunDirectory: "/tmp/zg/run" });
+    expect(loadConfig({ ...validEnvironment, ZG_AI_ENABLED: "1" }).aiEnabled).toBe(true);
+    expect(loadConfig({ ...validEnvironment, ZG_AI_ENABLED: "true" }).aiEnabled).toBe(true);
+    expect(() => loadConfig({ ...validEnvironment, ZG_AI_ENABLED: "yes" })).toThrow(/ZG_AI_ENABLED/);
+  });
+});

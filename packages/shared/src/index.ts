@@ -24,6 +24,12 @@ export type Permission =
   | "edit_chat_settings"
   | "view_audit";
 
+/**
+ * 2차 분류기(kanana-safeguard)의 유해 범주. 모델 카드: S1 증오, S2 괴롭힘, S3 성적 콘텐츠, S4 범죄, S5 아동 성착취, S6 자살·자해, S7 잘못된 정보.
+ * S6가 가장 높으면 '도움 필요'(needs_care)로 올린다(스펙 5.2 ⑤).
+ */
+export type AiCategory = "S1" | "S2" | "S3" | "S4" | "S5" | "S6" | "S7";
+
 /** 저장된 판정 1건(후보·섀도·자동 숨김 등). */
 export interface VerdictDto {
   id: number;
@@ -36,6 +42,12 @@ export interface VerdictDto {
   reason: string;
   status: VerdictStatus;
   createdAt: number;
+  /** AI(2차) 판정의 유해 확률. 규칙 판정이면 null. */
+  aiProbability: number | null;
+  /** AI(2차) 판정의 가장 높은 범주. 규칙 판정이면 null. */
+  aiCategory: AiCategory | null;
+  /** 결과가 나온 때의 '확실' 임계값 이상이었는지(스펙 5.1 '확실' 배지). 저장해 두어 나중에 임계값을 바꿔도 바뀌지 않는다. */
+  sure: boolean;
 }
 
 /** 실시간 채팅 화면에 보내는 한 줄. */
@@ -48,6 +60,30 @@ export interface ChatLine {
 
 /** 자동 숨김을 켜고 끈 이유. manual: 매니저가 직접, breaker: 1분 한도 초과, failure_rate: 치지직 호출 실패 증가. */
 export type AutoHideOffReason = "manual" | "breaker" | "failure_rate";
+
+/** AI 워커 하나의 상태. unknown은 시작 직후 아직 확인하지 않은 상태다. */
+export type AiWorkerState = "ok" | "down" | "unknown";
+
+/** AI 워커 하나의 상태와 모델. */
+export interface AiWorkerStatus {
+  state: AiWorkerState;
+  /** 워커가 마지막으로 알려 준 모델 식별자(`<디렉터리>@<해시>`). 아직 모르면 null. */
+  model: string | null;
+  /** 지금 상태가 된 시각(ms). */
+  since: number;
+}
+
+/** AI 단계 상태(스펙 6장 상태 배너의 AI 상태·미검사 건수). */
+export interface AiStatus {
+  /** 서버에서 AI 단계를 켰는지(ZG_AI_ENABLED). 꺼져 있으면 화면은 AI 상태를 보이지 않는다. */
+  enabled: boolean;
+  stage1: AiWorkerStatus;
+  stage2: AiWorkerStatus;
+  /** 2차 대기열 길이. */
+  queueLength: number;
+  /** 최근 1분 동안 AI가 보지 못한 채팅 수. dropped는 과부하(대기열 넘침·15초 경과), unchecked는 장애·너무 긴 문장 등이다. */
+  uncheckedLastMinute: { dropped: number; unchecked: number };
+}
 
 /** 상태 배너·상태 점검 화면에 쓰는 서버 상태. */
 export interface ServerStatus {
@@ -64,6 +100,7 @@ export interface ServerStatus {
   autoHideOffReason: AutoHideOffReason | null;
   lastChatAt: number | null;
   pendingActions: number;
+  ai: AiStatus;
 }
 
 /** 로그인한 매니저 정보와 권한. */
@@ -83,11 +120,17 @@ export interface RuleEntryDto {
   createdAt: number;
 }
 
-/** 1단계에서 설정 화면이 바꿀 수 있는 값. */
+/** 설정 화면이 바꿀 수 있는 값. */
 export interface SettingsDto {
   breakerPerMinute: number;
   retentionDaysContent: number;
   retentionDaysAudit: number;
+  /** 1차 점수가 이 값 이상이면 2차로 보낸다(0 초과 1 미만). 모델마다 맞는 값이 달라 운영자가 정한다. */
+  stage1Threshold: number;
+  /** 2차 유해 확률이 이 값 이상이면 후보(0 초과 1 미만). */
+  candidateThreshold: number;
+  /** 2차 유해 확률이 이 값 이상이면 '확실'(0 초과 1 이하, 후보 임계값 이상). */
+  sureThreshold: number;
 }
 
 /** 감사 기록 1건(원문 없음). */
@@ -123,12 +166,14 @@ export interface MinuteStatDto {
   skipped: number;
   /** 10분 안에 같은 정규화 문장이 이미 있었던 수. */
   deduplicated: number;
-  /** 1차 분류기로 보낸 수(2단계). */
+  /** 2차 대기열에 넣은 수(1차 임계값 이상이거나 키워드 경로). */
   stage1_forwarded: number;
-  /** 2차 분류기가 판정한 수(2단계). */
+  /** 2차 결과를 적용한 수(캐시 재사용 포함). */
   stage2_done: number;
-  /** 2차 대기열에서 버린 수(2단계). */
+  /** 2차 대기열에서 버린 수(과부하: 넘침·15초 경과). */
   stage2_dropped: number;
+  /** AI가 보지 못한 수(장애·시간 초과·1차 대기 넘침·너무 긴 문장·종료 때 버림). */
+  ai_unchecked: number;
   /** 후보로 올린 수. */
   candidates: number;
   /** 자동 숨김에 성공한 수. 취소(스위치 꺼짐)·실패는 세지 않는다(S5). */

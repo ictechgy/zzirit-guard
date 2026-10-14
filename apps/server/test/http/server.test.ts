@@ -205,11 +205,14 @@ describe("판정 조치", () => {
   it("자동 숨김 결과를 알 수 없으면 매니저 숨기기도 409 result_unknown이다(K1)", async () => {
     harness.submit.mockResolvedValueOnce({ ok: false, message: "치지직 응답을 받지 못해 처리 결과를 알 수 없습니다.", isResultUnknown: true });
     const { services } = harness;
-    const handler = createDecisionHandler({ verdicts: harness.verdicts, executor: services.executor, autoHide: services.autoHide, claims: services.claims, stats: services.stats, broadcaster: harness.hub, logger: silentLogger });
+    const handler = createDecisionHandler({
+      verdicts: harness.verdicts, executor: services.executor, autoHide: services.autoHide, claims: services.claims, stats: services.stats, broadcaster: harness.hub, logger: silentLogger,
+      hideGuard: services.hideGuard, settings: services.settings,
+    });
     services.autoHide.setEnabled("c1", true, { type: "manager", channelId: "m1" }, "manual");
     const ref = { chatChannelId: "chat-1", messageTime: 5, senderChannelId: "bad", nickname: "악플러", content: "느금마", privileged: false, isRoleUnknown: false };
     const event = { channelId: "c1", senderChannelId: "bad", chatChannelId: "chat-1", nickname: "악플러", userRoleCode: "common_user", content: "느금마", messageTime: 5, receivedAt: 5 };
-    handler.handle(event, { decision: "auto_hide", reason: "rule:strong:1", ref, earlierFloodRefs: [], trivial: false, duplicate: false });
+    handler.handle(event, { decision: "auto_hide", reason: "rule:strong:1", ref, earlierFloodRefs: [], trivial: false, duplicate: false, aiEligible: false, keywordRouteId: null });
     await vi.waitFor(() => expect(services.claims.holderOf(harness.verdicts.listRecent("c1", 0)[0]?.id as number)).toBe("unknown"));
     const verdictId = harness.verdicts.listRecent("c1", 0)[0]?.id as number;
     const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${verdictId}/hide`, headers: mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER")) });
@@ -964,3 +967,45 @@ describe("정적 파일 서버의 JSON 404 경로", () => {
     }
   });
 });
+
+describe("같은 메시지 숨김 한 번(로드맵 2단계 계획 R4)", () => {
+  it("같은 메시지에 판정이 둘이면(AI 후보와 규칙 후보) 하나를 숨긴 뒤 다른 판정의 숨김은 409 already_handled다", async () => {
+    const first = insertCandidate();
+    const second = insertCandidate();
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    expect((await harness.app.inject({ method: "POST", url: `/api/verdicts/${first.id}/hide`, headers })).statusCode).toBe(200);
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${second.id}/hide`, headers });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "already_handled" });
+    expect(harness.submit).toHaveBeenCalledTimes(1);
+    expect(harness.services.claims.isClaimed(second.id)).toBe(false);
+  });
+
+  it("앞선 숨김의 결과를 알 수 없으면 같은 메시지의 다른 판정도 409 result_unknown이다", async () => {
+    harness.submit.mockResolvedValueOnce({ ok: false, message: "결과를 알 수 없습니다.", isResultUnknown: true });
+    const first = insertCandidate();
+    const second = insertCandidate();
+    const headers = mutatingHeaders(harness.login("STREAMING_CHAT_MANAGER"));
+    await harness.app.inject({ method: "POST", url: `/api/verdicts/${first.id}/hide`, headers });
+    const response = await harness.app.inject({ method: "POST", url: `/api/verdicts/${second.id}/hide`, headers });
+    expect(response.json()).toMatchObject({ error: "result_unknown" });
+  });
+});
+
+describe("판정 DTO의 AI 칸", () => {
+  it("기록 직후 응답과 목록 조회가 같은 AI 칸을 준다(규칙 판정은 null·null·false)", async () => {
+    const aiVerdict = harness.verdicts.insert({
+      channelId: "c1", chatChannelId: "chat-1", messageTime: 9, senderChannelId: "v", senderNickname: "v",
+      content: "AI 후보", decision: "candidate", reason: "ai:S2", unsafeProbability: 0.995, category: "S2", sure: true,
+    });
+    const ruleVerdict = insertCandidate();
+    const response = await harness.app.inject({ method: "GET", url: "/api/candidates", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
+    expect(response.json()).toEqual([ruleVerdictFirst(ruleVerdict, aiVerdict)].flat());
+    expect(ruleVerdict).toMatchObject({ aiProbability: null, aiCategory: null, sure: false });
+  });
+});
+
+/** 목록은 id 순서다. */
+function ruleVerdictFirst<T extends { id: number }>(a: T, b: T): T[] {
+  return [a, b].sort((left, right) => left.id - right.id);
+}

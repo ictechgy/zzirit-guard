@@ -1,7 +1,9 @@
 import type { ManagerRole } from "@zzirit-guard/shared";
 import { vi } from "vitest";
 import { createAutoHideSwitch } from "../../src/actions/autoHideSwitch.js";
+import { createMessageHideGuard } from "../../src/actions/messageHideGuard.js";
 import { createSenderActionGuard } from "../../src/actions/senderActionGuard.js";
+import { disabledAiStatus } from "../../src/ai/aiStatus.js";
 import { createVerdictClaims } from "../../src/actions/verdictClaims.js";
 import type { ActionOutcome, Executor } from "../../src/actions/executor.js";
 import { openDatabase } from "../../src/db/database.js";
@@ -46,10 +48,11 @@ export async function createHttpHarness(authFlowOverrides: Partial<AuthFlow> = {
   const submit = vi.fn<Executor["submit"]>(async () => ({ ok: true, note: null }) as ActionOutcome);
   const services: RouteServices = {
     channel: () => ({ channelId: "c1", channelName: "채널" }),
-    status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0 }),
+    status: () => ({ channelConnected: true, channelName: "채널", chatConnected: true, writeLocked: false, accessExpiresAt: null, autoHideEnabled: false, autoHideOffReason: null, lastChatAt: null, pendingActions: 0, ai: disabledAiStatus(0) }),
     verdicts, auditLog, settings, clock,
     claims: createVerdictClaims(),
     senderActions: createSenderActionGuard(clock),
+    hideGuard: createMessageHideGuard(clock, (target) => verdicts.isMessageHidden(target)),
     executor: { submit, pendingCount: () => 0, onFailureRateExceeded: () => undefined },
     autoHide: createAutoHideSwitch({ database, settings, auditLog, clock, logger: silentLogger }),
     rules: createRuleRepository(database, clock),

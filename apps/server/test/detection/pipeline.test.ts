@@ -63,8 +63,18 @@ describe("DetectionPipeline", () => {
     expect(pipeline.evaluate(chat("카지노 영화 봤어?"))).toMatchObject({ decision: "pass", reason: "rule:allow" });
   });
 
-  it("AI 키워드 경로 규칙은 1단계 판정을 바꾸지 않는다(2차 워커가 생기면 쓴다)", () => {
-    expect(pipeline.evaluate(chat("요즘 진짜 죽고싶다"))).toMatchObject({ decision: "pass", reason: "none" });
+  it("AI 키워드 경로 규칙은 규칙 판정을 바꾸지 않고, 걸린 규칙 번호만 AI 단계에 넘긴다", () => {
+    const result = pipeline.evaluate(chat("요즘 진짜 죽고싶다"));
+    expect(result).toMatchObject({ decision: "pass", reason: "none", aiEligible: true });
+    expect(result.keywordRouteId).toEqual(expect.any(Number));
+    expect(pipeline.evaluate(chat("오늘 방송 재밌다"))).toMatchObject({ aiEligible: true, keywordRouteId: null });
+  });
+
+  it("규칙이 판정한 메시지, 채널 허용어, 가벼운 반응은 AI 단계에 보내지 않는다", () => {
+    expect(pipeline.evaluate(chat("시발 꽁머니 준다"))).toMatchObject({ aiEligible: false, keywordRouteId: null });
+    rules.add("c1", "allow", "죽고싶다 ㅋㅋ", "m");
+    expect(pipeline.evaluate(chat("죽고싶다 ㅋㅋ"))).toMatchObject({ reason: "rule:allow", aiEligible: false, keywordRouteId: null });
+    expect(pipeline.evaluate(chat("ㅋㅋㅋㅋ"))).toMatchObject({ trivial: true, aiEligible: false });
   });
 
   it("허용 도메인 앞에 한글을 붙인 링크는 다른 주소일 수 있어 후보(rule:link_glued)로 올린다", () => {

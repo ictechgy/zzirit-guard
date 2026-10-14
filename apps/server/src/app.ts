@@ -1,11 +1,16 @@
 import { mkdirSync } from "node:fs";
 import type { AutoHideOffReason, ServerStatus } from "@zzirit-guard/shared";
 import type { FastifyInstance } from "fastify";
+import { join } from "node:path";
 import { createAutoHideSwitch } from "./actions/autoHideSwitch.js";
 import { createDecisionHandler } from "./actions/decisionHandler.js";
 import { createExecutor } from "./actions/executor.js";
+import { createMessageHideGuard } from "./actions/messageHideGuard.js";
 import { createSenderActionGuard } from "./actions/senderActionGuard.js";
 import { createVerdictClaims } from "./actions/verdictClaims.js";
+import { createAiStage, type AiOutcome, type AiStage } from "./ai/aiStage.js";
+import { disabledAiStatus } from "./ai/aiStatus.js";
+import { createWorkerClient } from "./ai/workerClient.js";
 import type { ChatEvent } from "./chat/chatEvent.js";
 import { connectWithSocketIo, createChatReceiver, type SocketConnector } from "./chat/chatReceiver.js";
 import { createRepeatedChatFilter } from "./chat/repeatedChatFilter.js";
@@ -30,7 +35,7 @@ import { createPushNotifier, type PushMessage, type PushSender } from "./push/pu
 import { createRealtimeHub, SESSION_EXPIRED_REASON } from "./realtime/hub.js";
 import { createAuditLog } from "./records/auditLog.js";
 import { runBackup, runRetention } from "./records/maintenance.js";
-import { createMinuteStats } from "./records/minuteStats.js";
+import { createMinuteStats, type MinuteStats } from "./records/minuteStats.js";
 import { createSettingsRepository } from "./records/settingsRepository.js";
 import { createVerdictRepository } from "./records/verdictRepository.js";
 import { runOneAtATime } from "./runOneAtATime.js";
@@ -74,6 +79,18 @@ const STATUS_BROADCAST_MS = 20_000;
 const SYSTEM_ACTOR = { type: "system" as const, channelId: null };
 /** 주기 작업이 이만큼 연속으로 건너뛰어지면 멈춘 것으로 보고 경고 로그를 남긴다(N5). */
 const STUCK_TASK_SKIP_THRESHOLD = 3;
+/** AI 결과별로 늘리는 분당 통계 칸. 1차 미만 통과(stage1_pass)는 세지 않는다(계획 R9). */
+const AI_OUTCOME_FIELDS = { forwarded: "stage1_forwarded", stage2_done: "stage2_done", stage2_dropped: "stage2_dropped", ai_unchecked: "ai_unchecked" } as const;
+
+/**
+ * AI 결과를 분당 통계에 센다.
+ * @param stats 분당 통계
+ * @param channelId 채널 ID
+ * @param outcome 메시지 하나의 결과
+ */
+function countAiOutcome(stats: MinuteStats, channelId: string, outcome: AiOutcome): void {
+  if (outcome !== "stage1_pass") stats.increment(channelId, AI_OUTCOME_FIELDS[outcome]);
+}
 
 /** 모든 구성 요소를 만들고 이벤트를 연결한다. */
 export async function createApp(config: AppConfig, options: AppOptions): Promise<App> {
@@ -98,7 +115,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const verdicts = createVerdictRepository(database, clock);
   const auditLog = createAuditLog(database, clock);
   const stats = createMinuteStats(database, clock);
-  const settings = createSettingsRepository(database);
+  const settings = createSettingsRepository(database, logger);
   const rules = createRuleRepository(database, clock);
   const sessions = createSessionStore(database, clock);
   const hub = createRealtimeHub({ clock });
@@ -116,7 +133,16 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const claims = createVerdictClaims();
   /** 사람 단위 제재가 같은 사람에게 겹쳐 나가지 않게 막는 표(K2). 제재는 매니저 라우트에서만 보낸다. */
   const senderActions = createSenderActionGuard(clock);
-  const decisionHandler = createDecisionHandler({ verdicts, executor, autoHide, claims, stats, broadcaster: hub, logger });
+  /** 같은 메시지에 숨김이 두 번 나가지 않게 막는 표. 매니저 숨김(routes)과 자동 숨김이 함께 쓴다(계획 R4). */
+  const hideGuard = createMessageHideGuard(clock, (target) => verdicts.isMessageHidden(target));
+  /** AI 단계. ZG_AI_ENABLED일 때만 만든다. 결정 처리기와 서로 부르므로 결정 처리기를 먼저 만들고 뒤에 채운다. */
+  let aiStage: AiStage | null = null;
+  const decisionHandler = createDecisionHandler({
+    verdicts, executor, autoHide, claims, hideGuard, settings, stats, broadcaster: hub, logger,
+    ...(config.aiEnabled ? { submitToAi: (submission: Parameters<AiStage["submit"]>[0]) => aiStage?.submit(submission) } : {}),
+  });
+  /** 서버 시작 시각. AI를 끈 배포의 상태 since에 쓴다. */
+  const startedAt = clock();
   const pipeline = createDetectionPipeline({
     rules, auditLog,
     groupFlood: createGroupFloodDetector(),
@@ -164,6 +190,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       autoHideOffReason,
       lastChatAt,
       pendingActions: executor.pendingCount(),
+      ai: aiStage ? { enabled: true, ...aiStage.status() } : disabledAiStatus(startedAt),
     };
   };
   /** 현재 상태를 열린 모든 매니저 화면에 즉시 보낸다. 연결·잠금·스위치가 바뀔 때 부른다. */
@@ -198,10 +225,26 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       if (channel) stats.increment(channel.channelId, "invalid_events");
     },
     onRevoked: () => {
+      // 수신기가 스스로 멈췄으므로 채팅 세션이 끝났다. AI 단계도 대기 중인 것을 버리고 캐시를 비운다(계획 R14).
+      aiStage?.resetSession();
       notify({ title: "찌리릿 가드", body: "치지직이 채팅 권한을 회수했습니다. 스트리머가 다시 연결해야 합니다." });
       broadcastStatus();
     },
   });
+  if (config.aiEnabled) {
+    aiStage = createAiStage({
+      stage1: createWorkerClient({ socketPath: join(config.aiRunDirectory, "stage1.sock"), stage: "stage1" }),
+      stage2: createWorkerClient({ socketPath: join(config.aiRunDirectory, "stage2.sock"), stage: "stage2" }),
+      clock, logger,
+      stage1Threshold: (channelId) => settings.get(channelId).stage1Threshold,
+      onResult: (submission, result) => decisionHandler.handleAiResult(submission, result),
+      onOutcome: (channelId, outcome) => countAiOutcome(stats, channelId, outcome),
+      onWorkerDown: (stage) => {
+        notify({ title: "찌리릿 가드", body: `AI ${stage === "stage1" ? "1차" : "2차"} 워커가 30초 넘게 응답하지 않습니다. 규칙은 계속 동작합니다.` });
+        broadcastStatus();
+      },
+    });
+  }
 
   /**
    * 채팅이 연결돼 있지 않을 때만 수신기를 다시 시작한다.
@@ -210,6 +253,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
   const restartReceiverIfIdle = (): void => {
     if (receiver.isConnected()) return;
     receiver.stop();
+    aiStage?.resetSession();
     receiver.start();
   };
   /**
@@ -242,6 +286,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
    */
   const disconnectChannel = (): void => {
     receiver.stop();
+    aiStage?.resetSession();
     disconnectTokensOnPurpose();
     removeAllPushSubscriptions();
     const ids = sessions.listActive().map((session) => session.id);
@@ -269,7 +314,7 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
 
   const services: RouteServices = {
     channel: () => credentialStore.loadChannel(),
-    status, verdicts, claims, senderActions, executor, autoHide, rules, settings, auditLog, stats, push,
+    status, verdicts, claims, senderActions, hideGuard, executor, autoHide, rules, settings, auditLog, stats, push,
     broadcaster: hub,
     clock,
     getChatSettings: async () => api.getChatSettings(await tokenManager.getAccessToken()),
@@ -429,6 +474,8 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       hasStarted = true;
       const isMismatched = disconnectMismatchedChannel();
       await http.listen({ host: "127.0.0.1", port: config.port });
+      // AI 단계를 수신보다 먼저 시작한다(첫 채팅부터 받을 수 있게, 계획 R14).
+      aiStage?.start();
       if (!isMismatched && credentialStore.loadChannel()) receiver.start();
       startTimers();
     },
@@ -437,6 +484,8 @@ export async function createApp(config: AppConfig, options: AppOptions): Promise
       hasStopped = true;
       await attemptShutdownStep("타이머", clearTimers);
       await attemptShutdownStep("채팅 수신기", () => receiver.stop());
+      // 수신을 멈춘 뒤, 통계 저장·DB 닫기 전에 AI 단계를 멈춘다. 늦은 AI 결과가 닫힌 DB에 쓰지 않게 하기 위해서다(계획 R14).
+      await attemptShutdownStep("AI 단계", () => aiStage?.stop());
       await attemptShutdownStep("통계 저장", () => stats.flush());
       await attemptShutdownStep("실시간 허브", () => hub.stop());
       await attemptShutdownStep("HTTP 서버", () => http.close());
