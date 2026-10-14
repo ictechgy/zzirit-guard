@@ -4,13 +4,14 @@
 - 범주별 전달률: 유해 범주에서는 재현율(2차로 넘긴 비율), 허용 유형에서는 잘못 넘긴 비율이다.
 - 가중 전달률: 가정한 실제 트래픽 구성(DEFAULT_TRAFFIC_MIX)으로 범주별 전달률을 가중 평균한 값이다. 평가셋은 유해가
   절반쯤이라 그대로 평균하면 실제 2차 부하를 크게 부풀린다. 그래서 구성비로 다시 가중한다.
-- 예산 임계값(개발셋에서만): 가중 전달률이 F_max(zg_stage1.capacity) 이하가 되는 가장 작은 임계값.
-  보류셋에는 개발셋에서 고른 값을 --threshold로 그대로 넣어 한 번만 본다. 보류셋으로 임계값을 고르면 오류를 낸다.
+- 개발셋: F_max(zg_stage1.capacity) 예산을 지키는 가장 작은 임계값을 고르고, 임계값 표와 문장별 점수를 남긴다.
+- 보류셋: 개발셋 결과 파일(--dev-report)의 임계값만 쓴다. 모델 가중치가 같은지 확인하고, 그 임계값 하나의 집계만 남긴다.
+  임계값 표나 문장별 점수를 남기면 보류셋을 보고 임계값을 다시 고를 수 있기 때문이다.
 원문은 출력·결과 파일에 넣지 않는다. 문장은 id로만 가리킨다.
 
 CLI 사용 예:
-  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v1.jsonl --forward-budget 0.30
-  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-holdout-v1.jsonl --threshold 0.42
+  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-dev-v1.jsonl --forward-budget 0.304
+  uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_data/chat-holdout-v1.jsonl --dev-report <모델>/chat-eval-dev.json
 """
 
 from __future__ import annotations
@@ -23,8 +24,8 @@ from pathlib import Path
 
 from zg_stage1 import modeling
 from zg_stage1.arguments import positive_integer, probability_argument
-from zg_stage1.chat_eval_data import ALLOW_CATEGORIES, CRITICAL_CATEGORIES, HARMFUL_CATEGORIES, ChatEvalItem, load_chat_eval_set
-from zg_stage1.data import describe_file_provenance
+from zg_stage1.chat_eval_data import ALLOW_CATEGORIES, CRITICAL_CATEGORIES, HARMFUL_CATEGORIES, ChatEvalItem, load_validated_eval_set
+from zg_stage1.data import compute_file_sha256, describe_file_provenance
 from zg_stage1.errors import DatasetFormatError, MetricError, OutputExistsError, run_command_line
 from zg_stage1.evaluate import resolve_max_length
 from zg_stage1.metrics import METRIC_DECIMALS, compute_roc_auc, ensure_valid_scores_and_labels
@@ -51,8 +52,11 @@ DEFAULT_TRAFFIC_MIX: dict[str, float] = {
 # 결과 표에 넣는 임계값. 거름망은 0.2~0.6 근처에서 결정될 가능성이 높아 그 구간을 촘촘히 본다.
 CHAT_REPORT_THRESHOLDS: tuple[float, ...] = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 
-# 고른 임계값의 소수 자릿수. 올림해서, 보고한 값을 그대로 써도 예산을 넘지 않게 한다.
+# 고르는 임계값의 소수 자릿수. 운영 설정에 그대로 옮겨 적을 수 있는 정밀도다.
 THRESHOLD_DECIMALS = 6
+
+# 아무것도 넘기지 않는 임계값. 점수는 1보다 작으므로 이 값이면 전달률이 0이다(예산을 지키는 마지막 후보).
+FORWARD_NOTHING_THRESHOLD = 1.0
 
 # 구성비 합이 1에서 이만큼 넘게 벗어나면 잘못 쓴 파일로 본다.
 MIX_SUM_TOLERANCE = 1e-6
@@ -87,21 +91,19 @@ def forward_rates_by_category(pairs: Sequence[tuple[ChatEvalItem, float]], thres
 
 
 def weighted_forward_rate(rates: Mapping[str, float], mix: Mapping[str, float]) -> float:
-    """구성비로 가중한 전달률. 평가셋에 없는 범주는 빼고, 남은 범주의 구성비 합으로 다시 나눈다."""
-    present_weight = sum(weight for category, weight in mix.items() if category in rates)
-    if present_weight <= 0:
-        raise MetricError("구성비가 있는 범주가 평가셋에 하나도 없습니다. 평가셋 범주 이름을 확인하세요.")
-    return sum(weight * rates[category] for category, weight in mix.items() if category in rates) / present_weight
+    """구성비로 가중한 전달률. 구성비가 있는 범주가 평가셋에 없으면 오류다.
 
-
-def missing_mix_categories(rates: Mapping[str, float], mix: Mapping[str, float]) -> list[str]:
-    """구성비에는 있지만 평가셋에 없는 범주. 가중 전달률이 그만큼 덜 대표적이라는 경고에 쓴다."""
-    return sorted(category for category, weight in mix.items() if weight > 0 and category not in rates)
+    왜 빼고 다시 나누지 않나: 빠진 범주가 실제로는 많이 넘어갈 수 있는데, 빼고 나누면 부하가 작게 보여 잘못된 임계값을 고른다.
+    """
+    missing = sorted(category for category, weight in mix.items() if weight > 0 and category not in rates)
+    if missing:
+        raise MetricError(f"구성비가 있는 범주가 평가셋에 없습니다: {', '.join(missing)}. 평가셋에 그 범주를 넣거나 구성비를 고치세요.")
+    return sum(weight * rates[category] for category, weight in mix.items() if weight > 0)
 
 
 def rates_for(rates: Mapping[str, float], categories: Sequence[str] | frozenset[str]) -> list[float]:
-    """주어진 범주 중 평가셋에 있는 것의 전달률 목록."""
-    return [rates[category] for category in sorted(categories) if category in rates]
+    """주어진 범주의 전달률 목록. 평가셋이 범주를 모두 담는지는 load_validated_eval_set이 확인한다."""
+    return [rates[category] for category in sorted(categories)]
 
 
 def summarize_at_chat_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], threshold: float, mix: Mapping[str, float]) -> dict:
@@ -112,23 +114,33 @@ def summarize_at_chat_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], thr
     return {
         "threshold": threshold,
         "weighted_forward_rate": round(weighted_forward_rate(rates, mix), METRIC_DECIMALS),
-        "critical_recall_min": round(min(critical), METRIC_DECIMALS) if critical else None,
-        "critical_recall_mean": round(sum(critical) / len(critical), METRIC_DECIMALS) if critical else None,
-        "allow_forward_max": round(max(allow), METRIC_DECIMALS) if allow else None,
+        "critical_recall_min": round(min(critical), METRIC_DECIMALS),
+        "critical_recall_mean": round(sum(critical) / len(critical), METRIC_DECIMALS),
+        "allow_forward_max": round(max(allow), METRIC_DECIMALS),
         "by_category": {category: round(rate, METRIC_DECIMALS) for category, rate in rates.items()},
     }
 
 
-def select_budget_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], mix: Mapping[str, float], budget: float) -> float | None:
-    """가중 전달률이 예산 이하가 되는 가장 작은 임계값. 어떤 임계값으로도 안 되면 None이다.
+def candidate_thresholds(pairs: Sequence[tuple[ChatEvalItem, float]]) -> list[float]:
+    """고를 수 있는 임계값 후보: 점수를 소수 여섯째 자리에서 내림한 값들과, 아무것도 넘기지 않는 1.0.
+
+    왜 내림인가: 올림하면 그 점수의 문장이 빠져 재현율이 떨어진다. 내림한 값 자체로 다시 계산하므로 예산도 정확히 지킨다.
+    """
+    scale = 10**THRESHOLD_DECIMALS
+    floored = {math.floor(score * scale) / scale for _item, score in pairs}
+    return sorted(value for value in floored | {FORWARD_NOTHING_THRESHOLD} if value > 0)
+
+
+def select_budget_threshold(pairs: Sequence[tuple[ChatEvalItem, float]], mix: Mapping[str, float], budget: float) -> float:
+    """가중 전달률이 예산 이하가 되는 가장 작은 임계값. 돌려주는 값 그대로 계산해 확인한다.
 
     왜 가장 작은 값인가: 임계값이 작을수록 재현율이 높다. 예산을 지키는 범위에서 재현율을 최대로 하는 값이다.
-    후보는 점수 자체다(점수 사이에서는 전달 여부가 바뀌지 않는다). 올림한 값을 돌려준다.
+    1.0(아무것도 넘기지 않음)은 항상 예산을 지키므로 결과가 없는 경우는 없다. 그 값이 나오면 핵심 재현율이 0으로 보고된다.
     """
-    for candidate in sorted({score for _item, score in pairs}):
+    for candidate in candidate_thresholds(pairs):
         if weighted_forward_rate(forward_rates_by_category(pairs, candidate), mix) <= budget:
-            return math.ceil(candidate * 10**THRESHOLD_DECIMALS) / 10**THRESHOLD_DECIMALS
-    return None
+            return candidate
+    return FORWARD_NOTHING_THRESHOLD
 
 
 def compute_chat_auc(pairs: Sequence[tuple[ChatEvalItem, float]]) -> float:
@@ -139,48 +151,75 @@ def compute_chat_auc(pairs: Sequence[tuple[ChatEvalItem, float]]) -> float:
     return round(compute_roc_auc(scores, labels), METRIC_DECIMALS)
 
 
-def build_chat_report(items: Sequence[ChatEvalItem], scores: Sequence[float], mix: Mapping[str, float], decision: dict) -> dict:
-    """평가 결과(원문 없음). decision은 {'mode': 'budget'|'fixed', 'budget'?: F_max, 'threshold'?: 값}이다."""
+def describe_counts(items: Sequence[ChatEvalItem], pairs: Sequence[tuple[ChatEvalItem, float]]) -> dict:
+    """채점 문장과 애매 문장 수."""
+    return {"scored": len(pairs), "ambiguous": len(items) - len(pairs)}
+
+
+def build_dev_report(items: Sequence[ChatEvalItem], scores: Sequence[float], mix: Mapping[str, float], budget: float) -> dict:
+    """개발셋 결과: 임계값 표, 예산 임계값과 그 요약, 문장별 점수(id만). 원문은 넣지 않는다."""
     pairs = scored_pairs(items, scores)
-    rates_at_half = forward_rates_by_category(pairs, 0.5)
-    threshold = decision.get("threshold")
-    if decision["mode"] == "budget":
-        threshold = select_budget_threshold(pairs, mix, decision["budget"])
+    threshold = select_budget_threshold(pairs, mix, budget)
     return {
-        "split": items[0].split,
-        "counts": {"scored": len(pairs), "ambiguous": len(items) - len(pairs)},
+        "split": "dev",
+        "counts": describe_counts(items, pairs),
         "auc": compute_chat_auc(pairs),
         "traffic_mix": dict(mix),
-        "missing_mix_categories": missing_mix_categories(rates_at_half, mix),
         "threshold_table": [summarize_at_chat_threshold(pairs, value, mix) for value in CHAT_REPORT_THRESHOLDS],
-        "decision": {**decision, "threshold": threshold, "at_threshold": None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix)},
+        "decision": {"mode": "budget", "budget": budget, "threshold": threshold, "at_threshold": summarize_at_chat_threshold(pairs, threshold, mix)},
         "scores": {item.item_id: round(score, METRIC_DECIMALS) for item, score in zip(items, scores, strict=True)},
     }
 
 
+def build_holdout_report(items: Sequence[ChatEvalItem], scores: Sequence[float], mix: Mapping[str, float], threshold: float) -> dict:
+    """보류셋 결과: 개발셋에서 고른 임계값 하나의 집계와 AUC만. 임계값 표·문장별 점수는 넣지 않는다(보류셋 튜닝 방지)."""
+    pairs = scored_pairs(items, scores)
+    return {
+        "split": "holdout",
+        "counts": describe_counts(items, pairs),
+        "auc": compute_chat_auc(pairs),
+        "traffic_mix": dict(mix),
+        "decision": {"mode": "fixed", "threshold": threshold, "at_threshold": summarize_at_chat_threshold(pairs, threshold, mix)},
+    }
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
-    """CLI 인자. --forward-budget(개발셋)과 --threshold(보류셋) 중 하나만 준다."""
+    """CLI 인자. 개발셋에는 --forward-budget, 보류셋에는 --dev-report를 준다."""
     parser = argparse.ArgumentParser(prog="python -m zg_stage1.evaluate_chat", description="채팅 평가셋으로 1차 분류기 평가(기본 CPU)")
     parser.add_argument("--model-dir", type=Path, required=True, help="train이 만든 출력 디렉터리")
     parser.add_argument("--eval-file", type=Path, required=True, help="채팅 평가셋 JSONL(개발셋 또는 보류셋)")
     decision = parser.add_mutually_exclusive_group(required=True)
     decision.add_argument("--forward-budget", type=probability_argument, help="F_max(개발셋에서 임계값을 고를 때)")
-    decision.add_argument("--threshold", type=probability_argument, help="고정 임계값(보류셋을 볼 때. 개발셋에서 고른 값)")
+    decision.add_argument("--dev-report", type=Path, help="같은 모델의 개발셋 결과 JSON(보류셋을 볼 때)")
     parser.add_argument("--mix-file", type=Path, help="트래픽 구성비 JSON(범주→비율, 합 1). 없으면 기본 가정")
     parser.add_argument("--device", choices=modeling.DEVICE_CHOICES, default="cpu", help="점수 계산 장치(기본 cpu)")
     parser.add_argument("--batch-size", type=positive_integer, default=modeling.DEFAULT_INFERENCE_BATCH_SIZE, help="점수 계산 배치 크기")
     parser.add_argument("--output", type=Path, help="결과 JSON 경로(기본: <모델>/chat-eval-<셋>.json)")
-    parser.add_argument("--overwrite", action="store_true", help="이미 있는 결과 파일을 덮어쓴다")
+    parser.add_argument("--overwrite", action="store_true", help="이미 있는 결과 파일을 덮어쓴다(개발셋만)")
     return parser
 
 
-def resolve_decision(arguments: argparse.Namespace, split: str) -> dict:
-    """임계값 결정 방식을 정한다. 보류셋으로 임계값을 고르려 하면 오류를 낸다(보류셋이 튜닝에 쓰이지 않게)."""
-    if arguments.forward_budget is None:
-        return {"mode": "fixed", "threshold": arguments.threshold}
-    if split != "dev":
-        raise DatasetFormatError("보류셋으로 임계값을 고르지 않습니다. 개발셋에서 고른 값을 --threshold로 주세요.")
-    return {"mode": "budget", "budget": arguments.forward_budget}
+def compute_model_weights_sha256(model_directory: Path) -> str:
+    """모델 가중치 파일의 sha256. 보류셋 평가가 개발셋에서 임계값을 고른 바로 그 모델인지 확인하는 데 쓴다."""
+    return compute_file_sha256(model_directory / modeling.WEIGHTS_FILE_NAME)
+
+
+def read_dev_threshold(dev_report_path: Path, model_weights_sha256: str) -> float:
+    """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나 다른 모델의 결과면 오류다."""
+    report = json.loads(dev_report_path.read_text(encoding="utf-8"))
+    if report.get("split") != "dev" or report.get("decision", {}).get("mode") != "budget":
+        raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 예산 결과가 아닙니다. --forward-budget으로 만든 개발셋 결과를 주세요.")
+    if report.get("model_weights_sha256") != model_weights_sha256:
+        raise DatasetFormatError(f"{dev_report_path.name}은 다른 모델의 결과입니다. 같은 --model-dir로 개발셋을 먼저 평가하세요.")
+    return float(report["decision"]["threshold"])
+
+
+def require_matching_decision(arguments: argparse.Namespace, split: str) -> None:
+    """개발셋에는 예산, 보류셋에는 개발셋 결과를 요구한다. 보류셋으로 임계값을 고르지 못하게 하기 위해서다."""
+    if split == "holdout" and arguments.dev_report is None:
+        raise DatasetFormatError("보류셋으로 임계값을 고르지 않습니다. 같은 모델의 개발셋 결과를 --dev-report로 주세요.")
+    if split == "dev" and arguments.forward_budget is None:
+        raise DatasetFormatError("개발셋에는 --forward-budget(F_max)을 주세요.")
 
 
 def load_traffic_mix(path: Path | None) -> dict[str, float]:
@@ -191,10 +230,10 @@ def load_traffic_mix(path: Path | None) -> dict[str, float]:
 
 
 def resolve_output_path(arguments: argparse.Namespace, split: str) -> Path:
-    """결과 파일 경로. 이미 있으면 --overwrite 없이는 덮어쓰지 않는다(앞선 결과를 지키기 위해서다)."""
+    """결과 파일 경로. 이미 있으면 덮어쓰지 않는다. 보류셋 결과는 --overwrite로도 덮어쓰지 않는다(한 번만 보는 셋이라서)."""
     output = arguments.output or arguments.model_dir / f"chat-eval-{split}.json"
-    if output.exists() and not arguments.overwrite:
-        raise OutputExistsError(f"{output.name}이 이미 있습니다. 바꾸려면 --overwrite를 주세요.")
+    if output.exists() and (split == "holdout" or not arguments.overwrite):
+        raise OutputExistsError(f"{output.name}이 이미 있습니다. 개발셋 결과는 --overwrite로 바꿀 수 있고, 보류셋 결과는 바꾸지 않습니다.")
     return output
 
 
@@ -207,32 +246,45 @@ def score_items(arguments: argparse.Namespace, items: Sequence[ChatEvalItem]) ->
     return modeling.score_texts(model, tokenizer, [item.text for item in items], device, max_length, arguments.batch_size)
 
 
+def format_summary_row(row: dict) -> str:
+    """요약 표 한 줄."""
+    cells = [row["threshold"], row["weighted_forward_rate"], row["critical_recall_min"], row["critical_recall_mean"], row["allow_forward_max"]]
+    return "| " + " | ".join(str(cell) for cell in cells) + " |"
+
+
 def format_chat_report_markdown(report: dict) -> str:
-    """결과 요약 표(원문 없음)."""
-    lines = [f"### 채팅 평가({report['split']}, {report['counts']['scored']}문장, 애매 {report['counts']['ambiguous']}): AUC {report['auc']:.4f}", ""]
-    if report["missing_mix_categories"]:
-        lines += [f"[경고] 평가셋에 없는 범주(가중에서 뺌): {', '.join(report['missing_mix_categories'])}", ""]
+    """결과 요약 표(원문 없음). 보류셋은 고정 임계값 한 줄만 보여 준다."""
+    counts = report["counts"]
+    lines = [f"### 채팅 평가({report['split']}, {counts['scored']}문장, 애매 {counts['ambiguous']}): AUC {report['auc']:.4f}", ""]
     lines += ["| 임계값 | 가중 전달률 | 핵심 재현율 최소 | 핵심 재현율 평균 | 허용 전달 최대 |", "|---|---|---|---|---|"]
-    rows = report["threshold_table"] + ([report["decision"]["at_threshold"]] if report["decision"]["at_threshold"] else [])
-    for row in rows:
-        cells = [row["threshold"], row["weighted_forward_rate"], row["critical_recall_min"], row["critical_recall_mean"], row["allow_forward_max"]]
-        lines.append("| " + " | ".join(str(cell) for cell in cells) + " |")
     at_threshold = report["decision"]["at_threshold"]
-    lines += ["", f"결정: {json.dumps({key: value for key, value in report['decision'].items() if key != 'at_threshold'}, ensure_ascii=False)}"]
-    if at_threshold:
-        lines += ["", "범주별 전달률: " + ", ".join(f"{category} {rate}" for category, rate in at_threshold["by_category"].items())]
+    lines += [format_summary_row(row) for row in report.get("threshold_table", []) + [at_threshold]]
+    decision = {key: value for key, value in report["decision"].items() if key != "at_threshold"}
+    lines += ["", f"결정: {json.dumps(decision, ensure_ascii=False)}", ""]
+    lines.append("범주별 전달률: " + ", ".join(f"{category} {rate}" for category, rate in at_threshold["by_category"].items()))
     return "\n".join(lines)
 
 
+def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEvalItem], mix: Mapping[str, float], model_sha: str) -> dict:
+    """셋에 맞는 보고서를 만든다. 보류셋은 채점 전에 개발셋 결과를 확인한다(다른 모델이면 채점하지 않는다)."""
+    if items[0].split == "holdout":
+        threshold = read_dev_threshold(arguments.dev_report, model_sha)
+        report = build_holdout_report(items, score_items(arguments, items), mix, threshold)
+        return report | {"dev_report": describe_file_provenance(arguments.dev_report)}
+    return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
-    """평가셋 읽기 → 결정 방식 확인 → 채점 → 보고서 저장·출력."""
+    """평가셋 검증 → 결정 방식 확인 → 채점 → 보고서 저장·출력."""
     arguments = build_argument_parser().parse_args(argv)
-    items = load_chat_eval_set(arguments.eval_file)
-    decision = resolve_decision(arguments, items[0].split)
+    items = load_validated_eval_set(arguments.eval_file)
+    require_matching_decision(arguments, items[0].split)
     mix = load_traffic_mix(arguments.mix_file)
     output = resolve_output_path(arguments, items[0].split)
-    report = build_chat_report(items, score_items(arguments, items), mix, decision)
-    report |= {"created_at": utc_timestamp(), "model_dir": arguments.model_dir.name, "eval_file": describe_file_provenance(arguments.eval_file)}
+    model_sha = compute_model_weights_sha256(arguments.model_dir)
+    report = build_report_for_split(arguments, items, mix, model_sha)
+    report |= {"created_at": utc_timestamp(), "model_dir": arguments.model_dir.name, "model_weights_sha256": model_sha}
+    report |= {"eval_file": describe_file_provenance(arguments.eval_file)}
     write_json_atomically(output, report)
     print(format_chat_report_markdown(report))
     print(f"\n저장: {output.name}")
