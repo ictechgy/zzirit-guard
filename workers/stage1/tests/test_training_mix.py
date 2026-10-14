@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import write_jsonl
-from zg_stage1.data import LabeledText, load_labeled_texts
-from zg_stage1.errors import DatasetFormatError, OutputExistsError, OutputLocationError
 from zg_stage1.chat_eval_data import OverlapFinding
+from zg_stage1.data import LabeledText, describe_file_provenance, load_labeled_texts
+from zg_stage1.errors import DatasetFormatError, OutputExistsError, OutputLocationError
 from zg_stage1.training_mix import (
     DEFAULT_HARD_NEGATIVES_PATH,
     HARD_NEGATIVE_VERSIONS,
@@ -27,8 +27,10 @@ from zg_stage1.training_mix import (
     exclude_evaluation_overlaps,
     hard_negative_rows,
     load_evaluation_references,
+    load_generated_examples,
     load_hard_negative_version,
     load_hard_negatives,
+    load_sealed_holdout_index,
     main,
     manifest_path_for,
     write_training_outputs,
@@ -41,6 +43,11 @@ def hard_negative(identifier: str, text: str, **overrides: str) -> dict:
     record["text"] = text
     record.update(overrides)
     return record
+
+
+def generated(identifier: str, text: str) -> dict:
+    """생성 학습 문장 한 줄. 실제 유해 문장 대신 자리표시자만 쓴다."""
+    return {"id": identifier, "text": text}
 
 
 def labeled(identifier: str, label: str) -> LabeledText:
@@ -76,6 +83,20 @@ def write_eval_set(tmp_path: Path, text: str) -> Path:
     """문장 하나짜리 개발셋 파일."""
     record = {"id": "d1", "split": "dev", "label": "allow", "category": "long_normal", "family": "x", "author": "a", "reviewer": "b", "text": text}
     return write_jsonl(tmp_path / "dev.jsonl", [record])
+
+
+def eval_record(identifier: str, text: str, split: str = "holdout") -> dict:
+    """봉인 제외 테스트용 평가 문장 한 줄. 원문 유출 검사를 위해 별도 id를 쓴다."""
+    return {
+        "id": identifier,
+        "split": split,
+        "label": "allow",
+        "category": "long_normal",
+        "family": identifier,
+        "author": "model-a",
+        "reviewer": "model-b",
+        "text": text,
+    }
 
 
 def test_blocks_overlap_with_evaluation_sets(tmp_path: Path) -> None:
@@ -145,6 +166,24 @@ def test_hard_negative_rows_repeat_with_unique_ids(tmp_path: Path) -> None:
     assert hard_negative_rows(items, 0) == []
 
 
+@pytest.mark.parametrize(
+    "records",
+    [
+        [generated("bad id", "노출되면 안 되는 자리표시자")],
+        [generated("valid-id", "")],
+        [generated("same-id", "첫 자리표시자"), generated("same-id", "둘째 자리표시자")],
+    ],
+)
+def test_rejects_invalid_generated_lines_without_text(tmp_path: Path, records: list[dict]) -> None:
+    """생성 파일의 id·빈 text·중복 id 오류는 위치와 해결책만 보이고 문장은 보이지 않는다."""
+    path = write_jsonl(tmp_path / "generated.jsonl", records)
+    with pytest.raises(DatasetFormatError) as raised:
+        load_generated_examples(path)
+    message = str(raised.value)
+    assert "generated.jsonl:" in message and any(instruction in message for instruction in ("고치", "고유", "넣으세요"))
+    assert all(record["text"] not in message for record in records if record["text"])
+
+
 def test_build_training_rows_appends_hard_negatives(tmp_path: Path) -> None:
     """K-HATERS(유해를 줄인 것) 뒤에 허용 문장이 붙는다."""
     items = load_hard_negatives(write_jsonl(tmp_path / "hn.jsonl", [hard_negative("1", "가나다")]))
@@ -167,9 +206,138 @@ def test_cli_writes_training_file_and_manifest(tmp_path: Path, khaters_records: 
     manifest = json.loads(manifest_path_for(out).read_text(encoding="utf-8"))
     assert manifest["settings"]["extra_repeat"] == 2 and manifest["counts"]["normal"] + manifest["counts"]["toxic"] == len(records)
     assert manifest["excluded_khaters_overlaps"] == [] and "version" not in manifest["inputs"]["hard_negatives"]
+    assert not ({"generated_harmful", "generated_allow"} & manifest["inputs"].keys())
+    assert "excluded_generated_overlaps" not in manifest and "sealed_holdout" not in manifest
     assert "크앙" not in json.dumps(manifest, ensure_ascii=False)
     with pytest.raises(OutputExistsError):
         main(arguments, environment={})
+
+
+def test_cli_adds_generated_rows_repeats_and_provenance(tmp_path: Path, khaters_records: list[dict]) -> None:
+    """생성 유해·허용 문장은 올바른 라벨과 고유 id로 반복되고, 입력별 출처와 반복 횟수가 남는다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", khaters_records)
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("1", "하드 네거티브 자리표시자")])
+    harmful = write_jsonl(tmp_path / "harmful.jsonl", [generated("harm-1", "유해 자리표시자 알파")])
+    allow = write_jsonl(tmp_path / "allow.jsonl", [generated("allow-1", "허용 자리표시자 베타")])
+    out = tmp_path / "generated-mix.jsonl"
+    main(
+        [
+            "--out",
+            str(out),
+            "--khaters-train",
+            str(khaters),
+            "--hard-negatives",
+            str(hard),
+            "--extra-repeat",
+            "0",
+            "--generated-harmful",
+            str(harmful),
+            "--generated-harmful-repeat",
+            "2",
+            "--generated-allow",
+            str(allow),
+            "--generated-allow-repeat",
+            "3",
+        ],
+        environment={},
+    )
+    records = {record.record_id: record for record in load_labeled_texts(out)}
+    assert [records[f"gh:harm-1-{copy}"].original_label for copy in range(2)] == ["offensive", "offensive"]
+    assert [records[f"ga:allow-1-{copy}"].original_label for copy in range(3)] == ["normal", "normal", "normal"]
+    manifest = json.loads(manifest_path_for(out).read_text(encoding="utf-8"))
+    assert manifest["inputs"]["generated_harmful"] == describe_file_provenance(harmful) | {"repeat": 2}
+    assert manifest["inputs"]["generated_allow"] == describe_file_provenance(allow) | {"repeat": 3}
+    assert manifest["counts"] == {"normal": 5, "toxic": 6}
+
+
+def test_cli_excludes_generated_evaluation_overlap_by_id(tmp_path: Path, khaters_records: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    """공개 평가 참조와 겹친 생성 줄은 학습에서 빠지고 입력 id만 매니페스트에 남는다."""
+    overlap_text = "평가 겹침 자리표시자 감마"
+    references = load_evaluation_references([write_eval_set(tmp_path, overlap_text)])
+    monkeypatch.setattr("zg_stage1.training_mix.load_evaluation_references", lambda: references)
+    khaters = write_jsonl(tmp_path / "train.jsonl", khaters_records)
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("1", "하드 네거티브 자리표시자")])
+    harmful = write_jsonl(tmp_path / "harmful.jsonl", [generated("overlap-id", overlap_text), generated("kept-id", "남는 생성 자리표시자")])
+    out = tmp_path / "overlap-mix.jsonl"
+    main(
+        [
+            "--out",
+            str(out),
+            "--khaters-train",
+            str(khaters),
+            "--hard-negatives",
+            str(hard),
+            "--extra-repeat",
+            "0",
+            "--generated-harmful",
+            str(harmful),
+        ],
+        environment={},
+    )
+    identifiers = {record.record_id for record in load_labeled_texts(out)}
+    manifest = json.loads(manifest_path_for(out).read_text(encoding="utf-8"))
+    assert "gh:overlap-id-0" not in identifiers and "gh:kept-id-0" in identifiers
+    assert manifest["excluded_generated_overlaps"] == ["overlap-id"]
+
+
+def test_cli_sealed_holdout_excludes_every_source_without_leaking_holdout(
+    tmp_path: Path, khaters_records: list[dict], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """봉인 겹침은 모든 출처에서 빠지되, 출력에는 학습 id와 출처별 건수만 남는다."""
+    texts = [f"봉인 원문 자리표시자 {suffix}" for suffix in ("알파", "베타", "감마", "델타")]
+    holdout_ids = [f"private-holdout-{index}" for index in range(4)]
+    sealed = write_jsonl(tmp_path / "sealed.jsonl", [eval_record(identifier, text) for identifier, text in zip(holdout_ids, texts, strict=True)])
+    khaters_records[0]["id"] = 101
+    khaters_records[0]["text"] = texts[0]
+    khaters = write_jsonl(tmp_path / "train.jsonl", khaters_records)
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("sealed-hn", texts[1]), hard_negative("kept-hn", "남는 하드 자리표시자")])
+    harmful = write_jsonl(tmp_path / "harmful.jsonl", [generated("sealed-gh", texts[2])])
+    allow = write_jsonl(tmp_path / "allow.jsonl", [generated("sealed-ga", texts[3])])
+    out = tmp_path / "sealed-mix.jsonl"
+    main(
+        [
+            "--out",
+            str(out),
+            "--khaters-train",
+            str(khaters),
+            "--hard-negatives",
+            str(hard),
+            "--extra-repeat",
+            "1",
+            "--generated-harmful",
+            str(harmful),
+            "--generated-allow",
+            str(allow),
+            "--sealed-holdout",
+            str(sealed),
+        ],
+        environment={},
+    )
+    manifest_text = manifest_path_for(out).read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    captured = capsys.readouterr().out
+    assert manifest["sealed_holdout"] == {
+        "file_name": sealed.name,
+        "sha256": describe_file_provenance(sealed)["sha256"],
+        "excluded_rows": 4,
+        "excluded_by_source": {"khaters": 1, "hard_negative": 1, "generated_harmful": 1, "generated_allow": 1},
+        "excluded_training_ids": ["101", "hn-sealed-hn-0", "gh:sealed-gh-0", "ga:sealed-ga-0"],
+    }
+    assert all(secret not in manifest_text and secret not in captured for secret in holdout_ids + texts)
+    assert "봉인 보류셋과 겹쳐 뺀 4줄" in captured
+    assert all(identifier not in {record.record_id for record in load_labeled_texts(out)} for identifier in manifest["sealed_holdout"]["excluded_training_ids"])
+
+
+def test_sealed_holdout_format_error_does_not_leak_holdout_data(tmp_path: Path) -> None:
+    """봉인 파일 형식 오류에도 내부 id와 문장을 내보내지 않고 원인·수정 방향만 알린다."""
+    secret_id = "private-holdout-duplicate"
+    secret_texts = ["봉인 오류 자리표시자 하나", "봉인 오류 자리표시자 둘"]
+    path = write_jsonl(tmp_path / "sealed.jsonl", [eval_record(secret_id, text) for text in secret_texts])
+    with pytest.raises(DatasetFormatError) as raised:
+        load_sealed_holdout_index(path)
+    message = str(raised.value)
+    assert "형식이 올바르지 않습니다" in message and "확인하세요" in message
+    assert secret_id not in message and all(text not in message for text in secret_texts)
 
 
 def test_cli_uses_committed_version_by_default(tmp_path: Path, khaters_records: list[dict]) -> None:

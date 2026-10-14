@@ -36,9 +36,18 @@ v2 파일은 v1(앞 2,934줄, `hn-0001`~`hn-2934`) 뒤에 734줄을 덧붙인 �
 `zg_stage1.training_mix`가 K-HATERS train과 이 파일을 섞어 학습 파일을 만든다. 학습 파일과 manifest(`<학습 파일 이름>.manifest.json`)는 저장소 밖에 쓴다.
 - 만들 때마다 평가셋(개발·보류)·72문장과 겹치는지 다시 확인한다. 이 파일의 문장이 겹치면 오류를 낸다. K-HATERS 줄이 겹치면 빼고 manifest에 id만 남긴다. 공식 train_v2에서는 짧은 인사·감사 문장 25줄이 빠진다(평가 문장 9개와 같은 문장).
 - 기본값은 후보 설정(v1, K-HATERS 유해 비율 그대로, 3번 반복, 시드 20261014)이다.
+- M2 2차 생성 파일은 한 줄에 `{"id": "안전한-외부-id", "text": "자리표시자 문장"}`를 쓴다. `--generated-harmful`은 `offensive`, `--generated-allow`는 `normal`로 들어가며 각각 반복 횟수를 정할 수 있다. 파일 출처와 반복 횟수, 공개 평가 겹침으로 빠진 생성 id는 manifest에 남는다.
+- `--sealed-holdout`은 모든 학습 행과 반복본을 만든 뒤 chat eval 형식의 봉인 보류셋으로 단방향 겹침을 검사한다. manifest에는 봉인 파일 이름·sha256, 출처별 제외 건수, 제외한 학습 id만 남고 봉인 id·문장·유사도는 남지 않는다.
 
 ```bash
 uv run python -m zg_stage1.training_mix --out "$ZG_DATA_DIR/ml/data/mix/train-hn-v1-r3.jsonl"
+uv run python -m zg_stage1.training_mix \
+  --out "$ZG_DATA_DIR/ml/data/mix/train-m2r2.jsonl" \
+  --generated-harmful "$ZG_DATA_DIR/ml/data/m2r2/generated-harmful.jsonl" \
+  --generated-harmful-repeat 1 \
+  --generated-allow "$ZG_DATA_DIR/ml/data/m2r2/generated-allow.jsonl" \
+  --generated-allow-repeat 2 \
+  --sealed-holdout "$ZG_DATA_DIR/ml/data/m2r2/sealed/chat-holdout-v3.jsonl"
 uv run python -m zg_stage1.train --train-file "$ZG_DATA_DIR/ml/data/mix/train-hn-v1-r3.jsonl" --epochs 2
 ```
 
