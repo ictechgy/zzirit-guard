@@ -133,6 +133,7 @@ export const MIGRATIONS: readonly string[] = [
   // 메시지 숨김 장부: 같은 메시지에 숨김이 두 번 나가지 않게 숨김 결과(성공·결과 모름)를 메시지마다 남긴다(원문 없음).
   // sending은 보내기 직전 표시다(결과를 적기 전에 죽거나 DB가 실패하면 결과 모름으로 본다).
   // 이미 숨긴 메시지를 옮겨 적는다: 지금 숨김 상태인 판정과, 숨김 성공 감사 기록이 가리키는 판정(숨긴 뒤 오판·제한으로 바뀐 것).
+  // 기록 시각은 알 수 있는 가장 늦은 시각(숨긴 감사 기록의 시각, 없으면 판정 시각)이다. 보관 기한이 숨긴 때부터 세어지게 한다.
   // 옮기지 않으면 올린 직후 치지직이 같은 메시지를 다시 보낼 때 되돌릴 수 없는 숨김이 또 나간다.
   `
   ALTER TABLE minute_stat ADD COLUMN ai_unchecked INTEGER NOT NULL DEFAULT 0;
@@ -151,7 +152,7 @@ export const MIGRATIONS: readonly string[] = [
     SELECT chat_channel_id, sender_channel_id, message_time, 'hidden', MAX(created_at) FROM (
       SELECT chat_channel_id, sender_channel_id, message_time, created_at FROM verdict WHERE status = 'hidden'
       UNION ALL
-      SELECT verdict.chat_channel_id, verdict.sender_channel_id, verdict.message_time, verdict.created_at
+      SELECT verdict.chat_channel_id, verdict.sender_channel_id, verdict.message_time, audit_log.created_at
         FROM audit_log JOIN verdict ON verdict.id = audit_log.verdict_id
         WHERE audit_log.action = 'hide' AND audit_log.result = 'ok'
     ) GROUP BY chat_channel_id, sender_channel_id, message_time;

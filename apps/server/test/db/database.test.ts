@@ -70,14 +70,14 @@ describe("openDatabase", () => {
     const failed = Number(insertVerdict.run(3, "c", "pending", 400).lastInsertRowid);
     insertVerdict.run(4, "d", "false_positive", 500);
     const insertAudit = database.prepare(
-      "INSERT INTO audit_log (channel_id, actor_type, action, verdict_id, result, created_at) VALUES ('c1', 'manager', 'hide', ?, ?, 0)",
+      "INSERT INTO audit_log (channel_id, actor_type, action, verdict_id, result, created_at) VALUES ('c1', 'manager', 'hide', ?, ?, ?)",
     );
-    insertAudit.run(restricted, "ok");
-    insertAudit.run(failed, "error");
+    insertAudit.run(restricted, "ok", 900);
+    insertAudit.run(failed, "error", 950);
     runMigrations(database);
     expect(database.prepare("SELECT sender_channel_id, message_time, state, updated_at FROM message_hide ORDER BY sender_channel_id").all()).toEqual([
       { sender_channel_id: "a", message_time: 1, state: "hidden", updated_at: 200 },
-      { sender_channel_id: "b", message_time: 2, state: "hidden", updated_at: 300 },
+      { sender_channel_id: "b", message_time: 2, state: "hidden", updated_at: 900 },
     ]);
   });
 
