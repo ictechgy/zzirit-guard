@@ -131,6 +131,9 @@ class WorkerHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServe
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_CONNECTIONS)
         self._active_lock = threading.Lock()
         self._active_connections = 0
+        # 처리 스레드 시작·기록과 닫기를 한 잠금으로 묶는다. 닫는 사이에 막 시작한 스레드를 놓치지 않게 하기 위해서다.
+        self._lifecycle_lock = threading.Lock()
+        self._closing = False
         self._handler_threads: list[threading.Thread] = []
         previous_umask = os.umask(0o177)  # 바인딩 순간부터 0600이 되게 한다(만든 뒤 chmod하면 그 사이가 빈다)
         try:
@@ -145,38 +148,45 @@ class WorkerHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServe
             return self._active_connections
 
     def process_request(self, request: socket.socket, client_address: object) -> None:  # type: ignore[override]
-        """자리가 있으면 처리 스레드를 만들고, 없으면 바로 503을 쓰고 닫는다.
-
-        표준 구현은 스레드를 시작하기 전에 기록해, 시작이 실패하면 멈출 때 시작하지 않은 스레드를 기다리다 오류가 난다.
-        그래서 시작에 성공한 스레드만 기록한다.
-        """
+        """자리가 있으면 처리 스레드를 만들고, 없으면 바로 503을 쓰고 닫는다."""
         if not self._slots.acquire(blocking=False):
             reply_busy_and_close(request)
             return
         self._change_active(1)
-        # 처리 스레드는 데몬이 아니고, 멈출 때 server_close가 기다린다. 처리 중인 요청이 잘리지 않게 하기 위해서다.
-        # 스레드 하나는 요청 마감(5초)·추론 대기(5초)·응답 쓰기(2초)로 끝이 정해져 있어 종료를 오래 막지 않는다.
+        self._start_handler(request, client_address)
+
+    def _start_handler(self, request: socket.socket, client_address: object) -> None:
+        """처리 스레드를 시작하고 기록한다. 닫는 중이면 연결을 닫는다.
+
+        표준 구현은 스레드를 시작하기 전에 기록해, 시작이 실패하면 멈출 때 시작하지 않은 스레드를 기다리다 오류가 난다.
+        그래서 시작에 성공한 스레드만, 닫기와 같은 잠금 안에서 기록한다(닫는 사이에 막 시작한 스레드를 놓치지 않게).
+        처리 스레드는 데몬이 아니다. 스레드 하나는 요청 마감(5초)·추론 대기(5초)·응답 쓰기(2초)로 끝이 정해져 있다.
+        """
         thread = threading.Thread(target=self.process_request_thread, args=(request, client_address), name="handler", daemon=False)
-        try:
-            thread.start()
-        except BaseException:
-            self._release_slot()
-            self.shutdown_request(request)
-            raise
-        self._remember_handler(thread)
+        with self._lifecycle_lock:
+            if self._closing:
+                self._abandon_request(request)
+                return
+            try:
+                thread.start()
+            except BaseException:
+                self._abandon_request(request)
+                raise
+            self._handler_threads = [known for known in self._handler_threads if known.is_alive()] + [thread]
 
     def server_close(self) -> None:
-        """소켓을 닫고 처리 중인 요청이 끝나기를 기다린다."""
-        super().server_close()
-        with self._active_lock:
+        """새 처리 스레드를 막고, 소켓을 닫은 뒤 처리 중인 요청이 끝나기를 기다린다."""
+        with self._lifecycle_lock:
+            self._closing = True
             threads = list(self._handler_threads)
+        super().server_close()
         for thread in threads:
             thread.join()
 
-    def _remember_handler(self, thread: threading.Thread) -> None:
-        """시작한 처리 스레드를 기록하고, 끝난 것은 지운다(목록이 끝없이 늘지 않게)."""
-        with self._active_lock:
-            self._handler_threads = [known for known in self._handler_threads if known.is_alive()] + [thread]
+    def _abandon_request(self, request: socket.socket) -> None:
+        """처리하지 못하는 연결의 자리를 돌려주고 닫는다."""
+        self._release_slot()
+        self.shutdown_request(request)
 
     def process_request_thread(self, request: socket.socket, client_address: object) -> None:  # type: ignore[override]
         """처리 스레드 본체. 끝나면 자리를 돌려준다."""
