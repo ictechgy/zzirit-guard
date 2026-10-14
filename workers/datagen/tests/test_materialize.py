@@ -18,10 +18,11 @@ def write_jsonl(path: Path, rows: list[dict[str, object]]) -> Path:
     return path
 
 
-def merged_directory(root: Path, harmful: list[dict[str, object]], allow: list[dict[str, object]]) -> Path:
-    """labels merge 출력과 같은 모양의 디렉터리."""
-    write_jsonl(root / "accepted-harmful.jsonl", harmful)
-    write_jsonl(root / "accepted-allow.jsonl", allow)
+def run_directory(root: Path, kept: list[dict[str, object]], harmful: list[dict[str, object]], allow: list[dict[str, object]]) -> Path:
+    """한 실행 디렉터리: kept 파일과 labels merge 출력(merged/)."""
+    write_jsonl(root / "kept-x.jsonl", kept)
+    write_jsonl(root / "merged" / "accepted-harmful.jsonl", harmful)
+    write_jsonl(root / "merged" / "accepted-allow.jsonl", allow)
     return root
 
 
@@ -30,39 +31,34 @@ def read_rows(path: Path) -> list[dict[str, str]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def test_joins_text_and_keeps_harmful_over_near_duplicate_allow(tmp_path: Path) -> None:
-    """유해를 먼저 받아, 거의 같은 허용 문장은 버린다(같은 모양이 양쪽 라벨로 들어가 지름길이 되지 않게)."""
-    kept = write_jsonl(
-        tmp_path / "kept.jsonl",
-        [
-            {"id": "a", "text": "자리표시자 문장 하나 둘 셋"},
-            {"id": "b", "text": "자리표시자 문장 하나 둘 셋!"},
-            {"id": "c", "text": "전혀 다른 중립 문장"},
-        ],
-    )
-    merged = merged_directory(
-        tmp_path / "m1", [{"id": "a", "category": "threat"}], [{"id": "b", "category": "long_normal"}, {"id": "c", "category": "short_normal"}]
-    )
-    report = run_materialize([merged], [kept], tmp_path / "harmful.jsonl", tmp_path / "allow.jsonl")
-    assert read_rows(tmp_path / "harmful.jsonl") == [{"id": "a", "text": "자리표시자 문장 하나 둘 셋"}]
-    assert read_rows(tmp_path / "allow.jsonl") == [{"id": "c", "text": "전혀 다른 중립 문장"}]
+def test_joins_text_prefixes_run_and_keeps_harmful_over_near_duplicate_allow(tmp_path: Path) -> None:
+    """유해를 먼저 받아 거의 같은 허용은 버리고, id 앞에 실행 이름을 붙여 실행 사이 id 충돌을 막는다."""
+    kept = [
+        {"id": "a", "text": "자리표시자 문장 하나 둘 셋"},
+        {"id": "b", "text": "자리표시자 문장 하나 둘 셋!"},
+        {"id": "c", "text": "전혀 다른 중립 문장"},
+    ]
+    run_one = run_directory(tmp_path / "pilot", kept, [{"id": "a", "category": "threat"}], [{"id": "b", "category": "long_normal"}])
+    run_two = run_directory(tmp_path / "full", kept, [], [{"id": "c", "category": "short_normal"}])
+    report = run_materialize([run_one, run_two], tmp_path / "harmful.jsonl", tmp_path / "allow.jsonl")
+    assert read_rows(tmp_path / "harmful.jsonl") == [{"id": "pilot:a", "text": "자리표시자 문장 하나 둘 셋"}]
+    assert read_rows(tmp_path / "allow.jsonl") == [{"id": "full:c", "text": "전혀 다른 중립 문장"}]
     assert report["allow"] == {"rows": 1, "by_category": {"short_normal": 1}, "near_duplicates": 1}
     assert stat.S_IMODE((tmp_path / "harmful.jsonl").stat().st_mode) == 0o600
     assert "자리표시자" not in json.dumps(report, ensure_ascii=False)
 
 
-def test_missing_text_duplicate_ids_and_existing_outputs_are_errors(tmp_path: Path) -> None:
-    """원문 없는 id, 입력 사이 같은 id, 이미 있는 출력은 모두 오류다."""
-    kept = write_jsonl(tmp_path / "kept.jsonl", [{"id": "a", "text": "중립"}])
-    merged = merged_directory(tmp_path / "m1", [{"id": "zz", "category": "threat"}], [])
+def test_missing_text_same_run_names_and_existing_outputs_are_errors(tmp_path: Path) -> None:
+    """원문 없는 id, 이름이 같은 실행 두 개, 이미 있는 출력은 모두 오류다."""
+    run = run_directory(tmp_path / "r1", [{"id": "a", "text": "중립"}], [{"id": "zz", "category": "threat"}], [])
     with pytest.raises(ValueError, match="원문이 없습니다"):
-        run_materialize([merged], [kept], tmp_path / "h.jsonl", tmp_path / "a.jsonl")
-    twice = write_jsonl(tmp_path / "kept2.jsonl", [{"id": "a", "text": "중립"}])
-    with pytest.raises(ValueError, match="다른 입력에도"):
-        run_materialize([merged], [kept, twice], tmp_path / "h2.jsonl", tmp_path / "a2.jsonl")
+        run_materialize([run], tmp_path / "h.jsonl", tmp_path / "a.jsonl")
+    other = run_directory(tmp_path / "nested" / "r1", [{"id": "a", "text": "중립"}], [], [])
+    with pytest.raises(ValueError, match="이름이 같은"):
+        run_materialize([other, other], tmp_path / "h2.jsonl", tmp_path / "a2.jsonl")
     (tmp_path / "h3.jsonl").write_text("", encoding="utf-8")
     with pytest.raises(FileExistsError):
-        run_materialize([merged], [kept], tmp_path / "h3.jsonl", tmp_path / "a3.jsonl")
+        run_materialize([other], tmp_path / "h3.jsonl", tmp_path / "a3.jsonl")
 
 
 def test_ngram_similarity_uses_matching_normalization() -> None:
