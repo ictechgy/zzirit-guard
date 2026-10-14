@@ -1,95 +1,191 @@
 # 로드맵 2단계(AI) 구현 계획: 1차·2차 워커와 서버 연결
 
 > **실행 방식:** 이 세션이 직접 구현한다(Native). PR마다 Codex 리뷰를 받는다. 단계는 체크박스(`- [ ]`)로 관리한다.
+> **개정:** 2026-10-14 Codex 설계 리뷰(12건)를 반영해 통신 방식(유닉스 소켓), 수명 주기, 메시지 단위 정리, 캐시, 집계를 다시 정했다.
 
-**목표:** 규칙이 판정하지 않은 채팅을 1차(KcELECTRA)·2차(kanana) 워커로 보내, AI 후보·'도움 필요'를 매니저 화면에 올린다. AI는 자동 숨김을 하지 않는다.
+**목표:** 규칙이 판정하지 않은 채팅을 1차(KcELECTRA)·2차(kanana) 워커로 보내, AI 후보와 '도움 필요'를 매니저 화면에 올린다. AI는 자동 숨김을 하지 않는다.
 
-**구조:** 워커 두 개가 127.0.0.1에서 같은 `/classify` 계약으로 응답한다. 서버는 동기 규칙 판정 뒤에 비동기 AI 단계를 둔다. 1차는 묶음으로 보내고, 2차는 우선순위 대기열에서 하나씩 보낸다. 결과가 기준을 넘으면 판정 기록을 새로 만들어 알린다.
+**구조:** 워커 두 개가 데이터 디렉터리 아래 0700 디렉터리의 유닉스 소켓에서 같은 HTTP `/classify` 계약으로 응답한다. 서버는 동기 규칙 판정 뒤에 비동기 AI 단계를 둔다.
+- 1차는 묶음으로 보낸다.
+- 키워드 경로 메시지는 1차를 거치지 않고 2차 대기열로 바로 간다.
+- 2차는 우선순위 대기열에서 하나씩 보낸다.
+- 결과가 기준을 넘으면, 그 메시지에 아직 판정 기록이 없을 때만 기록을 만들어 알린다.
 
-**기술:** Python 3.12(1차는 PyTorch CPU, 2차는 mlx-lm GPU)와 표준 라이브러리 HTTP 서버, Node 22 + TypeScript(Fastify·better-sqlite3), React PWA, launchd.
+**기술:** Python 3.12(1차는 PyTorch CPU, 2차는 mlx-lm GPU)와 표준 라이브러리 HTTP 서버, Node 22 + TypeScript(Fastify·better-sqlite3, `node:http`의 `socketPath`), React PWA, launchd.
 
-**스펙:** [설계 스펙](../specs/2026-10-11-zzirit-guard-design.md) §4·§5.2 ④⑤·§5.3·§5.4·§8·§10, [모델 보강 계획](../../ml/2026-10-14-model-strengthening-plan.md) M3
+**스펙:** [설계 스펙](../specs/2026-10-11-zzirit-guard-design.md) §4·§5·§6·§8·§9·§10·§11, [모델 보강 계획](../../ml/2026-10-14-model-strengthening-plan.md) M3
 
 ## 전역 제약
 
-- 워커는 127.0.0.1에만 바인딩한다. 서버가 쓰는 워커 주소도 루프백(127.0.0.1·localhost·[::1])의 http만 받는다(§8).
-- 요청마다 비밀값 헤더를 붙인다. 워커가 실행할 때 만든다(§5.3).
-- 채팅 원문은 로그에 남기지 않는다. 식별자, 건수, 지연만 남긴다(§8).
-- AI 판정은 절대 `auto_hide`가 되지 않는다. 유해 확률이 0.5 이상이면 `candidate`, 0.99 이상이면 '확실' 표시, 가장 높은 범주가 S6이면 `needs_care`다(§5.2 ⑤).
-- 2차 대기열은 300건까지 받고, 15초가 지난 항목은 버린다. 우선순위는 키워드 경로, 첫 채팅 사용자, 1차 점수 순이다. 버린 건수는 "AI 미검사"로 센다(§5.4).
+- 채팅 원문은 로그에 남기지 않는다. 식별자, 건수, 지연만 남긴다. 오류 메시지에도 요청·응답 본문을 넣지 않는다(§8).
+- AI 판정은 절대 `auto_hide`가 되지 않는다(§5.2 ⑤).
+  - 유해 확률이 `candidate_threshold`(기본 0.5) 이상이면 `candidate`, `sure_threshold`(기본 0.99) 이상이면 '확실' 표시다.
+  - 가장 높은 범주가 S6이면 `needs_care`다.
+- 저장은 `candidate`·`needs_care`가 된 AI 결과만 한다. 1차 점수와 기준 미만 결과는 메모리 캐시와 건수로만 남긴다(§9).
+- 2차 대기열은 300건까지 받고, 15초가 지난 항목은 버린다(§5.4).
 - 워커 응답이 2초를 넘으면 실패로 본다. 규칙은 계속 돌고, 화면에 "AI 중지"를 띄운다(§10).
-- 같은 정규화 문장의 AI 판정은 10분 동안, 최대 1만 건까지 재사용한다(§5.2 ③).
 - 가중치·학습 데이터·실채팅은 저장소에 넣지 않는다. 모델 경로는 인자나 환경 변수로만 받는다.
-- 배포(launchd 설치, 키체인)는 사용자가 지시할 때만 한다. 설치 스크립트는 dry-run으로만 확인한다.
+- 배포(launchd 설치)는 사용자가 지시할 때만 한다. 설치 스크립트는 dry-run과 `plutil -lint`로만 확인한다.
+
+## 위협 모델
+
+- 맥 미니에서 서버와 워커는 같은 사용자 계정으로 돈다.
+- **같은 사용자의 다른 프로세스는 범위 밖이다.** 그 프로세스는 이미 DB·키체인·데이터 디렉터리를 읽을 수 있다.
+- **다른 사용자의 프로세스는 범위 안이다.** 이 프로세스가 다음 일을 못 하게 한다.
+  - 워커에 채팅을 보내 부르기.
+  - 워커가 꺼진 사이에 같은 주소로 기다렸다가 서버가 보내는 채팅 원문을 받기.
+  - 가짜 판정을 돌려주기.
+- 그래서 TCP 포트(누구나 1024 이상 포트에 바인딩할 수 있다) 대신, 이 사용자만 들어갈 수 있는 0700 디렉터리의 유닉스 소켓을 쓴다. 스펙 §5.3의 비밀값 헤더도 같은 목적이었다. 같은 사용자는 비밀값 파일을 읽을 수 있으므로, 디렉터리 권한이 같은 보호를 더 단순하게 준다. 비밀값 헤더는 두지 않는다(스펙을 고친다).
 
 ## 판단(rulings)
 
-- **R1. 비밀값 전달.** 워커는 시작할 때 `secrets.token_hex(32)`로 비밀값을 만든다. 그 값을 `$ZG_DATA_DIR/run/<워커 이름>.secret`(디렉터리 0700, 파일 0600)에 원자적으로 쓴다. 서버는 이 파일을 읽어 캐시한다. 응답이 401이거나 파일이 없으면 한 번 다시 읽는다. 이렇게 하면 프로세스끼리 순서를 맞출 필요가 없고, 워커를 다시 띄울 때마다 비밀값이 바뀐다.
-  - 대안이었던 "설치 때 한 번 만든 고정값"은 스펙의 "실행할 때 만든"과 맞지 않아 버렸다.
-- **R2. HTTP 서버.** 표준 라이브러리 `http.server`를 쓴다. 웹 프레임워크 의존성을 늘리지 않기 위해서다(공급망).
-  - 1차는 `ThreadingHTTPServer`에 추론 잠금을 둔다. 상태 확인이 추론 뒤에 줄 서지 않게 하기 위해서다.
-  - 2차는 단일 스레드 `HTTPServer`다. mlx 모델과 접두 KV 캐시를 여러 스레드가 함께 쓰면 안 되기 때문이다.
-- **R3. 워커 계약.**
-  - `POST /classify`. 본문은 `{items:[{id, text}]}`이다. id는 1~64자, text는 1~1,000자, 항목 수는 1차 1~32건, 2차 1~4건이다. 본문은 64KB까지 받는다.
-  - 응답은 `{model, items:[{id, unsafe_probability, category}]}`이고 요청과 같은 순서다. 1차의 `category`는 null이고, 2차는 유해 범주 중 확률이 가장 높은 코드("S1"~"S7")다.
-  - `GET /health`는 `{model, ready}`를 준다. 두 경로 모두 비밀값을 요구한다.
-  - 상태 코드: 비밀값이 틀리면 401(본문에 이유 없음), 형식 오류는 400, 없는 경로는 404, 메서드 오류는 405, 너무 큰 본문은 413이다.
-  - 비밀값은 `hmac.compare_digest`로 비교한다.
-- **R4. AI 단계에 들어가는 메시지.** 규칙이 판정하지 않았고(`pass`·`none`) 가벼운 반응이 아닌 메시지다.
-  - `rule:allow`(채널 허용어)는 들어가지 않는다. 스펙이 AI보다 앞서 통과시키기 때문이다.
-  - 중복 문장은 AI 판정 캐시에 결과가 있으면 그 결과를 쓰고, 없으면(아직 처리 중이거나 버려짐) 넘긴다. 처리 중인 같은 문장을 기다리는 기능은 두지 않는다. 같은 문장을 여러 사람이 퍼뜨리면 떼도배 규칙이 맡는다.
-- **R5. 요주의 사용자 우선순위.** 지금 파이프라인은 요주의 사용자를 규칙(`rule:watch_user`)에서 후보로 판정하므로, 그 메시지는 AI 단계에 오지 않는다. 그래서 대기열 우선순위에서 이 항목은 빼고, 키워드 경로 > 첫 채팅 사용자 > 1차 점수 > 먼저 온 것 순으로 한다.
-  - 대가: 요주의 사용자의 메시지는 AI 범주·확률 없이 규칙 후보로만 올라간다. 스펙 §5.4의 우선순위 문구와 다르므로 스펙에 적는다.
-- **R6. 첫 채팅 사용자.** 채팅 연결이 새로 이어질 때(`markConnected`) 비우는, 보낸 사람 채널 id 집합으로 판단한다. 최대 20만 명까지 담고, 넘으면 비운다. 넘쳤을 때 "처음"으로 잘못 보는 것은 우선순위가 잠깐 오르는 정도라 받아들인다.
-- **R7. 1차 묶음.** 첫 항목이 들어온 뒤 25ms 안에 모이는 항목, 최대 16건을 한 번에 보낸다. 요청은 한 번에 하나만 보낸다.
-  - 기다리는 항목은 512건까지 둔다. 넘치면 그 메시지는 AI 미검사로 센다.
-  - 1차가 실패하면 그 묶음 전체가 AI 미검사이고, 1차 상태가 `down`이 된다.
-- **R8. 2차 소비.** 한 번에 1건씩, 직렬로 보낸다. 대기열이 꽉 차면 새 항목과 대기열의 가장 낮은 항목 중 낮은 쪽을 버린다.
-- **R9. AI 미검사 집계.** 분당 통계 `stage2_dropped`는 "AI 미검사"를 뜻하고, 다음을 모두 센다.
-  - 2차 대기열 넘침과 15초 경과.
-  - 1차·2차 워커 실패와 시간 초과.
-  - 1차 대기 넘침.
-
-  AI를 끈 상태(`ZG_AI_ENABLED` 미설정)는 세지 않는다.
-- **R10. 임계값.** 채널 설정 `stage1_threshold`(기본 0.05), `candidate_threshold`(0.5), `sure_threshold`(0.99)를 서버가 읽는다. 매니저 화면에서 1차 임계값만 바꿀 수 있게 한다.
-  - 1차 임계값은 모델마다 맞는 값이 다르다. 재학습한 모델은 0.003~0.03 근처다([재학습 결과](../../ml/2026-10-14-stage1-retrain-results.md)). 그래서 운영자가 정한다.
-  - 나머지 둘은 스펙 값으로 고정한다. 바꿀 근거(섀도 데이터)가 아직 없다.
-- **R11. 판정 기록.** AI 결과는 새 판정 기록이 된다. 이유는 `ai:S2`처럼 쓰고, `unsafe_probability`와 `category`를 저장해 DTO까지 싣는다. '확실'은 서버가 계산해 DTO의 `sure`로 보낸다.
-  - 실시간 채팅 줄은 이미 `pass`로 나갔으므로 바꾸지 않는다. 후보 목록에만 올라간다.
-  - `needs_care`도 분당 `candidates`로 센다. 따로 칸을 두지 않는다.
-- **R12. 켜고 끄기.** `ZG_AI_ENABLED=1`일 때만 AI 단계를 만든다. 기본은 꺼짐이라, 워커를 설치하지 않은 지금 배포는 그대로 돈다.
-- **R13. 워커 스레드.** 1차 워커의 PyTorch 스레드 수는 `--threads`(기본 6)로 정한다. 맥 미니는 12코어이고, 서버(Node)와 2차(GPU) 몫을 남긴다.
+- **R1. 통신.** 워커는 `$ZG_DATA_DIR/run/`(0700)의 `stage1.sock`·`stage2.sock`에서 HTTP/1.1로 듣는다.
+  - **워커 시작 순서**
+    1. 디렉터리를 0700으로 만들거나 확인한다.
+    2. `stageN.lock`에 `flock`을 잡는다. 이미 잡혀 있으면 다른 인스턴스가 살아 있으므로 오류로 끝낸다.
+    3. 모델을 다 불러오고 첫 추론으로 데우기를 한다.
+    4. 남은 소켓 파일을 지우고 바인딩한다. 소켓은 0600이다.
+    - 이렇게 하면 겹쳐 띄운 워커가 살아 있는 워커의 소켓을 빼앗지 못하고, 준비가 끝나기 전에는 소켓이 없다.
+  - **서버가 연결하기 전 확인:** `lstat`으로 디렉터리가 심볼릭 링크가 아니고, 소유자가 서버 프로세스의 uid이며, 권한이 0700인지 본다. 소켓 파일도 소켓 형식이고 소유자가 같은지 본다. 하나라도 틀리면 보내지 않고 "AI 중지"로 둔다. 리디렉션은 따르지 않는다(`node:http`는 원래 따르지 않는다).
+- **R2. 워커 HTTP 서버.** 표준 라이브러리(`socketserver.UnixStreamServer` + `ThreadingMixIn` + `BaseHTTPRequestHandler`)를 쓴다. 웹 프레임워크 의존성을 늘리지 않기 위해서다.
+  - 연결당 소켓 시간 제한은 5초다. 느리게 보내는 클라이언트가 처리 스레드를 오래 잡지 못하게 한다.
+  - 동시 처리 연결은 4개까지이고, 넘으면 바로 503을 준다.
+  - 요청마다 응답 뒤 연결을 닫는다(`Connection: close`).
+  - `Content-Length`가 없거나 `Transfer-Encoding`이 있으면 거절한다.
+  - **추론 전용 스레드 하나가 모델을 가진다.** 처리 스레드는 작업을 넘기고 최대 5초 기다린다(넘으면 503). mlx·PyTorch 모델을 여러 스레드가 함께 만지지 않게 하고, 상태 확인은 추론과 상관없이 바로 답하게 하기 위해서다.
+  - **감시:** 추론 하나가 10초를 넘으면 로그를 남기고 `os._exit(70)`으로 끝낸다. 클라이언트 시간 초과는 워커 안의 추론을 멈추지 못한다. 그래서 멈춘 워커는 스스로 죽고, launchd가 다시 띄운다.
+- **R3. 워커 계약 v1.** 정본은 `workers/contract/README.md`이고, 시험 사례는 `workers/contract/v1/*.json`에 둔다. 두 워커와 서버 클라이언트가 같은 사례로 시험한다.
+  - **요청:** `POST /classify`이고 `Content-Type: application/json`이다. 본문은 UTF-8, 65,536바이트 이하다.
+    - 최상위는 `{"items": [...]}` 하나만 받는다. 다른 키가 있으면 400이다.
+    - 항목은 `{"id","text"}`만 받는다.
+    - `id`는 `^[A-Za-z0-9_-]{1,64}$`이고 요청 안에서 겹치지 않는다.
+    - `text`는 1~1,000 유니코드 코드 포인트다.
+    - 항목 수는 1차 1~32건, 2차 1~4건이다.
+  - **응답 200:** `{"contract":1,"model":<1~200자>,"items":[{"id","unsafe_probability","category"}]}`.
+    - 항목은 요청과 같은 순서, 같은 id다.
+    - 확률은 0~1의 유한한 수다.
+    - `category`는 1차가 null이고, 2차는 `"S1"`~`"S7"`이다.
+  - **오류:** 400, 404, 405, 411, 413, 503이고 본문은 `{"error":"<코드>"}`뿐이다. 입력을 되돌려 쓰지 않는다.
+  - `GET /health`는 `{"contract":1,"model":…,"ready":true}`를 준다.
+  - **모델 식별자:** `<모델 디렉터리 이름>@<가중치 sha256 앞 12자>`다. 서버는 이 값을 캐시 키에 쓴다.
+- **R4. AI 단계에 들어가는 메시지와 정리.**
+  - 들어가는 메시지: 규칙이 판정하지 않았고(`pass`·`none`), 가벼운 반응이 아니며, 1,000 코드 포인트 이하인 메시지다.
+    - `rule:allow`(채널 허용어)는 스펙대로 AI보다 앞서 통과한다.
+    - 너무 긴 메시지는 자르지 않고 미검사로 센다(R9).
+  - **메시지 식별:** `(chatChannelId, senderChannelId, messageTime)`이다. 떼도배 소급 숨김이 쓰는 `MessageRef`와 같다.
+  - **AI 결과 처리(`handleAiResult`)는 규칙 판정과 다른 길이다.**
+    - 채팅 줄을 보내지 않는다.
+    - 수신 건수를 다시 세지 않는다.
+    - 자동 조치를 하지 않는다.
+  - **겹침 정리:** 기록하기 전에 같은 메시지의 판정 기록이 있는지 본다(예: 그 사이 떼도배로 소급 숨김됨). 있으면 AI 결과는 기록하지 않는다.
+    - better-sqlite3는 동기라서 확인과 기록이 한 이벤트 루프 차례 안에 끝난다.
+    - 반대 순서(AI 후보가 먼저 기록되고 그 뒤 떼도배가 발동)는 지금과 같다. 소급 숨김이 판정 기록을 새로 만든다. 그래서 매니저 조치는 메시지 단위로 막는다. 같은 메시지에 숨김 기록이 이미 있으면 후보의 숨김 요청을 거절한다(Task 3).
+- **R5. 요주의 사용자 우선순위.** 요주의 사용자는 규칙(`rule:watch_user`)이 먼저 후보로 판정하므로 AI 단계에 오지 않는다.
+  - 그래서 우선순위는 키워드 경로 > 첫 채팅 사용자 > 1차 점수 > 먼저 온 것이다.
+  - 스펙 §5.4에 이렇게 적는다.
+- **R6. 첫 채팅 사용자.** 논리 세션(앱이 채팅 수신기를 `start`할 때부터 `stop`할 때까지) 동안 처음 본 보낸 사람이다.
+  - 소켓이 잠깐 끊겼다 다시 이어지는 것은 세션을 바꾸지 않는다.
+  - 집합은 20만 명까지 담는 LRU다. 넘치면 가장 오래 안 본 사람부터 뺀다.
+- **R7. 1차 묶음.**
+  - 첫 항목이 들어온 뒤 25ms 안에 모이는 항목, 최대 16건을 한 번에 보낸다. 요청은 한 번에 하나만 보낸다.
+  - 기다리는 항목은 512건까지다.
+  - 1차가 실패하면 그 묶음은 미검사(장애)다.
+  - 키워드 경로 메시지는 1차와 상관없이 2차로 간다. 스펙의 "1차 점수 ≥ 임계값 **또는** 키워드 경로"를 따른다.
+- **R8. 2차 대기열.**
+  - **우선순위:** 엄격한 우선순위다(R5 순서). 같으면 먼저 온 것이다.
+  - **꽉 찼을 때:** 새 항목이 대기열의 가장 낮은 항목보다 높으면 그 항목을 버리고, 아니면 새 항목을 버린다(같으면 새 항목을 버린다).
+  - **만료:** 만료된 항목은 넣을 때마다 걸러 낸다. 가장 이른 만료 시각에 맞춘 타이머 하나로도 걸러 낸다.
+  - **굶주림:** 높은 우선순위가 계속 들어오면 낮은 항목은 15초 뒤에 버려진다. 과부하 때 덜 중요한 것부터 포기한다는 스펙의 의도라 받아들인다.
+  - **같은 문장 합치기:** 같은 정규화 문장이 이미 대기열에 있거나 처리 중이면 그 항목에 메시지를 붙인다(항목당 20건까지). 우선순위는 둘 중 높은 쪽이다. 결과는 붙은 메시지 모두에 적용한다.
+  - 2차는 한 번에 1건씩 직렬로 보낸다.
+- **R9. 집계(메시지마다 결과가 정확히 하나).**
+  - 결과 종류:
+    - `stage1_pass`: 1차 미만으로 통과.
+    - `stage2_done`: 2차 결과 적용(캐시 재사용 포함).
+    - `stage2_dropped`: 2차 대기열 넘침·15초 경과. 용량 압박이다.
+    - `ai_unchecked`: 워커 장애·시간 초과, 1차 대기 넘침, 너무 긴 문장, 종료 때 버림. 장애다.
+  - 분당 통계 칸:
+    - `stage1_forwarded`: 2차 대기열에 넣은 건수.
+    - `stage2_done`, `stage2_dropped`: 위와 같다.
+    - 새 칸 `ai_unchecked`: 마이그레이션 v3로 만든다.
+  - 화면의 "AI 미검사"는 `stage2_dropped + ai_unchecked`이고, 둘을 나눠서도 보여 준다.
+  - AI를 끈 상태(R12)는 세지 않는다.
+- **R10. 임계값.** 채널 설정 `stage1_threshold`(0.05), `candidate_threshold`(0.5), `sure_threshold`(0.99)를 설정 API와 화면에서 바꿀 수 있게 한다(스펙 §11의 설정 칸).
+  - **검사:** 칸마다 유한한 수인지 본다. 1차는 0 초과 1 미만, 후보는 0 초과 1 미만, 확실은 0 초과 1 이하이고, 후보 ≤ 확실이어야 한다.
+    - 기존 정수 설정(폭주 한도·보관 기간)의 정수 검사는 그대로 둔다.
+    - DB에서 읽을 때도 같은 검사를 한다. 깨진 값이면 기본값을 쓰고 경고 로그를 남긴다.
+  - **적용 시점:** 결과가 나온 때의 설정을 쓴다. 1차 임계값은 모델마다 맞는 값이 달라 운영자가 정한다([재학습 결과](../../ml/2026-10-14-stage1-retrain-results.md)).
+- **R11. 판정 기록과 DTO.**
+  - `VerdictDto`에 `aiProbability: number | null`, `aiCategory: "S1"…"S7" | null`, `sure: boolean`을 더한다. 규칙 판정은 null·null·false다.
+    - 기록 직후 알림, 목록, 단건 조회, WebSocket, REST가 모두 같은 변환 함수를 쓴다.
+  - 이유는 `ai:S2`처럼 쓴다. 실시간 채팅 줄은 이미 `pass`로 나갔으므로 바꾸지 않는다.
+  - `needs_care`도 분당 `candidates`로 센다.
+- **R12. 켜고 끄기.** `ZG_AI_ENABLED=1`일 때만 AI 단계를 만든다. 기본은 꺼짐이라, 워커를 설치하지 않은 배포는 지금과 같다.
+- **R13. 워커 스레드.** 1차 워커의 PyTorch 스레드 수는 `--threads`(기본 6)다. 서버와 2차 몫을 남긴다.
+- **R14. AI 단계 수명 주기.** `start()`, `submit()`, `resetSession()`, `stop()`을 둔다.
+  - **`resetSession()`:** 앱이 채팅 수신기를 멈추거나(채널 연결 해제·바꾸기) 다시 시작할 때 부른다.
+    - 세대 번호를 올리고, 대기 중인 항목을 미검사로 세어 버린다.
+    - 진행 중인 요청을 중단(abort)하고, 첫 채팅 사용자 집합과 캐시를 비운다.
+    - 이전 세대의 늦은 결과는 버린다.
+  - **`stop()`:** 앱 종료 때 부른다. `resetSession()`이 하는 일에 더해, 새 항목을 거절하고 모든 타이머(묶음·만료·상태 확인)를 지운다. 진행 중인 요청이 끝나기(또는 중단되기)를 기다린다.
+    - 앱의 `stop()`에서 통계 저장과 DB 닫기보다 먼저 부른다.
+- **R15. 상태 확인과 알림.**
+  - 워커마다 10초 동안 성공한 호출이 없으면 `/health`를 부른다(2초 시간 초과, 두 워커는 5초 어긋나게).
+  - **상태:** `ok`, `down`, `unknown`(시작 직후)이다. 호출이나 확인이 실패하면 `down`, 성공하면 `ok`다.
+  - **알림:** `down`이 30초 넘게 이어지면 "AI 중지" 푸시를 한 번 보낸다. `ok`로 돌아오기 전에는 다시 보내지 않는다. 짧은 재시작에 알림이 쏟아지지 않게 하기 위해서다.
+  - **`ServerStatus.ai`:**
+    - `enabled: boolean`
+    - `stage1`·`stage2`: `{state, model, since}`
+    - `queueLength: number`
+    - `uncheckedLastMinute: {dropped, unchecked}`
+- **R16. 캐시.** 판정이 아니라 원값을 담는다.
+  - 1차 점수와 2차 결과(확률·범주)를 (모델 식별자, 정규화 문장 키)로 10분, 각 1만 건까지 담는다.
+  - 쓸 때마다 지금 임계값을 다시 적용한다. 그래서 임계값을 낮추면 캐시된 1차 점수도 2차로 갈 수 있다.
+  - 워커가 알려 주는 모델 식별자가 바뀌면 그 단계 캐시를 비운다.
 
 ## 리뷰 초점(테스트로 고정할 것)
 
-1. 워커가 죽었거나 멈췄을 때: 2초 뒤 실패로 처리하고, 규칙 판정과 채팅 줄 전송은 막히지 않는다. 상태는 `down`이 됐다가 다음 성공 때 `ok`로 돌아온다.
-2. 워커를 다시 띄워 비밀값이 바뀌었을 때: 서버가 401을 받으면 파일을 다시 읽고 한 번 더 보낸다.
-3. 과부하: 2차 대기열이 300건을 넘거나 15초가 지나면 버리고 센다. 키워드 경로 항목은 1차 점수가 높은 항목보다 먼저 나간다.
-4. 공격자 입력: 아주 긴 문장, 제어 문자, 잘못된 JSON, 큰 본문, 비밀값 없는 요청. 워커는 4xx로 거절하고 원문을 로그에 남기지 않는다.
-5. 권한자·허용어·가벼운 반응·중복: AI 단계에 들어가는지와 결과가 어떻게 기록되는지(R4).
+1. **수명 주기:** 다음 시점에 정지·세션 초기화가 와도 늦은 결과가 기록되지 않는다. 25ms 묶음 대기 중, 1차 요청 중, 2차 요청 중, 채널 연결 해제. 앱 종료에서는 AI 정지가 DB 닫기보다 먼저 끝난다.
+2. **겹침:** AI 결과가 먼저 오고 떼도배가 나중에 오는 순서, 떼도배가 먼저 오고 AI 결과가 나중에 오는 순서. 어느 쪽이든 같은 메시지에 숨김 요청이 두 번 나가지 않는다.
+3. **장애:** 다음 경우에 규칙 판정과 채팅 줄 전송이 막히지 않고, 상태가 `down`이 됐다가 돌아온다. 워커가 죽음, 멈춤, 소켓 없음, 디렉터리 권한이 틀림, 조용한 채널에서 죽음. 1차가 죽어도 키워드 경로 메시지는 2차로 간다.
+4. **과부하:** 300건 넘침, 머리가 아닌 곳의 만료, 같은 우선순위의 넘침, 높은 우선순위가 계속 들어옴. 메시지마다 결과가 정확히 하나로 집계된다.
+5. **공격자 입력과 로그:** 긴 문장, 제어 문자, 잘못된 JSON, 큰 본문, `Content-Length` 없음, chunked, 겹친 id, 느린 헤더. 워커와 서버 로그에 채팅 원문 표식이 나오지 않는다(로그 포착 테스트).
 
 ---
 
-## Task 1: 1차 워커 (PR A)
+## Task 1: 워커 계약과 1차 워커 (PR A)
 
 **파일**
-- 만들기: `workers/stage1/zg_stage1/worker.py`(HTTP·인증·검증), `workers/stage1/zg_stage1/worker_secret.py`(비밀값 파일), `workers/stage1/tests/test_worker.py`, `workers/stage1/tests/test_worker_secret.py`
-- 고치기: `workers/stage1/README.md`(실행 방법)
+- 만들기:
+  - `workers/contract/README.md`(계약 v1 정본)
+  - `workers/contract/v1/requests.json`(요청 사례와 기대 상태 코드)
+  - `workers/contract/v1/responses.json`(응답 검증 사례, 서버 클라이언트용)
+- 만들기(1차 워커):
+  - `workers/stage1/zg_stage1/worker_contract.py`: 요청 검증, 응답 만들기, 순수 함수.
+  - `workers/stage1/zg_stage1/worker_server.py`: 유닉스 소켓 HTTP, 동시 처리 한도, 시간 제한.
+  - `workers/stage1/zg_stage1/worker_runtime.py`: 추론 스레드, 감시, 단일 인스턴스 잠금, 소켓 디렉터리.
+  - `workers/stage1/zg_stage1/worker.py`: CLI, 모델 불러오기, 모델 식별자.
+  - `workers/stage1/tests/test_worker_*.py`
+- 고치기: `workers/stage1/README.md`
 
-**인터페이스**
-- `python -m zg_stage1.worker --model-dir <학습 결과> [--port 8711] [--threads 6] [--secret-name stage1-worker]`
-- 모델은 `inference.json` 계약대로 불러온다(`load_trained_classifier`, `load_trained_tokenizer`, max_length). 점수는 `score_texts`로 낸다.
-- 공용 부분(`worker_secret.py`의 `write_worker_secret(data_dir, name) -> str`, 요청 검증)은 2차 워커가 같은 규칙을 따르게 문서로 남긴다. 2차는 별도 uv 프로젝트라 코드를 공유하지 않고, 같은 테스트 목록으로 맞춘다.
+**인터페이스:** `python -m zg_stage1.worker --model-dir <학습 결과> [--threads 6]`. 데이터 디렉터리는 `ZG_DATA_DIR`에서 정한다. `inference.json` 계약이 없으면 시작하지 않는다.
 
 **단계**
-- [ ] 비밀값 파일 테스트를 쓴다(권한 0600·0700, 원자적 교체, 64자 hex).
-- [ ] 비밀값 파일 쓰기를 구현한다.
-- [ ] 요청 검증 테스트를 쓴다(항목 수·id·text 길이·형식·본문 크기).
-- [ ] 검증을 구현한다. 순수 함수이고 점수 함수를 주입받는다.
-- [ ] HTTP 테스트를 쓴다. 포트 0에 띄우고 가짜 점수 함수로 401·400·404·405·413·200, 순서 유지, `/health`를 본다.
-- [ ] 서버를 구현하고, 로그에 건수와 지연만 남는지 테스트한다.
-- [ ] 실제 모델로 스모크를 돈다(커밋하지 않는 확인): 72문장 점수가 `zg_stage1.evaluate`와 같은지, 묶음 16의 지연.
-- [ ] README에 실행 방법을 적고, ruff·mypy·pytest를 통과시킨다. 커밋하고 Codex 리뷰를 받은 뒤 PR을 연다.
+- [ ] 계약 README와 사례 파일을 쓴다.
+- [ ] 계약 검증 테스트(사례 파일 전부)와 구현을 쓴다.
+- [ ] 런타임 테스트와 구현을 쓴다.
+  - 잠금 중복은 오류다.
+  - 디렉터리는 0700, 소켓은 0600이다.
+  - 준비 전에는 소켓이 없다.
+  - 추론 스레드가 5초를 넘으면 503, 10초를 넘으면 감시자가 종료 함수를 부른다(종료 함수는 주입한다).
+- [ ] HTTP 테스트를 쓴다. 임시 디렉터리 소켓과 가짜 점수 함수로 다음을 본다.
+  - 사례별 상태 코드.
+  - 동시 처리 한도 503.
+  - 느린 헤더 시간 제한.
+  - `/health`가 추론 중에도 바로 답하는지.
+  - 로그에 원문 표식이 없는지.
+- [ ] 실제 모델 스모크(커밋하지 않음): 72문장 점수가 `zg_stage1.evaluate`와 같은지, 묶음 16의 지연.
+- [ ] README, ruff, mypy, pytest를 마친다. 커밋하고 Codex 리뷰를 받은 뒤 PR을 연다.
 
 ## Task 2: 2차 워커 (PR B)
 
@@ -97,25 +193,24 @@
 - 만들기: `workers/stage2/`
   - `pyproject.toml`: mlx-lm 고정, `exclude-newer`
   - `uv.lock`
-  - `zg_stage2/{__init__,classifier,worker,worker_secret,errors}.py`
+  - `zg_stage2/`
+    - `classifier.py`: 템플릿, 접두 KV 캐시, 확률·범주
+    - `worker_contract.py`, `worker_server.py`, `worker_runtime.py`, `worker.py`
   - `tests/`
   - `README.md`
+- 1차 워커의 계약·서버·런타임 파일은 그대로 복사하고, 같은 사례 파일로 시험한다. 두 프로젝트의 의존성이 달라 패키지로 나누지 않는다. 복사본이 어긋나지 않게, 같은 내용인지 보는 테스트를 둔다.
 
-**인터페이스**
-- `python -m zg_stage2.worker --model-dir <kanana-safeguard-8b mlx 4비트> [--port 8712]`
-- `classifier.py`
-  - 모델 카드 템플릿으로 `[user, 빈 assistant]` 메시지를 만든다.
-  - 접두 KV 캐시를 쓴다. 고정 템플릿 앞부분을 한 번 계산하고, 판정마다 되감는다.
-  - 마지막 logits에서 `<SAFE>`, `<UNSAFE-S1..7>` 확률을 구한다. 유해 확률은 UNSAFE 합이고, 범주는 UNSAFE 중 가장 높은 것이다.
-  - 분류 토큰이 단일 토큰이 아니면 시작을 거부한다.
-- 근거 코드: `docs/spikes/2026-10-11-guard-models/scripts/bench_guard.py`의 `classify_with_kanana`·`PrefixCache`(버리는 코드라 다시 쓴다).
+**인터페이스:** `python -m zg_stage2.worker --model-dir <kanana-safeguard-8b mlx 4비트>`.
+- 분류 토큰(`<SAFE>`, `<UNSAFE-S1..7>`)이 단일 토큰이 아니면 시작하지 않는다.
+- 유해 확률은 UNSAFE 확률의 합이고, 범주는 UNSAFE 중 가장 높은 것이다.
 
 **단계**
-- [ ] uv 프로젝트를 만든다. mlx-lm은 스파이크와 같은 0.32 계열이고, 잠금 시점보다 2주 전 배포본이어야 한다.
+- [ ] uv 프로젝트를 만든다(mlx-lm 0.32 계열, 잠금 시점 2주 전 배포본).
 - [ ] 확률·범주 계산(순수 함수)의 테스트와 구현을 쓴다.
-- [ ] 요청 검증·HTTP·비밀값 테스트를 1차와 같은 목록으로 쓴다(가짜 분류기).
-- [ ] 실제 모델로 스모크를 돈다(커밋하지 않음): 스파이크 결과와 같은 문장의 확률이 맞는지, 1건 지연이 약 100ms인지.
-- [ ] README를 쓰고 ruff·mypy·pytest를 통과시킨다. 커밋하고 Codex 리뷰를 받은 뒤 PR을 연다.
+- [ ] 분류기를 쓴다. 접두 캐시는 판정마다 되감고, 접두부가 맞지 않으면 전체를 다시 계산한다(근거: 스파이크 `bench_guard.py`).
+- [ ] 계약·서버·런타임 테스트를 1차와 같은 사례로 돌린다(가짜 분류기).
+- [ ] 실제 모델 스모크(커밋하지 않음): 스파이크와 같은 문장의 확률, 1건 지연이 약 100ms인지.
+- [ ] README, ruff, mypy, pytest를 마친다. 커밋하고 Codex 리뷰를 받은 뒤 PR을 연다.
 
 ## Task 3: 서버 AI 단계 (PR C)
 
@@ -123,62 +218,85 @@
 - 고치기:
   - `apps/server/src/detection/pipeline.ts`: `DetectionResult`에 `aiEligible`, `keywordRouteId`, `normalizedKey`를 더한다.
   - `apps/server/src/detection/messageTraits.ts`: `duplicateKeyOf`를 내보낸다.
-  - `apps/server/src/config.ts`: `ZG_AI_ENABLED`, `ZG_STAGE1_URL`, `ZG_STAGE2_URL`. 루프백 검증을 한다.
-  - `apps/server/src/app.ts`: 연결하고, 타이머와 정지를 붙인다.
-  - `apps/server/src/actions/decisionHandler.ts`: AI 단계로 넘기고, AI 결과를 기록한다.
-  - `apps/server/src/records/verdictRepository.ts`: DTO에 확률·범주·`sure`를 싣는다.
-  - `apps/server/src/records/settingsRepository.ts`: 실수 설정 3개를 읽는다. 1차 임계값은 쓸 수도 있다.
+  - `apps/server/src/config.ts`: `ZG_AI_ENABLED`.
+  - `apps/server/src/app.ts`:
+    - AI 단계를 만들고 연결한다.
+    - 수신기를 `start`·`stop`할 때 `resetSession`을 부른다.
+    - `stop()` 순서는 AI 정지 → 통계 저장 → DB 닫기다.
+  - `apps/server/src/actions/decisionHandler.ts`: AI 단계로 넘기는 `submit`을 붙이고, `handleAiResult`를 따로 둔다.
+  - 매니저 숨김 처리: 같은 메시지에 숨김 기록이 이미 있으면 거절한다.
+  - `apps/server/src/records/verdictRepository.ts`:
+    - `existsForMessage(ref)`를 더한다.
+    - DTO에 AI 칸을 싣는다. 한 변환 함수만 쓴다.
+  - `apps/server/src/records/settingsRepository.ts`: 실수 설정 3개, 칸별 검사, 읽을 때 검사.
+  - `apps/server/src/records/minuteStats.ts`, `apps/server/src/db/migrations.ts`: v3 `ai_unchecked`.
   - `apps/server/src/http/routes.ts`: 설정 스키마.
-  - `packages/shared/src/index.ts`: `VerdictDto.unsafeProbability/category/sure`, `ServerStatus.ai`, `SettingsDto.stage1Threshold`.
+  - `packages/shared/src/index.ts`: `AiCategory`, `VerdictDto` AI 칸, `ServerStatus.ai`, `SettingsDto` 임계값 3개, `MinuteStatDto.aiUnchecked`.
 - 만들기:
-  - `apps/server/src/ai/workerClient.ts`: 비밀값 파일, 2초 시간 초과, 401 때 한 번 다시 시도, 응답 검증.
-  - `apps/server/src/ai/stage1Batcher.ts`: 25ms·16건, 대기 512건.
-  - `apps/server/src/ai/stage2Queue.ts`: 300건, 15초, 우선순위.
-  - `apps/server/src/ai/aiVerdictCache.ts`: 10분, 1만 건 LRU.
-  - `apps/server/src/ai/firstChatters.ts`.
-  - `apps/server/src/ai/aiStage.ts`: 이것들을 묶어 결과를 콜백으로 낸다.
-  - `apps/server/src/ai/aiStatus.ts`.
+  - `apps/server/src/ai/workerClient.ts`: 소켓 경로와 권한 확인, 2초 시간 초과, abort, 응답 검증, 본문 없는 오류.
+  - `apps/server/src/ai/stage1Batcher.ts`
+  - `apps/server/src/ai/stage2Queue.ts`
+  - `apps/server/src/ai/scoreCache.ts`
+  - `apps/server/src/ai/firstChatters.ts`
+  - `apps/server/src/ai/workerHealth.ts`: 상태 확인, 상태, 알림 판단.
+  - `apps/server/src/ai/aiStage.ts`
   - `apps/server/test/ai/*.test.ts`
 
 **단계**
-- [ ] 파이프라인이 키워드 경로 번호와 AI 대상 여부를 내도록 바꾼다. 기존 "키워드 경로는 영향 없음" 테스트는 "판정은 바뀌지 않고 경로 번호만 실린다"로 바꾼다.
-- [ ] 워커 클라이언트 테스트와 구현을 쓴다. 가짜 워커 HTTP 서버로 다음을 본다.
-  - 200, 401 뒤 다시 읽기, 시간 초과, 연결 거부, 잘못된 응답(id 불일치·NaN·범위 밖).
-- [ ] 대기열·묶음·캐시·첫 채팅 사용자 테스트와 구현을 쓴다(가짜 시계).
+- [ ] 파이프라인이 키워드 경로 번호와 AI 대상 여부를 내도록 바꾼다. 기존 "키워드 경로는 영향 없음" 테스트는 "판정은 그대로이고 경로 번호만 실린다"로 바꾼다.
+- [ ] 워커 클라이언트 테스트와 구현을 쓴다. 가짜 소켓 워커로 다음을 본다.
+  - 계약 응답 사례 전부.
+  - 시간 초과, 연결 거부, 소켓 없음, 디렉터리 권한·소유자·심볼릭 링크.
+  - abort.
+  - 오류 메시지에 본문이 없는지.
+- [ ] 대기열·묶음·캐시·첫 채팅 사용자·상태 확인의 테스트와 구현을 쓴다(가짜 시계). 리뷰 초점 4번을 담는다.
 - [ ] AI 단계 통합 테스트를 쓴다. 가짜 클라이언트로 다음을 본다.
-  - 1차 점수가 임계값 미만이면 넘김, 키워드 경로면 2차, 결과가 0.5·0.99·S6일 때.
-  - 실패 때 미검사 집계와 상태.
-- [ ] 결정 처리기에 AI 결과 기록, 통계(`stage1_forwarded`·`stage2_done`·`stage2_dropped`·`candidates`), 알림을 붙인다.
-- [ ] 상태에 `ai`를 더하고 설정 API에 1차 임계값을 더한다.
-- [ ] 서버 lint·typecheck·test를 통과시킨다. 커밋하고 Codex 리뷰를 받는다.
+  - 임계값 경계, 키워드 경로 직행, 1차 장애 때 키워드 경로.
+  - 0.5·0.99·S6 결과, 캐시 재사용과 임계값 변경, 모델 식별자 변경.
+  - 리뷰 초점 1·2번.
+- [ ] 결정 처리기·판정 기록·통계·상태·설정을 붙인다. 로그 포착 테스트로 채팅 표식이 남지 않는지 본다.
+- [ ] 서버 lint·typecheck·test를 통과시킨다. 커밋한다.
 
 ## Task 4: 웹 (PR C에 함께)
 
 **파일**
-- 고치기: `apps/web/src/domain/verdictReason.ts`(`ai:S1~S7` 범주 이름), `components/CandidateGroupCard.tsx`(확률·'확실' 표시), `components/StatusBanner.tsx`("AI 중지"), `settings/StatusSection.tsx`(워커 상태·대기열), `settings/LimitsSection.tsx`(1차 임계값), `settings/StatsSection.tsx`(AI 미검사 표시)
+- 고치기:
+  - `apps/web/src/domain/verdictReason.ts`: `ai:S1~S7` 범주 이름.
+  - `components/CandidateGroupCard.tsx`: 확률, '확실'.
+  - `components/StatusBanner.tsx`: "AI 중지".
+  - `settings/StatusSection.tsx`: 워커 상태, 모델, 대기열, 미검사.
+  - AI 임계값 칸 3개: `settings/LimitsSection.tsx` 또는 새 `settings/AiSection.tsx`.
+  - `settings/StatsSection.tsx`: 미검사 두 종류.
 - 테스트: 해당 `*.test.tsx`
 
 **단계**
-- [ ] 범주 이름은 모델 카드를 따른다. S1 증오, S2 괴롭힘, S3 성적 콘텐츠, S4 범죄, S5 아동 성착취, S6 자살·자해, S7 잘못된 정보.
-- [ ] 확률은 소수 둘째 자리까지 보인다. '확실' 배지는 DTO의 `sure`로만 정한다.
-- [ ] AI를 켜지 않은 배포에서는 AI 상태 줄과 배너를 보이지 않는다.
-- [ ] 웹 lint·typecheck·test를 통과시킨다.
+- [ ] 범주 이름은 모델 카드를 따른다: S1 증오, S2 괴롭힘, S3 성적 콘텐츠, S4 범죄, S5 아동 성착취, S6 자살·자해, S7 잘못된 정보.
+- [ ] 확률은 소수 둘째 자리까지 보인다. '확실' 배지는 DTO의 `sure`로만 정한다. `needs_care`는 지금처럼 따로 묶어 보인다는 것을 시험한다.
+- [ ] AI가 꺼진 배포에서는 AI 상태 줄과 배너, AI 설정을 보이지 않는다.
+- [ ] 웹 lint·typecheck·test를 통과시킨다. PR C를 Codex 리뷰한 뒤 연다.
 
-## Task 5: 운영 (PR D)
+## Task 5: 운영과 스펙 (PR D)
 
 **파일**
 - 만들기: `ops/launchd/com.zzirit-guard.stage1-worker.plist.template`, `ops/launchd/com.zzirit-guard.stage2-worker.plist.template`
-- 고치기: `ops/scripts/install-launchd.sh`(구성 요소 인자. 기본은 지금처럼 server), `ops/env.example`(AI 변수), `docs/operations/operator-guide.md`(워커 설치·모델 고르기·임계값 정하기·AI 중지 대응)
+- 고치기:
+  - `ops/scripts/install-launchd.sh`: 구성 요소 인자를 받고, 기본은 지금처럼 server다.
+  - `ops/env.example`: `ZG_AI_ENABLED`.
+  - `docs/operations/operator-guide.md`: 워커 설치, 모델 고르기, 1차 임계값 정하기, AI 중지 대응.
+  - 스펙:
+    - §4·§8: 워커 소켓.
+    - §5.3: 계약 링크, 비밀값 헤더 대신 소켓 권한(위협 모델).
+    - §5.4: R5, 집계.
+    - §11: `minute_stat.ai_unchecked`.
 
 **단계**
-- [ ] plist는 워커 venv의 python을 직접 부른다(uv를 launchd PATH에 두지 않기 위해서다). KeepAlive와 로그 경로는 서버와 같은 방식이다.
-- [ ] 설치 스크립트는 dry-run과 `plutil -lint`로만 확인한다. 실제 설치는 사용자가 지시할 때 한다.
+- [ ] plist는 워커 venv의 python을 직접 부른다(uv를 launchd PATH에 두지 않는다). KeepAlive와 로그 경로는 서버와 같은 방식이다.
+- [ ] 설치 스크립트는 dry-run과 `plutil -lint`로만 확인한다.
 - [ ] 문서에 1차 임계값 고르는 법을 적는다. 개발셋과 `zg_stage1.evaluate_chat`으로 정하고, 보류셋은 한 번만 본다.
-- [ ] 스펙 §5.4에 R5(요주의 사용자 우선순위)를, §5.3에 R1(비밀값 파일)을 반영한다.
 - [ ] 커밋하고 Codex 리뷰를 받은 뒤 PR을 연다.
 
 ## 하지 않는 것
 
 - AI 자동 숨김: 섀도 데이터를 본 뒤에 다시 정한다(§5.2 ⑤).
 - 실채팅으로 임계값을 맞추는 일: 치지직 서면 회신과 운영자 합의 뒤에 한다.
-- 처리 중인 같은 문장 기다리기, 실시간 채팅 줄의 AI 결과 갱신(R4·R11).
+- 실시간 채팅 줄의 AI 결과 갱신(R11).
