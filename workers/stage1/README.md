@@ -167,13 +167,15 @@ uv run python -m zg_stage1.chat_eval_data eval_data/chat-dev-v1.jsonl eval_data/
 uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>" \
   --eval-file eval_data/chat-dev-v1.jsonl --forward-budget 0.304
 
-# 4) 고른 임계값을 고정해 보류셋을 한 번 본다(보류셋에 --forward-budget을 주면 오류)
+# 4) 3의 결과(같은 모델)로 보류셋을 한 번 본다. 임계값 하나의 집계만 남고, 결과 파일은 덮어쓰지 않는다
 uv run python -m zg_stage1.evaluate_chat --model-dir "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>" \
-  --eval-file eval_data/chat-holdout-v1.jsonl --threshold <3에서 고른 값>
+  --eval-file eval_data/chat-holdout-v1.jsonl --dev-report "$ZG_DATA_DIR/ml/stage1/kcelectra-<시각>/chat-eval-dev.json"
 ```
 
 - 가중 전달률은 가정한 트래픽 구성비(`evaluate_chat.DEFAULT_TRAFFIC_MIX`)로 계산한다. 실측 비율이 생기면 `--mix-file`로 바꾼다.
 - 72문장 회귀 세트는 봉인했다. 파일이 바뀌면 테스트와 겹침 검사가 실패한다.
+- `evaluate_chat`도 평가 전에 같은 검사(72문장 겹침, 셋 안 중복, 애매 5% 이하, 범주마다 20문장 이상)를 한다.
+- F_max는 시드가 다른 반복 5번 모두에서 기준을 지키는 값이다.
 
 ## 알려진 한계
 
