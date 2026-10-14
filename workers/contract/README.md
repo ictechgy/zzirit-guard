@@ -53,19 +53,23 @@
 
 | 상태 | 코드 | 때 |
 |---|---|---|
+| 400 | `invalid_request` | 요청 줄·헤더가 깨졌거나 너무 김 |
 | 400 | `invalid_json` | UTF-8 JSON이 아님 |
-| 400 | `invalid_body` | 키·형식이 다름, 항목이 0건 |
+| 400 | `invalid_body` | 키·형식이 다름, 항목이 0건, `Content-Length`가 ASCII 숫자가 아니거나 두 번 있음 |
 | 400 | `too_many_items` | 항목 수 상한을 넘음 |
 | 400 | `bad_id` | id 형식이 틀림 |
 | 400 | `duplicate_id` | id가 겹침 |
 | 400 | `bad_text` | text가 비었거나 1,000자를 넘거나 짝 없는 서로게이트가 있음 |
 | 400 | `content_type` | JSON이 아님 |
 | 400 | `transfer_encoding` | `Transfer-Encoding`이 있음 |
-| 404 | `not_found` | 없는 경로 |
-| 405 | `method_not_allowed` | 경로는 맞는데 메서드가 다름 |
+| 404 | `not_found` | 없는 경로(메서드와 상관없이 경로를 먼저 본다) |
+| 405 | `method_not_allowed` | 경로는 맞는데 메서드가 다름(HEAD에는 본문이 없다) |
 | 411 | `length_required` | `Content-Length`가 없음 |
 | 413 | `payload_too_large` | 본문이 65,536바이트를 넘음 |
-| 503 | `busy` | 동시 처리 한도를 넘었거나 추론이 5초 안에 끝나지 않음 |
+| 500 | `internal` | 추론 중 예상하지 못한 오류, 모델이 계약 밖의 값을 냄 |
+| 503 | `busy` | 동시 처리 한도를 넘었거나, 추론이 5초 안에 끝나지 않았거나, 멈추는 중임 |
+
+요청은 연결한 때부터 5초 안에 다 보내야 한다(요청 줄·헤더·본문). 넘으면 응답 없이 연결을 닫는다.
 
 ## 시험 사례
 

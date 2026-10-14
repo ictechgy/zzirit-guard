@@ -152,26 +152,38 @@ def serve_until_stopped(socket_path: Path, settings: WorkerSettings, on_ready: C
         socket_path.unlink(missing_ok=True)
 
 
-def start_worker(arguments: argparse.Namespace, environment: Mapping[str, str], on_ready: Callable[[WorkerHTTPServer], None] = stop_on_terminate) -> None:
-    """잠금 → 남은 소켓 정리 → 모델 불러오기·데우기 → 추론 스레드 → 소켓 순서로 시작한다.
-
-    소켓 경로 길이는 모델을 불러오기 전에 확인한다. 앞선 인스턴스가 남긴 소켓은 잠금을 잡은 직후 지운다.
-    그래서 준비가 끝나기 전에는 소켓이 없고, 서버는 "연결 안 됨"으로 본다.
-    """
-    model_directory = ensure_existing_directory(arguments.model_dir, "1차 분류기 학습 결과")
-    run_directory = resolve_run_directory(resolve_data_directory(arguments.data_dir, environment))
-    socket_path = socket_path_for(run_directory, WORKER_NAME)
-    lock_file = acquire_instance_lock(run_directory, WORKER_NAME)
-    remove_stale_socket(socket_path)
-    model = compute_model_identifier(model_directory)
-    scorer = load_scorer(model_directory, arguments.threads)
+def build_warmed_scorer(model_directory: Path, threads: int) -> Callable[[Sequence[str]], list[ItemVerdict]]:
+    """모델을 불러와 한 번 데운 점수 함수. 추론 스레드 안에서 불러, 모델을 만든 스레드가 계속 쓰게 한다."""
+    scorer = load_scorer(model_directory, threads)
     scorer(list(WARMUP_TEXTS))
-    runner = InferenceRunner(scorer)
+    return scorer
+
+
+def serve_model(model_directory: Path, threads: int, socket_path: Path, on_ready: Callable[[WorkerHTTPServer], None]) -> None:
+    """모델 식별자를 계산하고, 추론 스레드에서 모델을 준비한 뒤 소켓을 연다. 끝나면 추론 스레드를 멈춘다."""
+    model = compute_model_identifier(model_directory)
+    runner = InferenceRunner(lambda: build_warmed_scorer(model_directory, threads))
     runner.start()
     try:
         serve_until_stopped(socket_path, WorkerSettings(model, MAX_ITEMS_PER_REQUEST, runner), on_ready)
     finally:
         runner.stop()
+
+
+def start_worker(arguments: argparse.Namespace, environment: Mapping[str, str], on_ready: Callable[[WorkerHTTPServer], None] = stop_on_terminate) -> None:
+    """잠금 → 남은 소켓 정리 → 모델 불러오기·데우기 → 소켓 순서로 시작한다.
+
+    소켓 경로 길이는 모델을 불러오기 전에 확인한다. 앞선 인스턴스가 남긴 소켓은 잠금을 잡은 직후 지운다.
+    그래서 준비가 끝나기 전에는 소켓이 없고, 서버는 "연결 안 됨"으로 본다. 잠금은 소켓을 지운 뒤에 푼다.
+    """
+    model_directory = ensure_existing_directory(arguments.model_dir, "1차 분류기 학습 결과")
+    run_directory = resolve_run_directory(resolve_data_directory(arguments.data_dir, environment))
+    socket_path = socket_path_for(run_directory, WORKER_NAME)
+    lock_file = acquire_instance_lock(run_directory, WORKER_NAME)
+    try:
+        remove_stale_socket(socket_path)
+        serve_model(model_directory, arguments.threads, socket_path, on_ready)
+    finally:
         lock_file.close()
 
 

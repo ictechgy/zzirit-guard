@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from tests.worker_cases import (
     receive_all,
     send_case,
     send_json,
+    send_raw,
     short_temporary_directory,
 )
 from zg_stage1.worker_contract import ItemVerdict
@@ -43,21 +45,36 @@ def length_score(texts: Sequence[str]) -> list[ItemVerdict]:
 
 
 @contextmanager
-def serving(infer: Callable[[Sequence[str]], list], result_wait_seconds: float = 5.0) -> Iterator[Path]:
-    """임시 소켓에 워커 서버를 띄우고 소켓 경로를 준다. 끝나면 서버와 추론 스레드를 멈춘다."""
+def serving_server(infer: Callable[[Sequence[str]], list], result_wait_seconds: float = 5.0) -> Iterator[tuple[Path, WorkerHTTPServer]]:
+    """임시 소켓에 워커 서버를 띄우고 (소켓 경로, 서버)를 준다. 끝나면 서버와 추론 스레드를 멈춘다."""
     with short_temporary_directory() as directory:
-        runner = InferenceRunner(infer, result_wait_seconds=result_wait_seconds)
+        runner = InferenceRunner(lambda: infer, result_wait_seconds=result_wait_seconds)
         runner.start()
         socket_path = directory / "stage1.sock"
         server = WorkerHTTPServer(socket_path, WorkerSettings(FAKE_MODEL, 32, runner))
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
         try:
-            yield socket_path
+            yield socket_path, server
         finally:
             server.shutdown()
             server.server_close()
             runner.stop()
+
+
+@contextmanager
+def serving(infer: Callable[[Sequence[str]], list], result_wait_seconds: float = 5.0) -> Iterator[Path]:
+    """serving_server와 같고 소켓 경로만 준다."""
+    with serving_server(infer, result_wait_seconds) as (socket_path, _):
+        yield socket_path
+
+
+def wait_until(condition: Callable[[], bool], seconds: float = 5.0) -> None:
+    """조건이 참이 될 때까지 기다린다. 시간 안에 안 되면 실패다(고정 sleep 대신 상태를 보고 기다린다)."""
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "조건을 기다리다 시간이 지났습니다"
+        time.sleep(0.01)
 
 
 @pytest.mark.parametrize("case", REQUEST_CASES, ids=[case["name"] for case in REQUEST_CASES])
@@ -96,10 +113,9 @@ def test_health_answers_while_inference_runs() -> None:
         background = threading.Thread(target=send_json, args=(socket_path, "POST", "/classify", {"items": [{"id": "a", "text": "가"}]}))
         background.start()
         assert started.wait(3)
-        began = time.monotonic()
         health = send_json(socket_path, "GET", "/health")
         assert health.status == 200 and health.body == {"contract": 1, "model": FAKE_MODEL, "ready": True}
-        assert time.monotonic() - began < 1.0
+        assert background.is_alive() and not release.is_set()
         release.set()
         background.join(5)
 
@@ -127,21 +143,19 @@ def open_idle_connection(socket_path: Path) -> socket.socket:
 
 def test_connection_limit_replies_busy_without_thread() -> None:
     """동시 처리 연결 한도를 넘은 연결은 바로 503을 받는다. 붙잡던 연결이 닫히면 다시 받는다."""
-    with serving(length_score) as socket_path:
+    with serving_server(length_score) as (socket_path, server):
         idle = [open_idle_connection(socket_path) for _ in range(MAX_CONCURRENT_CONNECTIONS)]
-        time.sleep(0.2)
+        wait_until(lambda: server.active_connections() == MAX_CONCURRENT_CONNECTIONS)
         assert send_json(socket_path, "GET", "/health").body == {"error": "busy"}
         for connection in idle:
             connection.close()
-        deadline = time.monotonic() + 3
-        while send_json(socket_path, "GET", "/health").status != 200:
-            assert time.monotonic() < deadline
-            time.sleep(0.05)
+        wait_until(lambda: server.active_connections() == 0)
+        assert send_json(socket_path, "GET", "/health").status == 200
 
 
 def test_slow_client_is_disconnected(monkeypatch: pytest.MonkeyPatch) -> None:
     """요청 줄·헤더를 제시간에 다 보내지 않는 연결은 응답 없이 닫고, 자리를 돌려준다."""
-    monkeypatch.setattr(WorkerRequestHandler, "timeout", 0.3)
+    monkeypatch.setattr(WorkerRequestHandler, "request_deadline_seconds", 0.3)
     with serving(length_score) as socket_path:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(3)
@@ -180,3 +194,105 @@ def test_invalid_model_output_is_500() -> None:
     with serving(lambda texts: [ItemVerdict(float("nan"), None) for _ in texts]) as socket_path:
         response = send_json(socket_path, "POST", "/classify", {"items": [{"id": "a", "text": "가"}]})
     assert (response.status, response.body) == (500, {"error": "internal"})
+
+
+def test_trickling_client_hits_request_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """한 바이트씩 계속 흘려 보내도(쉬는 틈은 짧아도) 연결한 때부터의 마감을 넘기면 끊긴다."""
+    monkeypatch.setattr(WorkerRequestHandler, "request_deadline_seconds", 0.5)
+    with serving_server(length_score) as (socket_path, server):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.connect(str(socket_path))
+            began = time.monotonic()
+            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                for byte in b"POST /classify HTTP/1.1\r\nX-Slow: " + b"a" * 200:
+                    connection.sendall(bytes([byte]))
+                    time.sleep(0.02)
+            assert time.monotonic() - began < 3.0
+        wait_until(lambda: server.active_connections() == 0)
+
+
+@pytest.mark.parametrize(
+    ("request_line", "status", "error"),
+    [
+        (b"HEAD /health HTTP/1.1", 405, None),
+        (b"OPTIONS /classify HTTP/1.1", 405, "method_not_allowed"),
+        (b"OPTIONS /missing HTTP/1.1", 404, "not_found"),
+        (b"FOO /health HTTP/1.1", 405, "method_not_allowed"),
+        (b"FOO /missing HTTP/1.1", 404, "not_found"),
+        (b"GET /" + b"a" * 70000 + b" HTTP/1.1", 400, "invalid_request"),
+        (b"NOT-HTTP", 400, "invalid_request"),
+    ],
+)
+def test_stdlib_errors_follow_contract(request_line: bytes, status: int, error: str | None) -> None:
+    """표준 서버가 직접 내는 응답(모르는 메서드, 긴 요청 줄, 깨진 요청 줄)도 계약의 상태·코드로 나온다. HEAD에는 본문이 없다."""
+    with serving(length_score) as socket_path:
+        response = send_raw(socket_path, request_line + b"\r\nHost: local\r\n\r\n")
+    assert response.status == status
+    assert response.body == ({} if error is None else {"error": error})
+
+
+@pytest.mark.parametrize(
+    ("content_length_lines", "status", "error"),
+    [
+        ([b"Content-Length: \xb2"], 400, "invalid_body"),
+        ([b"Content-Length: 1e3"], 400, "invalid_body"),
+        ([b"Content-Length: -5"], 400, "invalid_body"),
+        ([b"Content-Length: " + b"9" * 4000], 413, "payload_too_large"),
+        ([b"Content-Length: 2", b"Content-Length: 2"], 400, "invalid_body"),
+    ],
+)
+def test_content_length_is_parsed_strictly(content_length_lines: list[bytes], status: int, error: str) -> None:
+    """Content-Length는 ASCII 숫자 한 번만 받는다. '²'·지수·음수·중복은 400, 너무 긴 숫자는 413이다(트레이스백 없이)."""
+    head = b"\r\n".join([b"POST /classify HTTP/1.1", b"Host: local", b"Content-Type: application/json", *content_length_lines]) + b"\r\n\r\n"
+    with serving(length_score) as socket_path:
+        response = send_raw(socket_path, head, b"{}")
+    assert (response.status, response.body) == (status, {"error": error})
+
+
+def test_client_that_leaves_during_inference_is_cleaned_up(caplog: pytest.LogCaptureFixture) -> None:
+    """서버가 2초에 포기하고 끊은 뒤 추론이 끝나도, 트레이스백 없이 정리하고 자리를 돌려준다."""
+    caplog.set_level(logging.INFO, logger="zg_worker")
+    started, release = threading.Event(), threading.Event()
+
+    def slow(texts: Sequence[str]) -> list[ItemVerdict]:
+        started.set()
+        release.wait(5)
+        return length_score(texts)
+
+    body = json.dumps({"items": [{"id": "a", "text": CHAT_SENTINEL}]}, ensure_ascii=False).encode("utf-8")
+    head = f"POST /classify HTTP/1.1\r\nHost: local\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n".encode()
+    with serving_server(slow) as (socket_path, server):
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.connect(str(socket_path))
+        connection.sendall(head + body)
+        assert started.wait(3)
+        connection.close()
+        release.set()
+        wait_until(lambda: server.active_connections() == 0)
+        assert send_json(socket_path, "GET", "/health").status == 200
+    assert "Traceback" not in caplog.text and CHAT_SENTINEL not in caplog.text
+
+
+def test_shutdown_waits_for_active_request() -> None:
+    """멈출 때 처리 중인 요청이 끝나기를 기다린다. 그 요청은 정상 응답을 받는다."""
+    started, release = threading.Event(), threading.Event()
+    responses: list = []
+
+    def slow(texts: Sequence[str]) -> list[ItemVerdict]:
+        started.set()
+        release.wait(5)
+        return length_score(texts)
+
+    with serving_server(slow) as (socket_path, server):
+        background = threading.Thread(target=lambda: responses.append(send_json(socket_path, "POST", "/classify", {"items": [{"id": "a", "text": "가"}]})))
+        background.start()
+        assert started.wait(3)
+        server.shutdown()
+        closer = threading.Thread(target=server.server_close)
+        closer.start()
+        time.sleep(0.1)
+        assert closer.is_alive()
+        release.set()
+        closer.join(5)
+        background.join(5)
+    assert responses and responses[0].status == 200
