@@ -176,25 +176,48 @@ class OverlapFinding:
     similarity: float
 
 
+def build_ngram_postings(entries: Sequence[tuple[str, str, frozenset[str]]]) -> dict[str, tuple[int, ...]]:
+    """3-gram마다 그 3-gram을 가진 색인 항목 번호(오름차순). 한 문장과 3-gram을 하나도 나누지 않는 항목은 유사도가 0이라 비교할 필요가 없다."""
+    postings: dict[str, list[int]] = {}
+    for position, (_, _, ngrams) in enumerate(entries):
+        for ngram in ngrams:
+            postings.setdefault(ngram, []).append(position)
+    return {ngram: tuple(positions) for ngram, positions in postings.items()}
+
+
 @dataclass(frozen=True)
 class OverlapIndex:
-    """비교 대상 문장들의 정규화 결과. 같은 대상을 여러 번 비교할 때 다시 계산하지 않기 위해서다."""
+    """비교 대상 문장들의 정규화 결과와 3-gram 역색인. 같은 대상을 여러 번 비교할 때 다시 계산하지 않기 위해서다.
+
+    왜 역색인인가: 학습 파일(K-HATERS 17만 줄)을 평가 문장 1,500여 개와 하나씩 비교하면 수억 번을 계산한다.
+    3-gram을 하나라도 나누는 항목만 비교해도 결과(가장 비슷한 항목 하나)는 모두 비교할 때와 같다.
+    """
 
     entries: tuple[tuple[str, str, frozenset[str]], ...]
+    postings: dict[str, tuple[int, ...]]
 
     @classmethod
     def build(cls, identified_texts: Iterable[tuple[str, str]]) -> OverlapIndex:
         """(id, 원문) 목록으로 색인을 만든다. 정규화 후 빈 문장은 비교할 것이 없어 뺀다."""
         normalized = ((identifier, normalize_for_overlap(text)) for identifier, text in identified_texts)
-        return cls(tuple((identifier, text, character_ngrams(text)) for identifier, text in normalized if text))
+        entries = tuple((identifier, text, character_ngrams(text)) for identifier, text in normalized if text)
+        return cls(entries, build_ngram_postings(entries))
+
+    def count_shared_ngrams(self, ngrams: frozenset[str]) -> Counter[int]:
+        """색인 항목 번호별로 이 3-gram 집합과 나누는 3-gram 수."""
+        shared: Counter[int] = Counter()
+        for ngram in ngrams:
+            shared.update(self.postings.get(ngram, ()))
+        return shared
 
     def find_overlap(self, item_id: str, text: str) -> OverlapFinding | None:
-        """한 문장이 색인의 어느 문장과 같거나 거의 같으면 가장 비슷한 것 하나를 돌려준다."""
+        """한 문장이 색인의 어느 문장과 같거나 거의 같으면 가장 비슷한 것 하나를 돌려준다. 같은 유사도면 색인에서 앞선 항목이다."""
         normalized = normalize_for_overlap(text)
         ngrams = character_ngrams(normalized)
         best: OverlapFinding | None = None
-        for reference_id, reference_text, reference_ngrams in self.entries:
-            similarity = 1.0 if normalized == reference_text else jaccard_similarity(ngrams, reference_ngrams)
+        for position, shared_count in sorted(self.count_shared_ngrams(ngrams).items()):
+            reference_id, reference_text, reference_ngrams = self.entries[position]
+            similarity = 1.0 if normalized == reference_text else shared_count / (len(ngrams) + len(reference_ngrams) - shared_count)
             if similarity >= NEAR_DUPLICATE_JACCARD and (best is None or similarity > best.similarity):
                 best = OverlapFinding(item_id, reference_id, round(similarity, 3))
         return best

@@ -87,8 +87,11 @@ class ScoredItem(NamedTuple):
     route: RuleRoute = RuleRoute(rule_flagged=False, keyword=False)
 
     def is_routed(self, threshold: float) -> bool:
-        """매니저나 2차 중 어디로든 올라가는지: 규칙이 잡거나, 키워드 경로거나, 1차 점수가 임계값 이상."""
-        return self.route.rule_flagged or self.route.keyword or self.score >= threshold
+        """매니저나 2차 중 어디로든 올라가는지: 규칙이 잡거나, 2차로 가거나(goes_to_stage2).
+
+        가벼운 반응(AI 건너뜀)은 규칙이 잡지 않으면 어디로도 가지 않는다. 2차 부하와 같은 기준이어야 숫자가 맞기 때문이다.
+        """
+        return self.route.rule_flagged or self.goes_to_stage2(threshold)
 
     def goes_to_stage2(self, threshold: float) -> bool:
         """2차(kanana)로 가는지. 규칙이 먼저 판정하거나 가벼운 반응이면 멈추므로(스펙 §5.2 ②·③) 2차 부하에서 뺀다."""

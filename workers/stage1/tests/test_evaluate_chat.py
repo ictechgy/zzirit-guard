@@ -192,7 +192,7 @@ def test_rule_routes_count_toward_recall_but_not_stage2_load() -> None:
         "n1": RuleRoute(False, False, skip_ai=True), "n2": RuleRoute(False, False),
     }
     pairs = scored_pairs(items, [0.1, 0.1, 0.9, 0.1], routes)
-    assert forward_rates_by_category(pairs, 0.5) == {"doxxing": 1.0, "long_normal": 0.0, "self_harm": 1.0, "short_normal": 1.0}
+    assert forward_rates_by_category(pairs, 0.5) == {"doxxing": 1.0, "long_normal": 0.0, "self_harm": 1.0, "short_normal": 0.0}
     assert stage2_rates_by_category(pairs, 0.5) == {"doxxing": 0.0, "long_normal": 0.0, "self_harm": 1.0, "short_normal": 0.0}
     assert stage2_rates_by_category(pairs, 0.05) == {"doxxing": 0.0, "long_normal": 1.0, "self_harm": 1.0, "short_normal": 0.0}
 
