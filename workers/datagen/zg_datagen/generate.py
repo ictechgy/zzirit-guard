@@ -7,7 +7,7 @@ import hashlib
 import itertools
 import json
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -46,7 +46,7 @@ class TextGenerator(Protocol):
 class MlxTextGenerator:
     """mlx를 실제 생성 시점에만 불러 테스트 환경에 무거운 선택 의존성을 요구하지 않는다."""
 
-    def __init__(self, model_directory: Path, max_tokens: int) -> None:
+    def __init__(self, model_directory: Path, max_tokens: int, disable_thinking: bool = False) -> None:
         from mlx_lm import load
 
         # load는 설정에 따라 (모델, 토크나이저) 또는 (모델, 토크나이저, 설정)을 돌려줘 앞의 두 개만 쓴다.
@@ -54,6 +54,9 @@ class MlxTextGenerator:
         loaded = load(str(model_directory))
         self._model, self._tokenizer = loaded[0], loaded[1]
         self._max_tokens = max_tokens
+        # Qwen3처럼 기본으로 '생각' 단계를 내는 모델은 그 글이 토큰 상한을 먹고 JSON 줄을 밀어낸다. 끄면 채팅 템플릿에 알린다.
+        # 이 값을 모르는 템플릿(kanana 등)은 Jinja가 무시한다.
+        self._template_arguments = {"enable_thinking": False} if disable_thinking else {}
 
     def generate(self, messages: list[dict[str, str]], seed: int) -> str:
         """호출마다 난수 상태를 되감아 묶음 순서와 무관하게 시드 재현성을 보장한다."""
@@ -62,7 +65,7 @@ class MlxTextGenerator:
         from mlx_lm.sample_utils import make_sampler
 
         mx.random.seed(seed)
-        prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False, **self._template_arguments)
         if not isinstance(prompt, str):
             raise ValueError("모델 채팅 템플릿이 문자열을 만들지 않았습니다. 올바른 instruct 모델인지 확인하세요.")
         sampler = make_sampler(temp=0.9, top_p=0.95)
@@ -82,6 +85,7 @@ class GenerationRequest:
     model_dir: Path
     max_tokens: int = DEFAULT_MAX_TOKENS
     input_path: Path | None = None
+    disable_thinking: bool = False
 
 
 @dataclass
@@ -373,11 +377,18 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--batch-size", type=int, choices=range(2, 5), default=3)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument("--disable-thinking", action="store_true", help="채팅 템플릿에 enable_thinking=False를 준다(Qwen3 등 생각 단계를 내는 모델)")
     parser.add_argument("--out", type=Path, required=True)
 
 
 def request_from_args(arguments: argparse.Namespace) -> GenerationRequest:
     """CLI 이름을 내부의 단일 요청 모양으로 바꿔 실행 경로가 argparse 세부에 묶이지 않게 한다."""
+    request = base_request_from_args(arguments)
+    return replace(request, disable_thinking=arguments.disable_thinking)
+
+
+def base_request_from_args(arguments: argparse.Namespace) -> GenerationRequest:
+    """하위 명령별로 개수·의도·입력을 고른다."""
     if arguments.command == "harmful":
         return GenerationRequest(
             "harmful",
@@ -417,7 +428,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     """성공 시 원문 없는 manifest JSON만 출력해 터미널 기록에 생성 문장이 남지 않게 한다."""
     request = request_from_args(build_parser().parse_args(argv))
     validate_request(request)
-    generator = MlxTextGenerator(request.model_dir, request.max_tokens)
+    generator = MlxTextGenerator(request.model_dir, request.max_tokens, request.disable_thinking)
     print(json.dumps(run_generation(request, generator), ensure_ascii=False, sort_keys=True))
 
 
