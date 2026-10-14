@@ -124,8 +124,9 @@
    },
    "status": {
     "stage1": 200,
-    "stage2": 200
-   }
+    "stage2": 400
+   },
+   "error": "text_too_long"
   },
   {
    "name": "text_1000_astral_code_points",
@@ -136,8 +137,9 @@
    },
    "status": {
     "stage1": 200,
-    "stage2": 200
-   }
+    "stage2": 400
+   },
+   "error": "text_too_long"
   },
   {
    "name": "text_1001_code_points",

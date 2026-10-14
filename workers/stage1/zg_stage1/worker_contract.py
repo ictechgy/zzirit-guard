@@ -28,8 +28,9 @@ IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # 모델 식별자 길이 상한(응답).
 MAX_MODEL_LENGTH = 200
 
-# 응답의 범주로 쓸 수 있는 값. 1차는 None, 2차는 kanana-safeguard 범주 S1~S7이다.
-VALID_CATEGORIES: frozenset[str | None] = frozenset({None, *(f"S{index}" for index in range(1, 8))})
+# 워커별로 응답 범주로 쓸 수 있는 값. 1차는 범주가 없고(None), 2차는 kanana-safeguard 범주 S1~S7 중 하나다.
+STAGE1_CATEGORIES: frozenset[str | None] = frozenset({None})
+STAGE2_CATEGORIES: frozenset[str | None] = frozenset(f"S{index}" for index in range(1, 8))
 
 
 class ContractError(Exception):
@@ -131,13 +132,16 @@ def parse_classify_request(body: bytes, max_items: int) -> list[ClassifyItem]:
     return items
 
 
-def validate_verdict(verdict: ItemVerdict) -> None:
-    """워커가 내보낼 판정이 계약에 맞는지 확인한다. 맞지 않으면 모델·코드 문제라 ValueError로 알린다(요청 탓이 아니다)."""
+def validate_verdict(verdict: ItemVerdict, allowed_categories: frozenset[str | None]) -> None:
+    """워커가 내보낼 판정이 계약에 맞는지 확인한다. 맞지 않으면 모델·코드 문제라 ValueError로 알린다(요청 탓이 아니다).
+
+    allowed_categories: 이 워커가 낼 수 있는 범주(STAGE1_CATEGORIES·STAGE2_CATEGORIES).
+    """
     probability = verdict.unsafe_probability
     if not (isinstance(probability, float | int) and math.isfinite(probability) and 0.0 <= probability <= 1.0):
         raise ValueError("unsafe_probability가 0~1의 유한한 수가 아닙니다. 모델 출력 계산을 확인하세요.")
-    if verdict.category not in VALID_CATEGORIES:
-        raise ValueError("category가 계약 밖의 값입니다(1차는 None, 2차는 S1~S7). 분류기 출력을 확인하세요.")
+    if verdict.category not in allowed_categories:
+        raise ValueError("category가 이 워커의 계약 밖 값입니다(1차는 None, 2차는 S1~S7). 분류기 출력을 확인하세요.")
 
 
 def encode_json(document: object) -> bytes:
@@ -145,12 +149,12 @@ def encode_json(document: object) -> bytes:
     return json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
-def build_classify_response(model: str, items: Sequence[ClassifyItem], verdicts: Sequence[ItemVerdict]) -> bytes:
-    """`/classify` 응답 본문. 요청과 같은 순서, 같은 id로 만든다."""
+def build_classify_response(model: str, items: Sequence[ClassifyItem], verdicts: Sequence[ItemVerdict], allowed_categories: frozenset[str | None]) -> bytes:
+    """`/classify` 응답 본문. 요청과 같은 순서, 같은 id로 만든다. 판정이 계약(확률·이 워커의 범주)에 맞지 않으면 ValueError다."""
     if len(items) != len(verdicts):
         raise ValueError("판정 수가 항목 수와 다릅니다. 점수 함수가 입력 순서대로 하나씩 돌려주는지 확인하세요.")
     for verdict in verdicts:
-        validate_verdict(verdict)
+        validate_verdict(verdict, allowed_categories)
     entries = [
         {"id": item.item_id, "unsafe_probability": float(verdict.unsafe_probability), "category": verdict.category}
         for item, verdict in zip(items, verdicts, strict=True)

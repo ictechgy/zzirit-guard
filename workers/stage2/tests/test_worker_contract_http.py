@@ -12,7 +12,8 @@ import pytest
 
 from tests.worker_cases import build_case_body, expected_error, expected_status, load_request_cases, send_case, short_temporary_directory
 from zg_stage2.worker import MAX_ITEMS_PER_REQUEST
-from zg_stage2.worker_contract import ItemVerdict
+from zg_stage2.classifier import MAX_CONTENT_TOKENS
+from zg_stage2.worker_contract import STAGE2_CATEGORIES, ContractError, ItemVerdict
 from zg_stage2.worker_runtime import InferenceRunner
 from zg_stage2.worker_server import WorkerHTTPServer, WorkerSettings
 
@@ -21,7 +22,9 @@ REQUEST_CASES = load_request_cases()
 
 
 def fake_kanana(texts: Sequence[str]) -> list[ItemVerdict]:
-    """가짜 판정: 문장 길이로 확률을 정하고 범주는 S2."""
+    """가짜 판정: 글자 하나를 토큰 하나로 보고 토큰 상한을 넘으면 실제 분류기처럼 text_too_long, 아니면 길이로 확률을 정하고 범주는 S2."""
+    if any(len(text) > MAX_CONTENT_TOKENS for text in texts):
+        raise ContractError("text_too_long")
     return [ItemVerdict(min(1.0, len(text) / 100), "S2") for text in texts]
 
 
@@ -32,7 +35,7 @@ def serving() -> Iterator[Path]:
         runner = InferenceRunner(lambda: fake_kanana)
         runner.start()
         socket_path = directory / "stage2.sock"
-        server = WorkerHTTPServer(socket_path, WorkerSettings(FAKE_MODEL, MAX_ITEMS_PER_REQUEST, runner))
+        server = WorkerHTTPServer(socket_path, WorkerSettings(FAKE_MODEL, MAX_ITEMS_PER_REQUEST, runner, STAGE2_CATEGORIES))
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
         try:

@@ -5,13 +5,13 @@
   (<SAFE>, <UNSAFE-S1>~<UNSAFE-S7>)의 확률을 읽는다. 생성은 하지 않는다(순전파 한 번).
 - 유해 확률은 UNSAFE 확률의 합이고, 범주는 UNSAFE 중 가장 높은 것이다. 스펙: 0.5 이상 후보, 가장 높은 범주가 S6면 '도움 필요'.
 
-채팅은 공격자가 쓴 입력이다. 템플릿 경계를 넘지 못하게 프롬프트를 세 조각으로 만든다.
-- 템플릿 앞부분(시스템 지시문 ~ 사용자 발화 시작)과 뒷부분(사용자 발화 끝 ~ assistant 차례)은 템플릿 그대로 토큰화한다.
-- 가운데 채팅 내용은 따로 토큰화한다.
-  - 특수 토큰(<|eot_id|> 등)은 일반 글자로 쪼갠다.
-  - 추가 토큰 문자열(<SAFE> 등)과 역할 표시(<human> 등)는 꺾쇠를 전각(＜＞)으로 바꿔 실제 제어 토큰이 되지 않게 한다.
-  - 그래도 추가 토큰 번호가 남으면 판정하지 않는다.
-- 앞부분은 모든 프롬프트에 같아 KV 캐시로 한 번만 계산하고, 판정마다 그 상태로 되감는다(접두 캐시).
+채팅은 공격자가 쓴 입력이다. 템플릿 경계를 넘지 못하게 한다.
+- 채팅 안의 추가 토큰 문자열(<|eot_id|>, <SAFE> 등)과 역할 표시(<human> 등)는 꺾쇠를 전각(＜＞)으로 바꾼다. 그래서 실제 제어 토큰이 되지 않는다.
+- 그다음 공식 채팅 템플릿으로 프롬프트 전체를 만들고 한 번에 토큰화한다. 조각마다 따로 토큰화하면 경계에서 학습 때와 다른 토큰이 나올 수 있다.
+- 프롬프트의 추가 토큰 수가 템플릿만 있을 때와 다르면(채팅이 제어 토큰을 만들었으면) 판정하지 않는다.
+- 템플릿 앞부분(시스템 지시문 ~ 사용자 발화 시작)은 모든 프롬프트에 같아 KV 캐시로 한 번만 계산한다(접두 캐시).
+  - 판정마다 각 층을 앞부분 길이로 되감는다.
+  - 프롬프트가 그 토큰들로 시작하지 않으면(경계에서 토큰이 합쳐진 경우) 캐시 없이 전체를 계산한다.
 - 채팅 내용이 MAX_CONTENT_TOKENS를 넘으면 판정하지 않는다(400 text_too_long). 이 맥 미니에서 프롬프트 처리는 초당 약 350~400토큰이다.
   넘는 문장은 서버의 2초 제한을 넘기기 때문이다. 자르지 않는다(판정 입력을 몰래 바꾸지 않기 위해서다).
 주의: 이 모듈의 함수는 추론 스레드 하나에서만 부른다(mlx 모델과 캐시를 여러 스레드가 만지지 않게).
@@ -106,54 +106,79 @@ def neutralize_markers(text: str, pattern: re.Pattern[str]) -> str:
 
 
 class PromptEncoder:
-    """프롬프트를 (템플릿 앞부분, 채팅 내용, 템플릿 뒷부분) 토큰으로 만든다. 앞부분은 모든 프롬프트에 같다."""
+    """채팅 한 줄을 공식 템플릿 프롬프트 토큰으로 만든다. 템플릿 앞부분 토큰(prefix_ids)은 접두 캐시가 쓴다."""
 
     def __init__(self, tokenizer: object) -> None:
         self._tokenizer = tokenizer
         before, after = split_template(tokenizer)
-        self.prefix_ids = self._encode_template(before)
-        self.suffix_ids = self._encode_template(after)
+        self.prefix_ids = self._encode(before)
         self._added_ids = set(added_token_strings(tokenizer))
         self._marker_pattern = build_marker_pattern(list(added_token_strings(tokenizer).values()))
+        template_ids = self._encode(before + after)
+        self._template_length = len(template_ids)
+        self._template_added_count = self._count_added(template_ids)
 
-    def encode_content(self, text: str) -> list[int]:
-        """채팅 내용을 토큰으로 만든다. 템플릿처럼 앞뒤 공백을 지우고, 제어 토큰이 될 문자열은 바꾼 뒤 특수 토큰을 쪼개 토큰화한다.
+    def encode_prompt(self, text: str) -> list[int]:
+        """제어 문자열을 바꾼 채팅으로 템플릿을 그리고 한 번에 토큰화한다(모델 카드와 같은 입력).
 
-        추가 토큰 번호가 남거나 MAX_CONTENT_TOKENS를 넘으면 ContractError다(판정하지 않는다).
+        채팅이 추가 토큰을 만들었거나(bad_text) 채팅 몫이 MAX_CONTENT_TOKENS를 넘으면(text_too_long) ContractError다.
         """
-        content = neutralize_markers(text.strip(), self._marker_pattern)
-        token_ids = list(self._tokenizer.encode(content, add_special_tokens=False, split_special_tokens=True))  # type: ignore[attr-defined]
-        if self._added_ids.intersection(token_ids):
+        rendered = self._tokenizer.apply_chat_template(build_messages(neutralize_markers(text, self._marker_pattern)), tokenize=False)  # type: ignore[attr-defined]
+        prompt_ids = self._encode(rendered)
+        if self._count_added(prompt_ids) != self._template_added_count:
             raise ContractError("bad_text")
-        if len(token_ids) > MAX_CONTENT_TOKENS:
+        if len(prompt_ids) - self._template_length > MAX_CONTENT_TOKENS:
             raise ContractError("text_too_long")
-        return token_ids
+        return prompt_ids
 
-    def _encode_template(self, text: str) -> list[int]:
-        """템플릿 조각을 토큰화한다(템플릿의 특수 토큰은 그대로 쓴다)."""
+    def _encode(self, text: str) -> list[int]:
+        """특수 토큰을 더하지 않고 토큰화한다(템플릿이 이미 넣는다)."""
         return list(self._tokenizer.encode(text, add_special_tokens=False))  # type: ignore[attr-defined]
+
+    def _count_added(self, token_ids: Sequence[int]) -> int:
+        """토큰 목록에 든 추가 토큰(특수 토큰·분류 토큰) 수."""
+        return sum(1 for token_id in token_ids if token_id in self._added_ids)
 
 
 class PrefixCache:
-    """템플릿 앞부분의 KV 캐시. 판정이 끝날 때마다(예외가 나도) 모든 층을 앞부분 길이로 되감는다."""
+    """템플릿 앞부분의 KV 캐시. 판정이 끝날 때마다(예외가 나도) 층마다 앞부분 길이로 되감는다."""
 
     def __init__(self, model: nn.Module, prefix_ids: Sequence[int]) -> None:
         if not prefix_ids:
             raise ModelFormatError("채팅 템플릿 앞부분이 비었습니다. kanana-safeguard 원본 템플릿인지 확인하세요.")
-        self.prefix_length = len(prefix_ids)
-        self.cache = cache_module.make_prompt_cache(model)
-        model(mx.array(list(prefix_ids))[None], cache=self.cache)
-        mx.eval([layer_cache.state for layer_cache in self.cache])
+        self._model = model
+        self.prefix_ids = list(prefix_ids)
+        self.prefix_length = len(self.prefix_ids)
+        self.cache = self._compute()
+
+    def remaining_after_prefix(self, prompt_ids: Sequence[int]) -> list[int] | None:
+        """프롬프트가 앞부분 토큰으로 시작하고 뒤에 토큰이 남으면 그 나머지를, 아니면 None(전체 계산)을 돌려준다."""
+        if len(prompt_ids) <= self.prefix_length or list(prompt_ids[: self.prefix_length]) != self.prefix_ids:
+            return None
+        return list(prompt_ids[self.prefix_length :])
 
     def offsets(self) -> list[int]:
         """층마다 캐시에 든 토큰 수(테스트·확인용)."""
         return [int(layer_cache.offset) for layer_cache in self.cache]
 
     def rewind(self) -> None:
-        """판정 중 쌓인 토큰을 지워 캐시를 앞부분 상태로 되돌린다."""
-        extra = max(self.offsets()) - self.prefix_length
-        if extra > 0:
-            cache_module.trim_prompt_cache(self.cache, extra)
+        """판정 중 쌓인 토큰을 층마다 지운다. 계산 도중 예외로 층마다 진행이 달라도 각 층을 제 길이만큼만 되감는다.
+
+        어느 층이 앞부분보다 짧아졌으면(있어서는 안 되는 상태) 캐시를 새로 계산한다. 다음 판정이 망가진 캐시를 쓰지 않게 하기 위해서다.
+        """
+        for layer_cache in self.cache:
+            extra = int(layer_cache.offset) - self.prefix_length
+            if extra > 0:
+                layer_cache.trim(extra)
+        if any(offset != self.prefix_length for offset in self.offsets()):
+            self.cache = self._compute()
+
+    def _compute(self) -> list:
+        """앞부분을 계산해 새 캐시를 만든다."""
+        cache = cache_module.make_prompt_cache(self._model)
+        self._model(mx.array(self.prefix_ids)[None], cache=cache)
+        mx.eval([layer_cache.state for layer_cache in cache])
+        return cache
 
 
 class KananaClassifier:
@@ -164,14 +189,19 @@ class KananaClassifier:
         self._label_ids = mx.array(resolve_label_token_ids(tokenizer))
         self._encoder = PromptEncoder(tokenizer)
         self._prefix = PrefixCache(model, self._encoder.prefix_ids)
+        self.fallback_count = 0
 
     def classify(self, texts: Sequence[str]) -> list[ItemVerdict]:
         """문장마다 판정한다(직렬). 묶음 처리는 프롬프트 처리량이 병목이라 효과가 거의 없었다(스파이크)."""
         return [self.classify_one(text) for text in texts]
 
     def classify_one(self, text: str) -> ItemVerdict:
-        """한 문장을 판정한다. 앞부분은 캐시에서 쓰고 채팅 내용과 뒷부분만 계산한 뒤, 캐시를 되감는다."""
-        remaining = self._encoder.encode_content(text) + self._encoder.suffix_ids
+        """한 문장을 판정한다. 프롬프트가 앞부분 토큰으로 시작하면 나머지만 계산하고 캐시를 되감는다. 아니면 전체를 계산한다."""
+        prompt_ids = self._encoder.encode_prompt(text)
+        remaining = self._prefix.remaining_after_prefix(prompt_ids)
+        if remaining is None:
+            self.fallback_count += 1
+            return self._summarize(self._model(mx.array(prompt_ids)[None])[0, -1])
         try:
             return self._summarize(self._model(mx.array(remaining)[None], cache=self._prefix.cache)[0, -1])
         finally:
@@ -179,8 +209,7 @@ class KananaClassifier:
 
     def classify_without_cache(self, text: str) -> ItemVerdict:
         """접두 캐시 없이 프롬프트 전체를 계산한다(접두 캐시 결과를 확인할 때 쓴다)."""
-        prompt = self._encoder.prefix_ids + self._encoder.encode_content(text) + self._encoder.suffix_ids
-        return self._summarize(self._model(mx.array(prompt)[None])[0, -1])
+        return self._summarize(self._model(mx.array(self._encoder.encode_prompt(text))[None])[0, -1])
 
     def _summarize(self, last_logits: mx.array) -> ItemVerdict:
         """마지막 위치의 logits에서 분류 토큰 확률을 구한다. bf16 그대로 지수를 취하면 합이 1을 넘는 오차가 생겨 float32로 올린다."""

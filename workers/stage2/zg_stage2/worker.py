@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from zg_stage2.errors import PathResolutionError, Stage2Error
-from zg_stage2.worker_contract import ItemVerdict, validate_model_identifier
+from zg_stage2.worker_contract import STAGE2_CATEGORIES, ItemVerdict, validate_model_identifier
 from zg_stage2.worker_runtime import (
     InferenceRunner,
     WorkerSetupError,
@@ -149,7 +149,7 @@ def serve_model(
     runner = InferenceRunner(build_infer)
     runner.start()
     try:
-        serve_until_stopped(socket_path, WorkerSettings(model, MAX_ITEMS_PER_REQUEST, runner), on_ready)
+        serve_until_stopped(socket_path, WorkerSettings(model, MAX_ITEMS_PER_REQUEST, runner, STAGE2_CATEGORIES), on_ready)
     finally:
         runner.stop()
 

@@ -28,7 +28,7 @@ from tests.worker_cases import (
     short_temporary_directory,
 )
 from zg_stage1 import worker_server
-from zg_stage1.worker_contract import ContractError, ItemVerdict
+from zg_stage1.worker_contract import STAGE1_CATEGORIES, ContractError, ItemVerdict
 from zg_stage1.worker_runtime import InferenceRunner
 from zg_stage1.worker_server import MAX_CONCURRENT_CONNECTIONS, WorkerHTTPServer, WorkerRequestHandler, WorkerSettings, parse_content_length
 
@@ -53,7 +53,7 @@ def serving_server(infer: Callable[[Sequence[str]], list], result_wait_seconds: 
         runner = InferenceRunner(lambda: infer, result_wait_seconds=result_wait_seconds)
         runner.start()
         socket_path = directory / "stage1.sock"
-        server = WorkerHTTPServer(socket_path, WorkerSettings(FAKE_MODEL, 32, runner))
+        server = WorkerHTTPServer(socket_path, WorkerSettings(FAKE_MODEL, 32, runner, STAGE1_CATEGORIES))
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
         try:
@@ -330,7 +330,7 @@ def test_failed_handler_thread_start_does_not_break_shutdown(monkeypatch: pytest
     with short_temporary_directory() as directory:
         runner = InferenceRunner(lambda: length_score)
         runner.start()
-        server = WorkerHTTPServer(directory / "stage1.sock", WorkerSettings(FAKE_MODEL, 32, runner))
+        server = WorkerHTTPServer(directory / "stage1.sock", WorkerSettings(FAKE_MODEL, 32, runner, STAGE1_CATEGORIES))
         left, right = socket.socketpair()
         monkeypatch.setattr(worker_server.threading, "Thread", FailingThread)
         with pytest.raises(RuntimeError):
@@ -353,8 +353,9 @@ def test_classifier_contract_error_is_returned_as_is() -> None:
     assert (response.status, response.body) == (400, {"error": "text_too_long"})
 
 
-def test_invalid_category_is_500() -> None:
-    """분류기가 계약 밖의 범주(S8)를 내면 500이다."""
-    with serving(lambda texts: [ItemVerdict(0.5, "S8") for _ in texts]) as socket_path:
+@pytest.mark.parametrize("category", ["S8", "S1"])
+def test_category_outside_this_worker_is_500(category: str) -> None:
+    """1차 워커가 범주를 내면(S8은 어디에도 없고, S1은 2차의 범주) 500이다."""
+    with serving(lambda texts: [ItemVerdict(0.5, category) for _ in texts]) as socket_path:
         response = send_json(socket_path, "POST", "/classify", {"items": [{"id": "a", "text": "가"}]})
     assert (response.status, response.body) == (500, {"error": "internal"})
