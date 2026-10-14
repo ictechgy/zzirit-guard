@@ -206,11 +206,12 @@ def test_cli_refuses_output_inside_repository(tmp_path: Path, khaters_records: l
 
 def test_manifest_keeps_safe_ids_and_hashes_others() -> None:
     """뺀 K-HATERS 줄의 id는 짧은 영숫자면 그대로, 문장·경로 모양이면 sha256 앞 16자로 적는다. 평가 문장 id는 그대로다."""
-    findings = [OverlapFinding("12391", "dev-0491", 1.0), OverlapFinding("감사합니다 정말", "d1", 0.9), OverlapFinding("/Users/alice/train.jsonl", "d2", 1.0)]
+    path_shaped = "/Users/<사용자>/train.jsonl"
+    findings = [OverlapFinding("12391", "dev-0491", 1.0), OverlapFinding("감사합니다 정말", "d1", 0.9), OverlapFinding(path_shaped, "d2", 1.0)]
     described = [describe_excluded_overlap(finding) for finding in findings]
     assert described[0] == {"item_id": "12391", "reference_id": "dev-0491", "similarity": 1.0}
     assert all(record["item_id"].startswith("sha256:") and len(record["item_id"]) == 23 for record in described[1:])
-    assert "감사" not in json.dumps(described, ensure_ascii=False) and "alice" not in json.dumps(described)
+    assert "감사" not in json.dumps(described, ensure_ascii=False) and "Users" not in json.dumps(described)
 
 
 def staged_or_published_files(directory: Path) -> list[str]:
