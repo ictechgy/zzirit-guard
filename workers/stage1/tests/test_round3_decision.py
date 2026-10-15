@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from zg_stage1 import round3_decision
 from zg_stage1.chat_eval_data import ChatEvalItem
 from zg_stage1.errors import DatasetFormatError
 from zg_stage1.data import compute_file_sha256
@@ -549,10 +550,10 @@ def test_precheck_reports_r0_stop_stage2_rates_and_input_hashes(tmp_path: Path) 
             {
                 "id": row["id"],
                 "decision": "candidate" if row["category"] == "quote_report" else "pass",
-                "keyword": None,
+                "keyword": 7 if row["category"] == "minors" else None,  # R0에도 기본 키워드 경로 적중이 있다
                 "skipAi": False,
                 "evalSha256": eval_sha,
-                "policySha256": "r0",
+                "policySha256": round3_decision.R0_POLICY_SHA256,
             }
             for row in records
         ],
@@ -627,7 +628,8 @@ def test_dev_command_writes_decision_markdown_and_manifest_from_relative_config(
     dev_file = write_jsonl(tmp_path / "dev.jsonl", records)
     dev_sha = compute_file_sha256(dev_file)
     route_records = [
-        {"id": row["id"], "decision": "pass", "keyword": None, "skipAi": False, "evalSha256": dev_sha, "policySha256": "policy-r0"} for row in records
+        {"id": row["id"], "decision": "pass", "keyword": None, "skipAi": False, "evalSha256": dev_sha, "policySha256": round3_decision.R0_POLICY_SHA256}
+        for row in records
     ]
     routes = write_jsonl(tmp_path / "routes.jsonl", route_records)
     stage2 = write_json(
@@ -678,7 +680,7 @@ def test_dev_command_writes_decision_markdown_and_manifest_from_relative_config(
                 "eval_file": {"sha256": dev_sha},
                 "short_rule": {"max_length": 5, "multiplier": 4.0},
                 "traffic_mix": mix,
-                "rule_routes": {"policy_sha256": "policy-r0"},
+                "rule_routes": {"policy_sha256": round3_decision.R0_POLICY_SHA256},
                 "stage2_scores": {"model_identifier": "kanana@fixed", "sha256": compute_file_sha256(stage2)},
                 "decision": {"mode": "budget", "budget": 0.304, "threshold": 0.42, "at_threshold": summary},
                 "scores": scores,
@@ -767,3 +769,10 @@ def test_dev_command_writes_decision_markdown_and_manifest_from_relative_config(
     assert (tmp_path / "decision.md").is_file()
     combined = output.read_text(encoding="utf-8") + (tmp_path / "decision.md").read_text(encoding="utf-8")
     assert all(row["text"] not in combined for row in records)
+
+
+def test_require_r0_policy_accepts_r0_and_rejects_other_fingerprints() -> None:
+    """R0인지는 키워드 적중 유무가 아니라 규칙 지문으로 가린다(R0에도 기본 키워드 경로 적중이 있다)."""
+    round3_decision.require_r0_policy(round3_decision.R0_POLICY_SHA256, "규칙 경로")
+    with pytest.raises(DatasetFormatError, match="R0와 다릅니다"):
+        round3_decision.require_r0_policy("da3b4400f4b8617c535f2d90bf3833121602a915eabfd6b0a302e473f4385739", "규칙 경로")
