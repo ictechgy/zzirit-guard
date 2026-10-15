@@ -22,7 +22,7 @@ from zg_stage1.data import (
 from zg_stage1.errors import OutputExistsError, run_command_line
 from zg_stage1.evaluate import resolve_max_length
 from zg_stage1.metrics import METRIC_DECIMALS, compute_roc_auc
-from zg_stage1.model_card import read_model_card, utc_timestamp, write_json_atomically
+from zg_stage1.model_card import read_model_card, require_completed_training, utc_timestamp, write_json_atomically
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -71,6 +71,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     records, excluded_ids = load_validation_records(arguments.val_file, arguments.exclude_untargeted_offensive)
     device = modeling.resolve_device(arguments.device)
     model_card = read_model_card(arguments.model_dir)
+    require_completed_training(model_card, arguments.model_dir.name)
     max_length = resolve_max_length(arguments.model_dir, model_card)
     tokenizer = modeling.load_trained_tokenizer(arguments.model_dir)
     model = modeling.move_model_to_device(modeling.load_trained_classifier(arguments.model_dir), device)

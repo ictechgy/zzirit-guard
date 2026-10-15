@@ -58,7 +58,7 @@ def test_main_scores_policy_aligned_rows_and_writes_provenance(tmp_path: Path, m
     monkeypatch.setattr("zg_stage1.validation_auc.modeling.load_trained_classifier", lambda directory: "model")
     monkeypatch.setattr("zg_stage1.validation_auc.modeling.move_model_to_device", lambda model, device: model)
     monkeypatch.setattr("zg_stage1.validation_auc.resolve_max_length", lambda directory, card: 77)
-    monkeypatch.setattr("zg_stage1.validation_auc.read_model_card", lambda directory: {"hyperparameters": {"max_length": 77}})
+    monkeypatch.setattr("zg_stage1.validation_auc.read_model_card", lambda directory: {"status": "completed", "hyperparameters": {"max_length": 77}})
 
     def fake_scores(model: object, tokenizer: object, texts: list[str], device: str, max_length: int, batch_size: int) -> list[float]:
         captured.update(texts=texts, device=device, max_length=max_length, batch_size=batch_size)

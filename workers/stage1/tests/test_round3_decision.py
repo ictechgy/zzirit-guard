@@ -10,7 +10,7 @@ import pytest
 
 from zg_stage1 import round3_decision
 from zg_stage1.chat_eval_data import ChatEvalItem
-from zg_stage1.errors import DatasetFormatError
+from zg_stage1.errors import DatasetFormatError, ModelFormatError
 from zg_stage1.data import compute_file_sha256
 from zg_stage1.evaluate_chat import ShortRule
 from zg_stage1.round3_decision import (
@@ -347,6 +347,7 @@ def test_auc_constants_and_d_evidence_are_verified(tmp_path: Path) -> None:
             tmp_path / f"original-{seed}.json",
             {
                 "best_validation_auc": 0.91,
+                "status": "completed",
                 "hyperparameters": {"seed": seed},
                 "training_data": {"train": {"sha256": H1T2_TRAINING_DATA_SHA256}},
             },
@@ -388,6 +389,7 @@ def test_auc_constants_and_d_evidence_are_verified(tmp_path: Path) -> None:
                 tmp_path / f"card-{model}-{seed}.json",
                 {
                     "best_validation_auc": 0.901,
+                    "status": "completed",
                     "hyperparameters": {"seed": seed},
                     "training_data": {"train": {"sha256": H1T2_TRAINING_DATA_SHA256 if model == "H1T2" else "a" * 64}},
                 },
@@ -723,6 +725,7 @@ def test_dev_command_writes_decision_markdown_and_manifest_from_relative_config(
             tmp_path / f"card-{seed}.json",
             {
                 "best_validation_auc": 0.91,
+                "status": "completed",
                 "hyperparameters": {"seed": seed},
                 "training_data": {"train": {"sha256": H1T2_TRAINING_DATA_SHA256}},
             },
@@ -776,3 +779,22 @@ def test_require_r0_policy_accepts_r0_and_rejects_other_fingerprints() -> None:
     round3_decision.require_r0_policy(round3_decision.R0_POLICY_SHA256, "규칙 경로")
     with pytest.raises(DatasetFormatError, match="R0와 다릅니다"):
         round3_decision.require_r0_policy("da3b4400f4b8617c535f2d90bf3833121602a915eabfd6b0a302e473f4385739", "규칙 경로")
+
+
+def test_model_card_auc_refuses_unfinished_training(tmp_path: Path) -> None:
+    """검증 AUC 근거 카드가 학습 중(status running)이면 중간 체크포인트의 AUC라서 거절한다."""
+    references = [
+        write_json(
+            tmp_path / f"card-{seed}.json",
+            {
+                "best_validation_auc": 0.91,
+                "status": "running" if seed == 20261031 else "completed",
+                "hyperparameters": {"seed": seed},
+                "training_data": {"train": {"sha256": H1T2_TRAINING_DATA_SHA256}},
+            },
+        ).name
+        for seed in (20261011, 20261021, 20261031)
+    ]
+    config = {"validation_auc": {"H1T2": references}}
+    with pytest.raises(ModelFormatError, match="학습이 끝나지 않았습니다"):
+        round3_decision.load_model_card_auc_values(config, tmp_path / "config.json", "H1T2", H1T2_TRAINING_DATA_SHA256)

@@ -27,7 +27,7 @@ from zg_stage1.evaluate_chat import (
     weighted_forward_rate,
 )
 from zg_stage1.metrics import METRIC_DECIMALS
-from zg_stage1.model_card import utc_timestamp, write_json_atomically
+from zg_stage1.model_card import require_completed_training, utc_timestamp, write_json_atomically
 
 PASS_MIN_RECALL = 0.90
 NEAR_MIN_RECALL = 0.85
@@ -639,6 +639,7 @@ def load_model_card_auc_values(config: Mapping[str, Any], config_path: Path, key
     for reference, expected_seed in zip(require_three(references, f"validation_auc.{key}"), REQUIRED_TRAINING_SEEDS, strict=True):
         path = resolve_relative_path(config_path, reference, f"validation_auc.{key}")
         document = read_json_object(path, "모델 카드 AUC 근거")
+        require_completed_training(document, path.parent.name)
         hyperparameters = document.get("hyperparameters")
         seed = hyperparameters.get("seed") if isinstance(hyperparameters, dict) else None
         require_equal(seed, expected_seed, f"{path.name}의 모델 카드 학습 시드")

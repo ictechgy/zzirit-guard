@@ -22,6 +22,9 @@ MODEL_CARD_FILE_NAME = "model-card.json"
 # 카드 형식 버전. 필드를 바꾸면 올려서, 읽는 쪽(워커·평가)이 형식을 구분하게 한다.
 MODEL_CARD_SCHEMA_VERSION = 1
 
+# 학습이 끝났을 때만 카드에 쓰는 상태 값. running·interrupted 카드 옆의 가중치는 중간 체크포인트다.
+COMPLETED_STATUS = "completed"
+
 # 버전을 기록할 라이브러리. 같은 시드라도 라이브러리가 바뀌면 결과가 달라질 수 있어 함께 남긴다.
 TRACKED_LIBRARIES: tuple[str, ...] = ("torch", "transformers", "tokenizers", "safetensors", "numpy", "huggingface-hub")
 
@@ -144,3 +147,20 @@ def read_model_card(model_directory: Path) -> dict | None:
         raise ModelFormatError(
             f"{MODEL_CARD_FILE_NAME}을 JSON으로 읽을 수 없습니다({error.msg}). 학습이 중간에 끊겼는지 확인하고, 필요하면 다시 학습하세요."
         ) from error
+
+
+def require_completed_training(card: dict | None, directory_name: str) -> None:
+    """카드가 있으면 학습이 끝난 모델인지 확인한다. 끝나지 않았으면 ModelFormatError로 멈춘다.
+
+    card: read_model_card의 결과. directory_name: 오류 메시지에 쓸 모델 디렉터리 이름.
+    왜: 학습 도구는 epoch마다 최고 가중치와 카드를 다시 쓴다. 학습 중에 평가하면 중간 체크포인트를 재서
+    최종 모델과 다른 모델로 판정하게 된다(M2 3차에서 실제로 났다). 카드가 없는 디렉터리는 지금처럼 평가를 허용한다.
+    """
+    if card is None:
+        return
+    status = card.get("status") if isinstance(card, dict) else None
+    if status != COMPLETED_STATUS:
+        raise ModelFormatError(
+            f"{directory_name}의 학습이 끝나지 않았습니다(model-card.json status={status!r}). "
+            "학습이 끝나 status가 completed가 된 뒤 평가하세요. 중간 체크포인트는 최종 모델과 다를 수 있습니다."
+        )

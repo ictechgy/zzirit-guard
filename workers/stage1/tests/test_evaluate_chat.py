@@ -10,7 +10,7 @@ import pytest
 
 from zg_stage1.chat_eval_data import ALLOW_CATEGORIES, HARMFUL_CATEGORIES, ChatEvalItem
 from zg_stage1.data import compute_file_sha256
-from zg_stage1.errors import DatasetFormatError, MetricError, OutputExistsError
+from zg_stage1.errors import DatasetFormatError, MetricError, ModelFormatError, OutputExistsError
 from zg_stage1.evaluate_chat import (
     DEFAULT_TRAFFIC_MIX,
     average_model_scores,
@@ -32,6 +32,7 @@ from zg_stage1.evaluate_chat import (
     read_dev_threshold,
     require_matching_decision,
     resolve_output_path,
+    score_model_items,
     scored_pairs,
     select_budget_threshold,
     stage2_rates_by_category,
@@ -40,6 +41,7 @@ from zg_stage1.evaluate_chat import (
     weighted_forward_rate,
     write_raw_score_artifacts,
 )
+from zg_stage1.model_card import require_completed_training
 
 
 def item(identifier: str, label: str, category: str, split: str = "dev") -> ChatEvalItem:
@@ -563,3 +565,20 @@ def test_model_training_identity_comes_from_model_card(tmp_path: Path) -> None:
         model_training_seed(model)
     with pytest.raises(DatasetFormatError, match="학습 데이터"):
         model_training_data_sha256(model)
+
+
+def test_scoring_refuses_unfinished_training(tmp_path: Path) -> None:
+    """학습 중이거나 중단된 카드의 모델은 점수를 내기 전에 거부한다. 학습 도구가 epoch마다 중간 체크포인트를 쓰기 때문이다."""
+    model = tmp_path / "model"
+    model.mkdir()
+    arguments = argparse.Namespace(device="cpu", batch_size=8)
+    for status in ("running", "interrupted", None):
+        (model / "model-card.json").write_text(json.dumps({"status": status}), encoding="utf-8")
+        with pytest.raises(ModelFormatError, match="학습이 끝나지 않았습니다"):
+            score_model_items(arguments, model, [])
+
+
+def test_completed_or_cardless_models_pass_training_check() -> None:
+    """학습이 끝난 카드와 카드 없는 디렉터리(기존 허용)는 통과한다."""
+    require_completed_training({"status": "completed"}, "model")
+    require_completed_training(None, "model")
