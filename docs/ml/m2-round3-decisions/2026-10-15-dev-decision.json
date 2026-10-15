@@ -1,0 +1,1010 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-15T11:55:29+00:00",
+  "variant": "W",
+  "settings": [
+    {
+      "key": "H1T2/single",
+      "model": "H1T2",
+      "form": "single",
+      "critical_recall": 0.8979666666666667,
+      "qualified": false,
+      "qualification_failures": [
+        "통과 시드가 2개 미만",
+        "근접하지 않은 시드가 있음"
+      ],
+      "evaluation_units": [
+        {
+          "role": "seed",
+          "source": {
+            "name": "h1t2-s20261011.json",
+            "sha256": "c9b57e32a6e6e5753372b5b1a162c28da27cda056e562dc3b02048d81cba3715"
+          },
+          "metrics": {
+            "threshold": 0.001571,
+            "weighted_forward_rate": 0.3018,
+            "critical_recall_min": 0.898,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9778,
+              "friendly_profanity": 0.45,
+              "game_combat": 0.3621,
+              "long_normal": 0.3333,
+              "minors": 1.0,
+              "number_url_like": 0.2069,
+              "quote_report": 0.4576,
+              "self_harm": 0.898,
+              "sexual": 0.9697,
+              "short_normal": 0.2778,
+              "spam": 0.98,
+              "threat": 1.0
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2167,
+              "game_combat": 0.2241,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.8367,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.45,
+            "quote_report_stage1_forward_rate": 0.4576,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.3621,
+            "short_normal": 0.2778,
+            "long_normal": 0.3333,
+            "number_url_like": 0.2069,
+            "allowed_max": 0.45,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8980 < 0.90",
+              "friendly_profanity 0.4500 > 0.30"
+            ],
+            "near_failures": [
+              "friendly_profanity 0.4500 > 0.35"
+            ]
+          },
+          "seed": 20261011
+        },
+        {
+          "role": "seed",
+          "source": {
+            "name": "h1t2-s20261021.json",
+            "sha256": "f5be9437a92cf3466a77daec6b2cc4bf82c6ca58b5858974fc3fbe75aab0cbd0"
+          },
+          "metrics": {
+            "threshold": 0.010232,
+            "weighted_forward_rate": 0.3039,
+            "critical_recall_min": 0.9388,
+            "by_category": {
+              "abuse": 0.9846,
+              "doxxing": 1.0,
+              "friendly_profanity": 0.2833,
+              "game_combat": 0.3276,
+              "long_normal": 0.35,
+              "minors": 1.0,
+              "number_url_like": 0.3621,
+              "quote_report": 0.5085,
+              "self_harm": 0.9388,
+              "sexual": 1.0,
+              "short_normal": 0.3148,
+              "spam": 0.98,
+              "threat": 1.0
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9077,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1724,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1864,
+              "self_harm": 0.8367,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 0.9846,
+            "friendly_profanity": 0.2833,
+            "quote_report_stage1_forward_rate": 0.5085,
+            "quote_report_endpoint": 0.1864,
+            "game_combat": 0.3276,
+            "short_normal": 0.3148,
+            "long_normal": 0.35,
+            "number_url_like": 0.3621,
+            "allowed_max": 0.3621,
+            "pass": true,
+            "near": true,
+            "status": "pass",
+            "pass_failures": [],
+            "near_failures": []
+          },
+          "seed": 20261021
+        },
+        {
+          "role": "seed",
+          "source": {
+            "name": "h1t2-s20261031.json",
+            "sha256": "99e4ae556db6bd76f8940f88b01b17103623a90d2b5da5aa52da262a6b5e35ad"
+          },
+          "metrics": {
+            "threshold": 0.003778,
+            "weighted_forward_rate": 0.3034,
+            "critical_recall_min": 0.8571,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9333,
+              "friendly_profanity": 0.4333,
+              "game_combat": 0.2931,
+              "long_normal": 0.1167,
+              "minors": 0.9062,
+              "number_url_like": 0.2931,
+              "quote_report": 0.4407,
+              "self_harm": 0.8571,
+              "sexual": 0.9545,
+              "short_normal": 0.463,
+              "spam": 0.94,
+              "threat": 0.9062
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2667,
+              "game_combat": 0.1897,
+              "long_normal": 0.0333,
+              "minors": 0.4219,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7959,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.3594
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.4333,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.2931,
+            "short_normal": 0.463,
+            "long_normal": 0.1167,
+            "number_url_like": 0.2931,
+            "allowed_max": 0.463,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8571 < 0.90",
+              "friendly_profanity 0.4333 > 0.30",
+              "short_normal 0.4630 > 0.40"
+            ],
+            "near_failures": [
+              "friendly_profanity 0.4333 > 0.35",
+              "short_normal 0.4630 > 0.45"
+            ]
+          },
+          "seed": 20261031
+        }
+      ]
+    },
+    {
+      "key": "W/single",
+      "model": "W",
+      "form": "single",
+      "critical_recall": 0.8299333333333334,
+      "qualified": false,
+      "qualification_failures": [
+        "통과 시드가 2개 미만",
+        "근접하지 않은 시드가 있음"
+      ],
+      "evaluation_units": [
+        {
+          "role": "seed",
+          "source": {
+            "name": "w-s20261011.json",
+            "sha256": "765411dee97b15dee5ca97535c3d0f9e037e392f5cf672feabc0c3d427999316"
+          },
+          "metrics": {
+            "threshold": 0.002179,
+            "weighted_forward_rate": 0.2996,
+            "critical_recall_min": 0.8776,
+            "by_category": {
+              "abuse": 0.9846,
+              "doxxing": 0.9556,
+              "friendly_profanity": 0.3167,
+              "game_combat": 0.3276,
+              "long_normal": 0.1833,
+              "minors": 0.9688,
+              "number_url_like": 0.1897,
+              "quote_report": 0.4407,
+              "self_harm": 0.8776,
+              "sexual": 0.9545,
+              "short_normal": 0.4444,
+              "spam": 0.96,
+              "threat": 0.9688
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9077,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1897,
+              "long_normal": 0.0167,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7755,
+              "sexual": 0.7424,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 0.9846,
+            "friendly_profanity": 0.3167,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.3276,
+            "short_normal": 0.4444,
+            "long_normal": 0.1833,
+            "number_url_like": 0.1897,
+            "allowed_max": 0.4444,
+            "pass": false,
+            "near": true,
+            "status": "near",
+            "pass_failures": [
+              "critical_recall_min 0.8776 < 0.90",
+              "friendly_profanity 0.3167 > 0.30",
+              "short_normal 0.4444 > 0.40"
+            ],
+            "near_failures": []
+          },
+          "seed": 20261011
+        },
+        {
+          "role": "seed",
+          "source": {
+            "name": "w-s20261021.json",
+            "sha256": "96fde50d9dacf7cb77f7b3eda0f380fbf3b1398e3a85874aad3136460fb3b2fa"
+          },
+          "metrics": {
+            "threshold": 0.0007,
+            "weighted_forward_rate": 0.3011,
+            "critical_recall_min": 0.7959,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9778,
+              "friendly_profanity": 0.3333,
+              "game_combat": 0.2414,
+              "long_normal": 0.2,
+              "minors": 0.9844,
+              "number_url_like": 0.1897,
+              "quote_report": 0.4407,
+              "self_harm": 0.7959,
+              "sexual": 0.9394,
+              "short_normal": 0.463,
+              "spam": 0.94,
+              "threat": 0.9688
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1724,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1864,
+              "self_harm": 0.7347,
+              "sexual": 0.7576,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.3333,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1864,
+            "game_combat": 0.2414,
+            "short_normal": 0.463,
+            "long_normal": 0.2,
+            "number_url_like": 0.1897,
+            "allowed_max": 0.463,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.7959 < 0.90",
+              "friendly_profanity 0.3333 > 0.30",
+              "short_normal 0.4630 > 0.40"
+            ],
+            "near_failures": [
+              "critical_recall_min 0.7959 < 0.85",
+              "short_normal 0.4630 > 0.45"
+            ]
+          },
+          "seed": 20261021
+        },
+        {
+          "role": "seed",
+          "source": {
+            "name": "w-s20261031.json",
+            "sha256": "0c22b96f6a34ea50047e9e83e6ef8e4fdde11b64956ba761874d71a06d9407f3"
+          },
+          "metrics": {
+            "threshold": 0.000483,
+            "weighted_forward_rate": 0.3036,
+            "critical_recall_min": 0.8163,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 1.0,
+              "friendly_profanity": 0.4167,
+              "game_combat": 0.2069,
+              "long_normal": 0.2,
+              "minors": 1.0,
+              "number_url_like": 0.2069,
+              "quote_report": 0.4407,
+              "self_harm": 0.8163,
+              "sexual": 0.9848,
+              "short_normal": 0.4444,
+              "spam": 0.98,
+              "threat": 0.9688
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2167,
+              "game_combat": 0.1207,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7347,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.4167,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.2069,
+            "short_normal": 0.4444,
+            "long_normal": 0.2,
+            "number_url_like": 0.2069,
+            "allowed_max": 0.4444,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8163 < 0.90",
+              "friendly_profanity 0.4167 > 0.30",
+              "short_normal 0.4444 > 0.40"
+            ],
+            "near_failures": [
+              "critical_recall_min 0.8163 < 0.85",
+              "friendly_profanity 0.4167 > 0.35"
+            ]
+          },
+          "seed": 20261031
+        }
+      ]
+    },
+    {
+      "key": "H1T2/ensemble",
+      "model": "H1T2",
+      "form": "ensemble",
+      "critical_recall": 0.9184,
+      "qualified": false,
+      "qualification_failures": [
+        "세 시드 앙상블이 통과하지 않음",
+        "근접하지 않은 두 시드 앙상블이 있음"
+      ],
+      "evaluation_units": [
+        {
+          "role": "three_seed_ensemble",
+          "source": {
+            "name": "h1t2-ens.json",
+            "sha256": "a5d111c7566abbb7d34cf3d7787ab02e8780feb7d8d4ac159a077280c59ad279"
+          },
+          "metrics": {
+            "threshold": 0.008352,
+            "weighted_forward_rate": 0.3004,
+            "critical_recall_min": 0.9184,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9778,
+              "friendly_profanity": 0.4167,
+              "game_combat": 0.3621,
+              "long_normal": 0.2833,
+              "minors": 0.9844,
+              "number_url_like": 0.2586,
+              "quote_report": 0.4746,
+              "self_harm": 0.9184,
+              "sexual": 0.9697,
+              "short_normal": 0.3148,
+              "spam": 0.96,
+              "threat": 1.0
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2333,
+              "game_combat": 0.2069,
+              "long_normal": 0.0333,
+              "minors": 0.4219,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1864,
+              "self_harm": 0.8163,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.4167,
+            "quote_report_stage1_forward_rate": 0.4746,
+            "quote_report_endpoint": 0.1864,
+            "game_combat": 0.3621,
+            "short_normal": 0.3148,
+            "long_normal": 0.2833,
+            "number_url_like": 0.2586,
+            "allowed_max": 0.4167,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "friendly_profanity 0.4167 > 0.30"
+            ],
+            "near_failures": [
+              "friendly_profanity 0.4167 > 0.35"
+            ]
+          }
+        },
+        {
+          "role": "two_seed_ensemble",
+          "source": {
+            "name": "h1t2-pair-1.json",
+            "sha256": "7d91930cca3624b6a8bd1bcfddac529801cbdc2e400b2e4eee2c2d21abad32d7"
+          },
+          "metrics": {
+            "threshold": 0.007366,
+            "weighted_forward_rate": 0.3,
+            "critical_recall_min": 0.9388,
+            "by_category": {
+              "abuse": 0.9846,
+              "doxxing": 1.0,
+              "friendly_profanity": 0.35,
+              "game_combat": 0.3621,
+              "long_normal": 0.3333,
+              "minors": 0.9844,
+              "number_url_like": 0.2759,
+              "quote_report": 0.4746,
+              "self_harm": 0.9388,
+              "sexual": 0.9848,
+              "short_normal": 0.2963,
+              "spam": 0.98,
+              "threat": 1.0
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9077,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2167,
+              "game_combat": 0.2069,
+              "long_normal": 0.0333,
+              "minors": 0.4219,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1864,
+              "self_harm": 0.8367,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 0.9846,
+            "friendly_profanity": 0.35,
+            "quote_report_stage1_forward_rate": 0.4746,
+            "quote_report_endpoint": 0.1864,
+            "game_combat": 0.3621,
+            "short_normal": 0.2963,
+            "long_normal": 0.3333,
+            "number_url_like": 0.2759,
+            "allowed_max": 0.3621,
+            "pass": false,
+            "near": true,
+            "status": "near",
+            "pass_failures": [
+              "friendly_profanity 0.3500 > 0.30"
+            ],
+            "near_failures": []
+          }
+        },
+        {
+          "role": "two_seed_ensemble",
+          "source": {
+            "name": "h1t2-pair-2.json",
+            "sha256": "de100e2e39fc9faa46fcf01f88bfcdf2539fd3251ee0c00e903fded2c33d2af8"
+          },
+          "metrics": {
+            "threshold": 0.003374,
+            "weighted_forward_rate": 0.3029,
+            "critical_recall_min": 0.8776,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9778,
+              "friendly_profanity": 0.4667,
+              "game_combat": 0.3276,
+              "long_normal": 0.1667,
+              "minors": 0.9844,
+              "number_url_like": 0.2586,
+              "quote_report": 0.4576,
+              "self_harm": 0.8776,
+              "sexual": 0.9697,
+              "short_normal": 0.4074,
+              "spam": 0.92,
+              "threat": 0.9844
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2667,
+              "game_combat": 0.2069,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.8163,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.4667,
+            "quote_report_stage1_forward_rate": 0.4576,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.3276,
+            "short_normal": 0.4074,
+            "long_normal": 0.1667,
+            "number_url_like": 0.2586,
+            "allowed_max": 0.4667,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8776 < 0.90",
+              "friendly_profanity 0.4667 > 0.30",
+              "short_normal 0.4074 > 0.40"
+            ],
+            "near_failures": [
+              "friendly_profanity 0.4667 > 0.35"
+            ]
+          }
+        },
+        {
+          "role": "two_seed_ensemble",
+          "source": {
+            "name": "h1t2-pair-3.json",
+            "sha256": "9bace08910f22324f0e0d6f283f6fbebe72ea1f13f09b62ed09f188bac2b5771"
+          },
+          "metrics": {
+            "threshold": 0.011264,
+            "weighted_forward_rate": 0.3005,
+            "critical_recall_min": 0.9184,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9778,
+              "friendly_profanity": 0.4,
+              "game_combat": 0.3448,
+              "long_normal": 0.3,
+              "minors": 0.9844,
+              "number_url_like": 0.2586,
+              "quote_report": 0.4746,
+              "self_harm": 0.9184,
+              "sexual": 0.9697,
+              "short_normal": 0.3148,
+              "spam": 0.96,
+              "threat": 1.0
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2333,
+              "game_combat": 0.2069,
+              "long_normal": 0.0333,
+              "minors": 0.4219,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1864,
+              "self_harm": 0.8163,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.4,
+            "quote_report_stage1_forward_rate": 0.4746,
+            "quote_report_endpoint": 0.1864,
+            "game_combat": 0.3448,
+            "short_normal": 0.3148,
+            "long_normal": 0.3,
+            "number_url_like": 0.2586,
+            "allowed_max": 0.4,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "friendly_profanity 0.4000 > 0.30"
+            ],
+            "near_failures": [
+              "friendly_profanity 0.4000 > 0.35"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "W/ensemble",
+      "model": "W",
+      "form": "ensemble",
+      "critical_recall": 0.8571,
+      "qualified": false,
+      "qualification_failures": [
+        "세 시드 앙상블이 통과하지 않음",
+        "근접하지 않은 두 시드 앙상블이 있음"
+      ],
+      "evaluation_units": [
+        {
+          "role": "three_seed_ensemble",
+          "source": {
+            "name": "w-ens.json",
+            "sha256": "250979d40d76c6026a38526bd845637d9cb923abf5243114e19edde1de7c9d8e"
+          },
+          "metrics": {
+            "threshold": 0.00216,
+            "weighted_forward_rate": 0.3037,
+            "critical_recall_min": 0.8571,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9556,
+              "friendly_profanity": 0.3333,
+              "game_combat": 0.3103,
+              "long_normal": 0.1833,
+              "minors": 0.9688,
+              "number_url_like": 0.1379,
+              "quote_report": 0.4407,
+              "self_harm": 0.8571,
+              "sexual": 0.9697,
+              "short_normal": 0.463,
+              "spam": 0.96,
+              "threat": 0.9688
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1897,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7551,
+              "sexual": 0.7576,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.3333,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.3103,
+            "short_normal": 0.463,
+            "long_normal": 0.1833,
+            "number_url_like": 0.1379,
+            "allowed_max": 0.463,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8571 < 0.90",
+              "friendly_profanity 0.3333 > 0.30",
+              "short_normal 0.4630 > 0.40"
+            ],
+            "near_failures": [
+              "short_normal 0.4630 > 0.45"
+            ]
+          }
+        },
+        {
+          "role": "two_seed_ensemble",
+          "source": {
+            "name": "w-pair-1.json",
+            "sha256": "e4a2bc4930fda4e272edca5f097cd08f029f014d1365b6875944a594cd04d616"
+          },
+          "metrics": {
+            "threshold": 0.002603,
+            "weighted_forward_rate": 0.3036,
+            "critical_recall_min": 0.8571,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 0.9556,
+              "friendly_profanity": 0.3333,
+              "game_combat": 0.3103,
+              "long_normal": 0.1833,
+              "minors": 0.9531,
+              "number_url_like": 0.1379,
+              "quote_report": 0.4407,
+              "self_harm": 0.8571,
+              "sexual": 0.9394,
+              "short_normal": 0.463,
+              "spam": 0.96,
+              "threat": 0.9531
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1897,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7551,
+              "sexual": 0.7424,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.3333,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.3103,
+            "short_normal": 0.463,
+            "long_normal": 0.1833,
+            "number_url_like": 0.1379,
+            "allowed_max": 0.463,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8571 < 0.90",
+              "friendly_profanity 0.3333 > 0.30",
+              "short_normal 0.4630 > 0.40"
+            ],
+            "near_failures": [
+              "short_normal 0.4630 > 0.45"
+            ]
+          }
+        },
+        {
+          "role": "two_seed_ensemble",
+          "source": {
+            "name": "w-pair-2.json",
+            "sha256": "bac9e96af91b609e3130248b5286e479efcfffbab9d1c49b682ad41338e3e427"
+          },
+          "metrics": {
+            "threshold": 0.00211,
+            "weighted_forward_rate": 0.3036,
+            "critical_recall_min": 0.8571,
+            "by_category": {
+              "abuse": 0.9846,
+              "doxxing": 0.9556,
+              "friendly_profanity": 0.3333,
+              "game_combat": 0.3103,
+              "long_normal": 0.1833,
+              "minors": 0.9688,
+              "number_url_like": 0.1207,
+              "quote_report": 0.4746,
+              "self_harm": 0.8571,
+              "sexual": 0.9697,
+              "short_normal": 0.463,
+              "spam": 0.96,
+              "threat": 0.9688
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9077,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2167,
+              "game_combat": 0.1897,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7551,
+              "sexual": 0.7576,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 0.9846,
+            "friendly_profanity": 0.3333,
+            "quote_report_stage1_forward_rate": 0.4746,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.3103,
+            "short_normal": 0.463,
+            "long_normal": 0.1833,
+            "number_url_like": 0.1207,
+            "allowed_max": 0.463,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.8571 < 0.90",
+              "friendly_profanity 0.3333 > 0.30",
+              "short_normal 0.4630 > 0.40"
+            ],
+            "near_failures": [
+              "short_normal 0.4630 > 0.45"
+            ]
+          }
+        },
+        {
+          "role": "two_seed_ensemble",
+          "source": {
+            "name": "w-pair-3.json",
+            "sha256": "e91f8f3858038fa38078bf117ab6c67bdb5e51d860a391e109d73ef4892330ba"
+          },
+          "metrics": {
+            "threshold": 0.000858,
+            "weighted_forward_rate": 0.2989,
+            "critical_recall_min": 0.7755,
+            "by_category": {
+              "abuse": 1.0,
+              "doxxing": 1.0,
+              "friendly_profanity": 0.3667,
+              "game_combat": 0.2414,
+              "long_normal": 0.2,
+              "minors": 0.9844,
+              "number_url_like": 0.1724,
+              "quote_report": 0.4407,
+              "self_harm": 0.7755,
+              "sexual": 0.9848,
+              "short_normal": 0.4444,
+              "spam": 0.96,
+              "threat": 0.9531
+            },
+            "endpoint_candidate_by_category": {
+              "abuse": 0.9231,
+              "doxxing": 0.3111,
+              "friendly_profanity": 0.2167,
+              "game_combat": 0.1379,
+              "long_normal": 0.0333,
+              "minors": 0.4375,
+              "number_url_like": 0.0172,
+              "quote_report": 0.1695,
+              "self_harm": 0.7347,
+              "sexual": 0.7727,
+              "short_normal": 0.0185,
+              "spam": 0.9,
+              "threat": 0.4062
+            },
+            "abuse_recall": 1.0,
+            "friendly_profanity": 0.3667,
+            "quote_report_stage1_forward_rate": 0.4407,
+            "quote_report_endpoint": 0.1695,
+            "game_combat": 0.2414,
+            "short_normal": 0.4444,
+            "long_normal": 0.2,
+            "number_url_like": 0.1724,
+            "allowed_max": 0.4444,
+            "pass": false,
+            "near": false,
+            "status": "fail",
+            "pass_failures": [
+              "critical_recall_min 0.7755 < 0.90",
+              "friendly_profanity 0.3667 > 0.30",
+              "short_normal 0.4444 > 0.40"
+            ],
+            "near_failures": [
+              "critical_recall_min 0.7755 < 0.85",
+              "friendly_profanity 0.3667 > 0.35"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "validation_auc": {
+    "H1T2": {
+      "values": [
+        0.9052,
+        0.907,
+        0.9048
+      ],
+      "mean": 0.905667,
+      "sources": [
+        {
+          "name": "model-card.json",
+          "sha256": "fdddf2e6db1b5507976232108547ed43aee647a221710c37c390b0592c400282"
+        },
+        {
+          "name": "model-card.json",
+          "sha256": "b5199db22b710e5d8ad675121614db6a88bd418fded531d34078ef8e9175db0c"
+        },
+        {
+          "name": "model-card.json",
+          "sha256": "cc2ad7445662a72f99a83a306a785b3b647b0646faa61a76a699df66f2a6aafb"
+        }
+      ],
+      "threshold": 0.902,
+      "pass": true
+    },
+    "W": {
+      "values": [
+        0.9051,
+        0.906,
+        0.906
+      ],
+      "mean": 0.9057,
+      "sources": [
+        {
+          "name": "model-card.json",
+          "sha256": "42ef5bdf16ad49b0b70dd97761389003314cba717e4bc0e96f1786d5862411d9"
+        },
+        {
+          "name": "model-card.json",
+          "sha256": "e81ba1e251335296afb509e07c86696c4df3ad5c85022af30e8073c3c1b3d36a"
+        },
+        {
+          "name": "model-card.json",
+          "sha256": "e84d8422a2ce4384c9fcaef332e60999aad9a3d994f1ff380b9792006d4d319b"
+        }
+      ],
+      "threshold": 0.902,
+      "pass": true
+    }
+  },
+  "rule_quote_report_rate": 0.118644,
+  "stop_condition_triggered": false,
+  "stage2_standalone_candidate_by_category": {
+    "abuse": 0.9231,
+    "doxxing": 0.2667,
+    "friendly_profanity": 0.3,
+    "game_combat": 0.5172,
+    "long_normal": 0.0167,
+    "minors": 0.4375,
+    "number_url_like": 0.0172,
+    "quote_report": 0.1864,
+    "self_harm": 0.8776,
+    "sexual": 0.7727,
+    "short_normal": 0.0185,
+    "spam": 0.42,
+    "threat": 0.4062
+  },
+  "winner": null,
+  "bootstrap": {
+    "winner_vs_other_qualified": [],
+    "friendly_profanity_mechanism": [
+      {
+        "form": "single",
+        "difference": "W - H1T2",
+        "low": -0.088889,
+        "high": 0.027778,
+        "rounds": 2000,
+        "upper_below_zero": false
+      },
+      {
+        "form": "ensemble",
+        "difference": "W - H1T2",
+        "low": -0.183333,
+        "high": 0.016667,
+        "rounds": 2000,
+        "upper_below_zero": false
+      }
+    ],
+    "seed": 20261014
+  }
+}
