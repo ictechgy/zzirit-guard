@@ -37,7 +37,7 @@ from zg_stage1.data import compute_file_sha256, describe_file_provenance
 from zg_stage1.errors import DatasetFormatError, MetricError, OutputExistsError, run_command_line
 from zg_stage1.evaluate import resolve_max_length
 from zg_stage1.metrics import METRIC_DECIMALS, compute_roc_auc, ensure_valid_scores_and_labels
-from zg_stage1.model_card import read_model_card, utc_timestamp, write_json_atomically
+from zg_stage1.model_card import read_model_card, require_completed_training, utc_timestamp, write_json_atomically
 
 # 실제 채팅의 범주 구성 가정(합 1.0). 실측 전까지의 가정이다(Grok 상담안: 짧은 일반·게임 80%, 칭찬 비속어 12%, 광고 모양 5%, 유해 3%).
 # 섀도 운영으로 실제 비율을 재면 --mix-file로 바꾼다.
@@ -619,8 +619,10 @@ def resolve_output_path(arguments: argparse.Namespace, split: str) -> Path:
 
 def score_model_items(arguments: argparse.Namespace, model_directory: Path, items: Sequence[ChatEvalItem]) -> list[float]:
     """학습된 모델 하나로 문장의 유해 확률을 계산한다."""
+    model_card = read_model_card(model_directory)
+    require_completed_training(model_card, model_directory.name)
     device = modeling.resolve_device(arguments.device)
-    max_length = resolve_max_length(model_directory, read_model_card(model_directory))
+    max_length = resolve_max_length(model_directory, model_card)
     tokenizer = modeling.load_trained_tokenizer(model_directory)
     model = modeling.move_model_to_device(modeling.load_trained_classifier(model_directory), device).eval()
     return modeling.score_texts(model, tokenizer, [item.text for item in items], device, max_length, arguments.batch_size)
@@ -639,8 +641,14 @@ def average_model_scores(scores_by_model: Sequence[Sequence[float]]) -> list[flo
 
 
 def score_items(arguments: argparse.Namespace, items: Sequence[ChatEvalItem]) -> list[float]:
-    """모든 --model-dir를 채점하고 둘 이상이면 문장별 평균을 낸다."""
-    components = [score_model_items(arguments, directory, items) for directory in model_directories(arguments)]
+    """모든 --model-dir를 채점하고 둘 이상이면 문장별 평균을 낸다.
+
+    채점 전에 모든 모델의 학습 완료를 먼저 확인한다. 앙상블의 마지막 모델에서 멈추면 앞 모델의 채점 시간을 버리기 때문이다.
+    """
+    directories = model_directories(arguments)
+    for directory in directories:
+        require_completed_training(read_model_card(directory), directory.name)
+    components = [score_model_items(arguments, directory, items) for directory in directories]
     arguments.raw_score_components = components
     return average_model_scores(components)
 

@@ -36,6 +36,7 @@ from zg_stage1.inference_contract import (
 from zg_stage1.errors import PathResolutionError, describe_failure, run_command_line
 from zg_stage1.metrics import METRIC_DECIMALS, STANDARD_THRESHOLD, compute_roc_auc, summarize_at_threshold
 from zg_stage1.model_card import (
+    COMPLETED_STATUS,
     MODEL_CARD_FILE_NAME,
     annotate_reference_match,
     build_initial_model_card,
@@ -456,7 +457,7 @@ class TrainingSession:
         """카드를 완료 상태로 만들고 요약을 출력한다."""
         elapsed = self.progress.elapsed_seconds()
         self.model_card.update(
-            status="completed",
+            status=COMPLETED_STATUS,
             stop_reason=stop_reason,
             finished_at=utc_timestamp(),
             completed_steps=self.progress.completed_steps,
