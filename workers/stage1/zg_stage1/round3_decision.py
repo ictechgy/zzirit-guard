@@ -42,6 +42,11 @@ SIMPLICITY_MARGIN = 0.02
 BOOTSTRAP_SEED = 20261014
 BOOTSTRAP_ROUNDS = 2000
 REQUIRED_SHORT_RULE = {"max_length": 5, "multiplier": 4.0}
+
+# 경로 S가 쓰는 규칙 경로 R0의 규칙 목록 지문(M2 2차 0단계에서 얼림). R0는 서버 기본 규칙과 기본 키워드 경로를
+# 담고(그래서 keyword 적중이 있다), `--keywords`로 비공개 목록을 더한 RP와는 지문이 다르다. 키워드 유무가 아니라
+# 이 지문으로 R0인지 확인한다. 서버 기본 규칙이 바뀌면 지문이 달라져 멈추는데, 경로를 얼린 이상 의도한 동작이다.
+R0_POLICY_SHA256 = "1d3f789bae3360f686351c49763e98da89a7c4bbaa67427105d897e207bbb61f"
 OTHER_ALLOW_CATEGORIES = ("game_combat", "short_normal", "long_normal", "number_url_like")
 REQUIRED_TRAINING_SEEDS = (20261011, 20261021, 20261031)
 H1T2_TRAINING_DATA_SHA256 = "9ffd01627a95c73ff2b21de24884913d525fbabba3af43b4cdd6c921da8d4a62"
@@ -991,8 +996,7 @@ def build_dev_decision(config_path: Path) -> tuple[dict[str, Any], dict[str, Any
     if items[0].split != "dev":
         raise DatasetFormatError("CONFIG dev_file은 dev split이어야 합니다.")
     routes, policy = load_rule_routes(rule_file, items, dev_file)
-    if any(route.keyword for route in routes.values()):
-        raise DatasetFormatError("M2 3차 경로는 S(R0)로 고정입니다. --keywords 없이 만든 rule_routes를 주세요.")
+    require_r0_policy(policy, "CONFIG rule_routes")
     stage2_scores, stage2_provenance = load_stage2_scores(stage2_file, items, dev_file)
     short_rule = ShortRule(int(REQUIRED_SHORT_RULE["max_length"]), float(REQUIRED_SHORT_RULE["multiplier"]))
     dev_sha256 = compute_file_sha256(dev_file)
@@ -1121,6 +1125,16 @@ def holdout_command(manifest_path: Path, report_paths: Sequence[Path], output: P
     print(f"보류셋 판정: {'합격' if verdict['passed'] else '불합격'} → {output.name}")
 
 
+def require_r0_policy(policy: str, label: str) -> None:
+    """규칙 경로 파일이 얼린 R0(서버 기본 규칙과 기본 키워드)로 만든 것인지 지문으로 확인한다.
+
+    왜: 기본 키워드 경로 적중은 R0에도 있으므로 키워드 유무로는 R0와 RP를 가를 수 없다.
+    label: 오류 메시지에 쓸 입력 이름. 다르면 DatasetFormatError로 멈춘다.
+    """
+    if policy != R0_POLICY_SHA256:
+        raise DatasetFormatError(f"{label}의 규칙 지문이 R0와 다릅니다. --keywords 없이 만든 R0 규칙 경로를 주세요.")
+
+
 def precheck_command(eval_file: Path, rule_routes: Path, stage2_scores: Path, output: Path) -> None:
     """학습 전 R0 중단 조건과 2차 단독 진단을 원문 없이 쓴다."""
     ensure_outputs_absent((output,))
@@ -1128,8 +1142,7 @@ def precheck_command(eval_file: Path, rule_routes: Path, stage2_scores: Path, ou
     if not items or items[0].split != "dev":
         raise DatasetFormatError("precheck --eval-file은 dev split이어야 합니다.")
     routes, policy = load_rule_routes(rule_routes, items, eval_file)
-    if any(route.keyword for route in routes.values()):
-        raise DatasetFormatError("precheck --rule-routes는 키워드 없이 만든 R0여야 합니다.")
+    require_r0_policy(policy, "precheck --rule-routes")
     scores, stage2 = load_stage2_scores(stage2_scores, items, eval_file)
     quote_rate = rule_quote_rate(items, routes)
     report = {
