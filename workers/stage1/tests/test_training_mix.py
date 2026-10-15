@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import stat
@@ -33,6 +34,7 @@ from zg_stage1.training_mix import (
     load_sealed_holdout_index,
     main,
     manifest_path_for,
+    selected_hard_negative_rows,
     write_training_outputs,
 )
 
@@ -469,3 +471,175 @@ def test_identity_failure_removes_new_staging_file(tmp_path: Path, monkeypatch: 
     with pytest.raises(OSError, match="I/O"):
         write_one_row(tmp_path / "mix.jsonl")
     assert staged_or_published_files(tmp_path) == []
+
+
+def target_labeled(identifier: str, label: str, target_label: object) -> dict:
+    """D 선택지 테스트용 K-HATERS 한 줄."""
+    return {"id": identifier, "text": f"K-HATERS 자리표시자 {identifier}", "label": label, "target_label": target_label}
+
+
+def test_new_options_are_absent_from_default_bytes(tmp_path: Path) -> None:
+    """새 선택지를 주지 않으면 기존 행과 manifest 모양을 바이트 단위로 유지한다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", [target_labeled("1", "normal", []), target_labeled("2", "offensive", [])])
+    hard = write_jsonl(
+        tmp_path / "hn.jsonl",
+        [hard_negative("fp", "칭찬 비속어 자리표시자"), hard_negative("game", "게임 자리표시자", category="game_combat")],
+    )
+    output = tmp_path / "mix.jsonl"
+    main(["--out", str(output), "--khaters-train", str(khaters), "--hard-negatives", str(hard), "--extra-repeat", "2"], environment={})
+    expected_rows = [
+        {"id": "1", "text": "K-HATERS 자리표시자 1", "label": "normal"},
+        {"id": "2", "text": "K-HATERS 자리표시자 2", "label": "offensive"},
+        {"id": "hn-fp-0", "text": "칭찬 비속어 자리표시자", "label": "normal"},
+        {"id": "hn-game-0", "text": "게임 자리표시자", "label": "normal"},
+        {"id": "hn-fp-1", "text": "칭찬 비속어 자리표시자", "label": "normal"},
+        {"id": "hn-game-1", "text": "게임 자리표시자", "label": "normal"},
+    ]
+    expected = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in expected_rows)
+    manifest = json.loads(manifest_path_for(output).read_text(encoding="utf-8"))
+    assert output.read_text(encoding="utf-8") == expected
+    assert "dropped_untargeted_offensive" not in manifest
+    assert "friendly_profanity_repeat" not in manifest
+
+
+def test_drop_untargeted_offensive_records_count_and_sorted_id_hash(tmp_path: Path) -> None:
+    """D는 대상 없는 offensive만 빼고, 정렬한 id 목록의 줄바꿈 포함 sha256을 남긴다."""
+    records = [
+        target_labeled("20", "offensive", []),
+        target_labeled("3", "offensive", ["person"]),
+        target_labeled("10", "offensive", []),
+        target_labeled("4", "normal", []),
+    ]
+    khaters = write_jsonl(tmp_path / "train.jsonl", records)
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("fp", "칭찬 비속어 자리표시자")])
+    output = tmp_path / "drop.jsonl"
+    main(
+        [
+            "--out",
+            str(output),
+            "--khaters-train",
+            str(khaters),
+            "--hard-negatives",
+            str(hard),
+            "--extra-repeat",
+            "0",
+            "--drop-untargeted-offensive",
+        ],
+        environment={},
+    )
+    manifest = json.loads(manifest_path_for(output).read_text(encoding="utf-8"))
+    assert [record.record_id for record in load_labeled_texts(output)] == ["3", "4"]
+    expected_hash = hashlib.sha256(b"10\n20\n").hexdigest()
+    assert manifest["dropped_untargeted_offensive"] == {"count": 2, "ids_sha256": expected_hash}
+
+
+@pytest.mark.parametrize("target_label", [None, "person", [""], ["ok", 1], ["   "]])
+def test_drop_rejects_invalid_target_label_with_location(tmp_path: Path, target_label: object) -> None:
+    """D가 켜졌을 때 target_label의 누락·형식 오류는 줄 위치와 수정 방향을 담아 멈춘다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", [target_labeled("1", "normal", target_label)])
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("fp", "칭찬 비속어 자리표시자")])
+    with pytest.raises(DatasetFormatError, match=r"train\.jsonl:1.*target_label"):
+        main(
+            ["--out", str(tmp_path / "bad.jsonl"), "--khaters-train", str(khaters), "--hard-negatives", str(hard), "--drop-untargeted-offensive"],
+            environment={},
+        )
+
+
+def test_drop_rejects_duplicate_khaters_ids(tmp_path: Path) -> None:
+    """D의 전용 로더도 K-HATERS id 중복을 조용히 합치지 않는다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", [target_labeled("same", "normal", []), target_labeled("same", "offensive", [])])
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("fp", "칭찬 비속어 자리표시자")])
+    with pytest.raises(DatasetFormatError, match=r"train\.jsonl:2.*이미"):
+        main(
+            ["--out", str(tmp_path / "duplicate.jsonl"), "--khaters-train", str(khaters), "--hard-negatives", str(hard), "--drop-untargeted-offensive"],
+            environment={},
+        )
+
+
+def test_friendly_profanity_repeat_only_changes_v1_friendly_category() -> None:
+    """W는 friendly_profanity만 전용 횟수로 넣고 다른 허용 유형은 --extra-repeat를 따른다."""
+    hard_negatives = load_hard_negative_version("v1")
+    assert sum(item.category == "friendly_profanity" for item in hard_negatives) == 986
+    rows = selected_hard_negative_rows(hard_negatives, repeat=2, friendly_repeat=5)
+    friendly_ids = {item.item_id for item in hard_negatives if item.category == "friendly_profanity"}
+    assert sum(row["id"][3:].rsplit("-", 1)[0] in friendly_ids for row in rows) == 986 * 5
+    assert len(rows) == 986 * 5 + (len(hard_negatives) - 986) * 2
+
+
+def test_friendly_profanity_repeat_rejects_custom_or_non_v1_source(tmp_path: Path) -> None:
+    """W는 사용자 파일이나 v2에 적용할 수 없다."""
+    khaters = write_jsonl(tmp_path / "train.jsonl", [target_labeled("1", "normal", [])])
+    hard = write_jsonl(tmp_path / "hn.jsonl", [hard_negative("fp", "칭찬 비속어 자리표시자")])
+    for index, source_args in enumerate((["--hard-negatives", str(hard)], ["--hard-negative-version", "v2"])):
+        with pytest.raises(DatasetFormatError, match="v1"):
+            main(
+                [
+                    "--out",
+                    str(tmp_path / f"bad-{index}.jsonl"),
+                    "--khaters-train",
+                    str(khaters),
+                    *source_args,
+                    "--friendly-profanity-repeat",
+                    "5",
+                ],
+                environment={},
+            )
+
+
+def test_drop_option_combines_with_generated_and_sealed_holdout(tmp_path: Path) -> None:
+    """D는 생성 입력과 봉인 제외을 함께 써도 출처별 집계와 실제 행을 일치시킨다."""
+    sealed_text = "봉인과 겹치는 칭찬 비속어 자리표시자"
+    sealed = write_jsonl(tmp_path / "sealed.jsonl", [eval_record("private", sealed_text)])
+    khaters = write_jsonl(
+        tmp_path / "train.jsonl",
+        [target_labeled("1", "offensive", []), target_labeled("2", "L1_hate", ["group"])],
+    )
+    hard = write_jsonl(
+        tmp_path / "hn.jsonl",
+        [hard_negative("sealed-fp", sealed_text), hard_negative("game", "게임 자리표시자", category="game_combat")],
+    )
+    harmful = write_jsonl(tmp_path / "harmful.jsonl", [generated("harm", "생성 유해 자리표시자")])
+    allow = write_jsonl(tmp_path / "allow.jsonl", [generated("allow", "생성 허용 자리표시자")])
+    output = tmp_path / "combined.jsonl"
+    main(
+        [
+            "--out",
+            str(output),
+            "--khaters-train",
+            str(khaters),
+            "--hard-negatives",
+            str(hard),
+            "--drop-untargeted-offensive",
+            "--extra-repeat",
+            "2",
+            "--generated-harmful",
+            str(harmful),
+            "--generated-allow",
+            str(allow),
+            "--sealed-holdout",
+            str(sealed),
+        ],
+        environment={},
+    )
+    manifest = json.loads(manifest_path_for(output).read_text(encoding="utf-8"))
+    identifiers = {record.record_id for record in load_labeled_texts(output)}
+    assert "1" not in identifiers and {"2", "hn-game-0", "hn-game-1", "gh:harm-0", "ga:allow-0"} <= identifiers
+    assert all(f"hn-sealed-fp-{copy}" not in identifiers for copy in range(2))
+    assert manifest["dropped_untargeted_offensive"]["count"] == 1
+    assert "friendly_profanity_repeat" not in manifest
+    assert manifest["sealed_holdout"]["excluded_by_source"]["hard_negative"] == 2
+
+
+def test_round3_variants_are_mutually_exclusive(tmp_path: Path) -> None:
+    """D와 W 선택지는 한 학습 파일에 함께 쓸 수 없다."""
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--out",
+                str(tmp_path / "bad.jsonl"),
+                "--drop-untargeted-offensive",
+                "--friendly-profanity-repeat",
+                "9",
+            ],
+            environment={},
+        )

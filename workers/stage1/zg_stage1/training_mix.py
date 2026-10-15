@@ -40,10 +40,12 @@ from zg_stage1.chat_eval_data import (
 )
 from zg_stage1.data import (
     LabeledText,
+    compute_identifier_list_sha256,
     compute_file_sha256,
     describe_file_provenance,
     iterate_nonblank_lines,
     load_labeled_texts,
+    load_labeled_texts_excluding_untargeted_offensive,
     parse_json_object,
     require_string_field,
 )
@@ -85,6 +87,7 @@ DEFAULT_HARD_NEGATIVE_VERSION = "v1"
 DEFAULT_EXTRA_REPEAT = 3
 DEFAULT_SEED = 20261014
 DEFAULT_GENERATED_REPEAT = 1
+V1_FRIENDLY_PROFANITY_ROWS = 986
 
 # 섞은 문장의 id 접두사. K-HATERS의 숫자 id와 겹치지 않게 한다.
 HARD_NEGATIVE_ID_PREFIX = "hn-"
@@ -300,6 +303,20 @@ def hard_negative_rows(items: Sequence[HardNegative], repeat: int) -> list[dict]
     return [{"id": f"{HARD_NEGATIVE_ID_PREFIX}{item.item_id}-{copy}", "text": item.text, "label": NORMAL_LABEL} for copy in range(repeat) for item in items]
 
 
+def selected_hard_negative_rows(items: Sequence[HardNegative], repeat: int, friendly_repeat: int | None) -> list[dict]:
+    """허용 문장을 범주별 반복 수로 만든다. 전용 값이 없으면 기존 함수 그대로 써서 행 순서와 바이트를 보존한다."""
+    if friendly_repeat is None:
+        return hard_negative_rows(items, repeat)
+    repeats = {item.item_id: friendly_repeat if item.category == "friendly_profanity" else repeat for item in items}
+    maximum = max(repeats.values(), default=0)
+    return [
+        {"id": f"{HARD_NEGATIVE_ID_PREFIX}{item.item_id}-{copy}", "text": item.text, "label": NORMAL_LABEL}
+        for copy in range(maximum)
+        for item in items
+        if copy < repeats[item.item_id]
+    ]
+
+
 def generated_rows(items: Sequence[GeneratedExample], repeat: int, prefix: str, label: str) -> list[dict]:
     """생성 문장을 반복 가능한 학습 행으로 바꾼다. 출처 접두사로 다른 입력의 같은 id도 충돌하지 않는다."""
     return [{"id": f"{prefix}{item.item_id}-{copy}", "text": item.text, "label": label} for copy in range(repeat) for item in items]
@@ -333,7 +350,7 @@ def build_sourced_training_rows(
     """모든 학습 행을 만든 뒤 출처와 묶는다. 왜: 봉인 검사는 반복까지 끝난 실제 학습 행 각각을 제외해야 한다."""
     kept = downsample_toxic(khaters, settings.toxic_fraction, settings.seed)
     rows = tag_source("khaters", khaters_rows(kept))
-    rows += tag_source("hard_negative", hard_negative_rows(hard_negatives, settings.extra_repeat))
+    rows += tag_source("hard_negative", selected_hard_negative_rows(hard_negatives, settings.extra_repeat, arguments.friendly_profanity_repeat))
     rows += tag_source("generated_harmful", generated_rows(generated.harmful, arguments.generated_harmful_repeat, GENERATED_HARMFUL_ID_PREFIX, OFFENSIVE_LABEL))
     rows += tag_source("generated_allow", generated_rows(generated.allow, arguments.generated_allow_repeat, GENERATED_ALLOW_ID_PREFIX, NORMAL_LABEL))
     return rows
@@ -479,6 +496,8 @@ def build_manifest(
     rows: Sequence[Mapping[str, str]],
     excluded_generated: Sequence[str] | None = None,
     sealed_holdout: Mapping[str, object] | None = None,
+    dropped_untargeted_offensive: Mapping[str, object] | None = None,
+    friendly_profanity_repeat: Mapping[str, object] | None = None,
 ) -> dict:
     """설정, 입력 출처, 평가셋과 겹쳐 뺀 K-HATERS 줄(id만), 줄 수. 출력 파일 기록("output")은 학습 파일을 쓴 뒤에 붙인다. 원문은 넣지 않는다."""
     manifest = {
@@ -491,6 +510,10 @@ def build_manifest(
         manifest["excluded_generated_overlaps"] = list(excluded_generated)
     if sealed_holdout is not None:
         manifest["sealed_holdout"] = dict(sealed_holdout)
+    if dropped_untargeted_offensive is not None:
+        manifest["dropped_untargeted_offensive"] = dict(dropped_untargeted_offensive)
+    if friendly_profanity_repeat is not None:
+        manifest["friendly_profanity_repeat"] = dict(friendly_profanity_repeat)
     return manifest
 
 
@@ -506,6 +529,17 @@ def build_argument_parser() -> argparse.ArgumentParser:
     source.add_argument("--hard-negatives", type=Path, help="저장소 대신 쓸 허용 문장 JSONL(파일 전체를 쓴다)")
     parser.add_argument("--toxic-fraction", type=fraction_below_one, help="K-HATERS 부분의 유해 비율 목표(기본: 줄이지 않음)")
     parser.add_argument("--extra-repeat", type=non_negative_integer, default=DEFAULT_EXTRA_REPEAT, help="허용 문장 반복 횟수(기본 3, 0이면 넣지 않음)")
+    round3_variant = parser.add_mutually_exclusive_group()
+    round3_variant.add_argument(
+        "--friendly-profanity-repeat",
+        type=positive_integer,
+        help="friendly_profanity 허용 문장만 --extra-repeat 대신 넣을 횟수(1 이상)",
+    )
+    round3_variant.add_argument(
+        "--drop-untargeted-offensive",
+        action="store_true",
+        help="K-HATERS의 offensive이면서 target_label이 빈 목록인 줄을 제외한다",
+    )
     parser.add_argument("--generated-harmful", type=Path, help="추가할 생성 유해 JSONL(id, text)")
     parser.add_argument("--generated-harmful-repeat", type=non_negative_integer, default=DEFAULT_GENERATED_REPEAT, help="생성 유해 반복 횟수(기본 1)")
     parser.add_argument("--generated-allow", type=Path, help="추가할 생성 허용 JSONL(id, text)")
@@ -536,6 +570,17 @@ def load_selected_hard_negatives(arguments: argparse.Namespace) -> tuple[list[Ha
     return load_hard_negative_version(version_name), describe_hard_negative_source(DEFAULT_HARD_NEGATIVES_PATH, version_name)
 
 
+def validate_round3_training_option(arguments: argparse.Namespace, hard_negatives: Sequence[HardNegative]) -> None:
+    """W는 고정한 허용 문장 v1의 칭찬 비속어 986줄에만 적용한다."""
+    if arguments.friendly_profanity_repeat is None:
+        return
+    if arguments.hard_negatives is not None or arguments.hard_negative_version != "v1":
+        raise DatasetFormatError("--friendly-profanity-repeat는 저장소 허용 문장 --hard-negative-version v1에만 쓸 수 있습니다.")
+    source_rows = sum(item.category == "friendly_profanity" for item in hard_negatives)
+    if source_rows != V1_FRIENDLY_PROFANITY_ROWS:
+        raise DatasetFormatError(f"허용 문장 v1의 friendly_profanity가 {source_rows}줄입니다. 고정값 {V1_FRIENDLY_PROFANITY_ROWS}줄인 원본 v1을 복원하세요.")
+
+
 def stage_and_publish_outputs(output_path: Path, rows: Sequence[Mapping[str, str]], manifest_body: Mapping[str, object], created: list[CreatedFile]) -> dict:
     """학습 파일과 manifest를 모두 임시 파일로 써 둔 뒤 학습 파일, manifest 순으로 최종 이름에 넣고 임시 파일을 지운다."""
     staged_data = stage_text_file(output_path.parent, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), created)
@@ -555,6 +600,8 @@ def write_training_outputs(
     excluded: Sequence[OverlapFinding],
     excluded_generated: Sequence[str] | None = None,
     sealed_holdout: Mapping[str, object] | None = None,
+    dropped_untargeted_offensive: Mapping[str, object] | None = None,
+    friendly_profanity_repeat: Mapping[str, object] | None = None,
 ) -> dict:
     """학습 파일과 그 sha256을 담은 manifest를 함께 쓴다. 둘 다 생기거나 둘 다 생기지 않는다.
 
@@ -565,7 +612,16 @@ def write_training_outputs(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     created: list[CreatedFile] = []
     try:
-        manifest = build_manifest(settings, inputs, excluded, rows, excluded_generated, sealed_holdout)
+        manifest = build_manifest(
+            settings,
+            inputs,
+            excluded,
+            rows,
+            excluded_generated,
+            sealed_holdout,
+            dropped_untargeted_offensive,
+            friendly_profanity_repeat,
+        )
         return stage_and_publish_outputs(output_path, rows, manifest, created)
     except BaseException:
         remove_created_files(created)
@@ -578,9 +634,14 @@ def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | Non
     ensure_outputs_absent(arguments.out)
     khaters_path = resolve_khaters_path(arguments, os.environ if environment is None else environment)
     hard_negatives, hard_negative_source = load_selected_hard_negatives(arguments)
+    validate_round3_training_option(arguments, hard_negatives)
     references = load_evaluation_references()
     ensure_no_evaluation_overlap(hard_negatives, references)
-    khaters, excluded = exclude_evaluation_overlaps(load_labeled_texts(khaters_path), references)
+    if arguments.drop_untargeted_offensive:
+        loaded_khaters, dropped_ids = load_labeled_texts_excluding_untargeted_offensive(khaters_path)
+    else:
+        loaded_khaters, dropped_ids = load_labeled_texts(khaters_path), []
+    khaters, excluded = exclude_evaluation_overlaps(loaded_khaters, references)
     generated = load_generated_selection(arguments, references)
     settings = MixSettings(arguments.toxic_fraction, arguments.extra_repeat, arguments.seed)
     sourced_rows = build_sourced_training_rows(khaters, hard_negatives, generated, settings, arguments)
@@ -588,7 +649,28 @@ def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | Non
     rows = [row for _, row in sourced_rows]
     inputs = {"khaters_train": describe_file_provenance(khaters_path), "hard_negatives": hard_negative_source} | generated.inputs
     generated_excluded = generated.excluded_ids if generated.enabled else None
-    manifest = write_training_outputs(arguments.out, rows, settings, inputs, excluded, generated_excluded, sealed_summary)
+    dropped_summary = None
+    if arguments.drop_untargeted_offensive:
+        dropped_summary = {"count": len(dropped_ids), "ids_sha256": compute_identifier_list_sha256(dropped_ids)}
+    friendly_summary = None
+    if arguments.friendly_profanity_repeat is not None:
+        source_rows = sum(item.category == "friendly_profanity" for item in hard_negatives)
+        friendly_summary = {
+            "repeat": arguments.friendly_profanity_repeat,
+            "source_rows": source_rows,
+            "added_rows": source_rows * (arguments.friendly_profanity_repeat - arguments.extra_repeat),
+        }
+    manifest = write_training_outputs(
+        arguments.out,
+        rows,
+        settings,
+        inputs,
+        excluded,
+        generated_excluded,
+        sealed_summary,
+        dropped_summary,
+        friendly_summary,
+    )
     counts = manifest["counts"]
     sealed_text = "" if sealed_summary is None else f", 봉인 보류셋과 겹쳐 뺀 {sealed_summary['excluded_rows']}줄"
     summary = f"학습 파일 {len(rows)}줄(정상 {counts['normal']}, 유해 {counts['toxic']}, 평가셋과 겹쳐 뺀 K-HATERS {len(excluded)}줄"
