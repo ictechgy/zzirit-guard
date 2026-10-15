@@ -1,0 +1,139 @@
+{
+ "plan": "docs/ml/2026-10-15-m2-round3-plan.md",
+ "evaluation_code_commit": "f3d67e450d8086eb3833c250b3be6d077cfebfad",
+ "step2_precheck": {
+  "rule_quote_report_rate": 0.118644,
+  "stop": false,
+  "stage2_standalone_candidate_by_category": {
+   "abuse": 0.9231,
+   "doxxing": 0.2667,
+   "friendly_profanity": 0.3,
+   "game_combat": 0.5172,
+   "long_normal": 0.0167,
+   "minors": 0.4375,
+   "number_url_like": 0.0172,
+   "quote_report": 0.1864,
+   "self_harm": 0.8776,
+   "sexual": 0.7727,
+   "short_normal": 0.0185,
+   "spam": 0.42,
+   "threat": 0.4062
+  },
+  "inputs": {
+   "eval_file": {
+    "name": "chat-dev-v2.jsonl",
+    "sha256": "39e6acd2cdc14e048a7d23e45c3405e56122381fdebcfd3c44e4bb7987a045c4"
+   },
+   "rule_routes": {
+    "name": "routes-R0.jsonl",
+    "sha256": "376ba820b1433f4b15d46e97bcdc6805968490193f8663475f65f4055f24a7a6",
+    "policy_sha256": "1d3f789bae3360f686351c49763e98da89a7c4bbaa67427105d897e207bbb61f"
+   },
+   "stage2_scores": {
+    "name": "stage2-dev.json",
+    "sha256": "e2d185a752db8d03cc3506ca6f155efc21d5046706c3d9cb7357a00c42075d84",
+    "model_identifier": "kanana-safeguard-8b-mlx-4bit@49406bb9bc93"
+   }
+  }
+ },
+ "step3_diagnostic": {
+  "sample_ids_sha256": "59f90c5df1a46957c4f5977e9ea040d155b581a0ec25d1dbe813ec267e17464a",
+  "label_prompt_sha256": "92d567f374d65ac88adb71b99c8780b6c18ed53909e75089e0af88680d736ab6",
+  "labelers": {
+   "codex": "gpt-5.6-sol, effort medium",
+   "grok": "grok-4.6, effort high"
+  },
+  "both_allow": 81,
+  "both_harmful_same_category": {
+   "abuse": 68,
+   "threat": 7,
+   "sexual": 3
+  },
+  "both_harmful_different_category": 5,
+  "disagree_or_ambiguous": 36,
+  "codex": {
+   "allow": 83,
+   "harmful": 112,
+   "ambiguous": 5
+  },
+  "grok": {
+   "allow": 110,
+   "harmful": 89,
+   "ambiguous": 1
+  },
+  "choice": "W",
+  "rule": "둘 다 허용 >= 100 이면 D, 아니면 W"
+ },
+ "step3_training_file_W": {
+  "settings": {
+   "toxic_fraction": null,
+   "extra_repeat": 3,
+   "seed": 20261014
+  },
+  "inputs": {
+   "khaters_train": {
+    "file_name": "train_v2.jsonl",
+    "size_bytes": 57669645,
+    "sha256": "3039eb0970ee2d3c67ee46f7bea94e3c559dcdc2ff5cce44c7d58b429035d07a"
+   },
+   "hard_negatives": {
+    "file_name": "hard-negatives-v2.jsonl",
+    "size_bytes": 771110,
+    "sha256": "3b7ef3e4c896767859b060e325356bbdd151f8c031e9a29ae3066cdae92e9e47",
+    "version": "v1",
+    "line_count": 2934,
+    "selected_sha256": "335e2c188bac7fad4ac7a162874c150e47d5734be9268c68c37cf2f361431e40"
+   },
+   "generated_harmful": {
+    "file_name": "harmful-k2.jsonl",
+    "size_bytes": 255035,
+    "sha256": "e7ff6f82179a2e2c2637353cb782ea1461b89e8faccafa6418c4944e009eaa1e",
+    "repeat": 1
+   },
+   "generated_allow": {
+    "file_name": "allow-k2.jsonl",
+    "size_bytes": 482579,
+    "sha256": "45b0c99925fbbd1493017b2ba50ef48161e73836a1ad1efedf1bd3f5425ff479",
+    "repeat": 1
+   }
+  },
+  "counts": {
+   "normal": 65901,
+   "toxic": 127598
+  },
+  "friendly_profanity_repeat": {
+   "repeat": 9,
+   "source_rows": 986,
+   "added_rows": 5916
+  },
+  "excluded_generated_overlaps": [
+   "full-a:gh-self_harm-00469",
+   "full-x-ds:gh-sexual-00101",
+   "full-a:gh-self_harm-00236",
+   "full-b:gb-friendly_profanity-00198"
+  ],
+  "excluded_khaters_overlaps_count": 25,
+  "sealed_holdout": {
+   "file_name": "chat-holdout-v3.jsonl",
+   "sha256": "479614b55a6332270b9dcc8673b5ecc6030ce217863acfea5210dc3fe26460e0",
+   "excluded_rows": 50,
+   "excluded_by_source": {
+    "khaters": 1,
+    "hard_negative": 42,
+    "generated_harmful": 7,
+    "generated_allow": 0
+   },
+   "excluded_training_ids_sha256": "6a2a7bec439a92cdd9422db35bba52109cff8884bccc86cfa74a0c39f2f219c7"
+  },
+  "output": {
+   "file_name": "train-w-v3x.jsonl",
+   "sha256": "169776bf44bb43cf87afde96c40e1b11296e77aa27e91756dbabd02493484180"
+  },
+  "seeds": [
+   20261011,
+   20261021,
+   20261031
+  ],
+  "epochs": 2
+ }
+}
