@@ -7,3 +7,4 @@
   - 3단계: 진단 라벨 집계와 D·W 선택, 고른 변형(W) 학습 파일의 입력·출력 sha256.
   - 보류셋 v3와 겹쳐 뺀 학습 줄의 id 목록은 보류셋 내용을 암시할 수 있어 sha256만 남겼다.
 - 판정에서 승자가 나오면 보류셋 확인용 manifest를 여기에 먼저 커밋한다(`workers/stage1/README.md`의 보류셋 한 명령).
+- `2026-10-15-dev-decision.json`: 개발셋 판정(`round3_decision dev`의 `decision.json` 그대로). 평가 14개의 지표·자격·메커니즘 구간과 근거 파일 sha256이 들어 있다. 승자가 없어 보류셋 manifest는 없다. 결과는 [M2 3차 결과](../2026-10-15-m2-round3-results.md)에 적었다.
