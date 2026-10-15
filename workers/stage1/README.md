@@ -198,6 +198,58 @@ uv run python -m zg_stage1.evaluate_chat --model-dir <모델> --eval-file eval_d
 - `evaluate_chat`도 평가 전에 같은 검사(72문장 겹침, 셋 안 중복, 애매 5% 이하, 범주마다 20문장 이상)를 한다.
 - F_max는 시드가 다른 반복 5번 모두에서 기준을 지키는 값이다.
 
+### M2 3차 학습·경로 끝·판정 도구
+
+기준과 실행 순서는 [M2 3차 계획](../../docs/ml/2026-10-15-m2-round3-plan.md)을 따른다. 기존 명령은 새 선택지를 주지 않으면 같은 학습 행과 평가 JSON을 만든다.
+
+```sh
+# D: 대상 없는 offensive 제외. target_label 전체를 엄격히 검사하고 manifest에 제외 id 지문을 남긴다.
+uv run python -m zg_stage1.training_mix --out <새 학습.jsonl> \
+  --drop-untargeted-offensive [기존 H1T2 입력 선택지...]
+
+# W: friendly_profanity만 9회, 다른 허용 문장은 --extra-repeat 3회
+uv run python -m zg_stage1.training_mix --out <새 학습.jsonl> \
+  --extra-repeat 3 --friendly-profanity-repeat 9 [기존 H1T2 입력 선택지...]
+
+# D와 H1T2를 같은 정책 정렬 validation으로 비교
+uv run python -m zg_stage1.validation_auc --model-dir <모델> --val-file <val_v2.jsonl> \
+  --exclude-untargeted-offensive --output <새 auc.json>
+
+# 2차 점수를 경로 끝 후보율에 합친 단일/앙상블 개발셋 평가
+uv run python -m zg_stage1.evaluate_chat --model-dir <시드1> --model-dir <시드2> --model-dir <시드3> \
+  --eval-file eval_data/chat-dev-v2.jsonl --forward-budget 0.304 \
+  --rule-routes <rules.jsonl> --short-rule 5:4 --stage2-scores <stage2-scores.json> --output <ensemble-dev.json>
+
+# 학습 전 R0 중단 조건과 범주별 2차 단독 후보율
+uv run python -m zg_stage1.round3_decision precheck \
+  --eval-file eval_data/chat-dev-v2.jsonl --rule-routes <R0-rules.jsonl> \
+  --stage2-scores <stage2-scores.json> --output <precheck.json>
+```
+
+`--drop-untargeted-offensive`(D)와 `--friendly-profanity-repeat`(W)는 서로 배타적이다. W는 저장소에 고정한 허용 문장 v1에만 쓸 수 있고, 실행 전 v1의 `friendly_profanity`가 986줄인지 확인한다. D의 `ids_sha256`와 정책 정렬 AUC의 `excluded_ids_sha256`는 K-HATERS id를 **정수 오름차순**으로 정렬해 `"<id>\n"`을 이어 붙인 UTF-8의 sha256이다. 정수가 아닌 id는 거절한다.
+
+`evaluate_chat`은 `--stage2-scores`를 준 dev 보고서에 결정 임계값의 `item_flags`(채점 id별 `routed`, `goes_to_stage2`, `endpoint`)와 `weighted_forward_rate_exact`, `within_budget`을 남긴다. 판정·부트스트랩은 반올림된 `scores`가 아닌 이 플래그만 쓰며, 플래그로 재계산한 범주별 비율이 보고서 집계와 다르면 멈춘다. holdout은 dev 보고서의 예산으로 exact 부하를 판정하고 문장별 플래그는 남기지 않는다.
+
+`round3_decision dev`의 CONFIG은 `variant`(`D`/`W`), `dev_file`, R0 `rule_routes`, `stage2_scores`, 고정 `short_rule` 5:4, 모델별 `training_data_sha256`(`H1T2`는 `9ffd01627a95c73ff2b21de24884913d525fbabba3af43b4cdd6c921da8d4a62`, X는 해당 학습 파일 지문), `reports`(`single` 3개 `{seed,path}`, `ensemble` 1개, `pair_ensembles` 3개), `validation_auc`, `manifest` 출처를 담는다. 상대경로는 CONFIG 파일 기준이다. 시드와 학습 파일 지문의 근거는 각 모델의 `model-card.json` → `hyperparameters.seed`와 `training_data.train.sha256`이고, `evaluate_chat`이 이를 단일/앙상블 보고서에 복사한다. 판정기는 보고서와 AUC 모델 카드가 CONFIG의 같은 모델 출처인지, 단일 시드가 `20261011, 20261021, 20261031` 오름차순인지, 앙상블 가중치 집합·순서와 세 두-시드 조합이 정확한지 검사한다.
+
+W의 `validation_auc.H1T2`/`validation_auc.W`는 각 시드 모델 카드이며 `best_validation_auc`가 필수다. D의 두 항목은 시드별 서로 다른 정책 정렬 AUC 파일 3개씩이고, 추가로 H1T2 모델 카드 3개를 `validation_auc.original_h1t2`에 둔다. 승자가 있으면 판정 JSON 옆에 Markdown과 `.manifest.json` 초안을 쓴다. `manifest` 입력에는 보류셋·커밋 지문과 함께 `evaluate_rules_sha256`(실제 실행할 `evaluateRules.js`)를 넣는다.
+
+```sh
+uv run python -m zg_stage1.round3_decision dev --config <round3-config.json> --output <decision.json>
+uv run python -m zg_stage1.round3_decision holdout --manifest <decision.manifest.json> \
+  --holdout-reports <보고서...> --output <verdict.json>
+```
+
+봉인 보류셋은 개별 명령을 손으로 실행하지 않고 저장소 루트에서 한 명령으로 끝낸다. 키워드 파일이 없으면 네 번째 인자에 `-`를 준다. 데이터 디렉터리는 여섯 번째 인자로 주며 `ZG_DATA_DIR`를 읽지 않는다. 생성한 manifest는 평가 코드 밖인 `docs/ml/m2-round3-decisions/` 아래에 결정 기록으로 두고 먼저 커밋한다. 스크립트는 manifest의 `evaluation_code_commit`이 HEAD의 조상인지, 그 커밋부터 HEAD까지 `workers/`·`apps/server/`가 바뀌지 않았는지와 깨끗한 작업 트리(`.serena/` 제외), `uv`·`node`, `evaluateRules.js`, 보류셋·1차 가중치·2차 모델 지문을 추론 전에 확인한다.
+
+판정을 쓴 뒤 출력 부모 안의 숨은 스테이징 디렉터리에 판정·보고서·원시 점수·로그를 모두 모으고, 출력 디렉터리가 없음을 다시 전제로 디렉터리 rename 한 번으로 공개한다. 단일은 시드별 1차 원시 점수, 앙상블은 구성 모델별·평균 점수, 2차 원시 점수와 각 sha256을 남긴다. 사전 검사가 실패하면 stderr에 `preflight: <reason>`(예: `code_commit_not_ancestor`, `evaluation_code_changed`, `worktree_dirty`, `output_parent_missing`)만 쓰며 보류셋 내용이나 점수를 쓰지 않는다. 이후 단계 실패는 종전처럼 단계 이름만 쓴다.
+
+```sh
+workers/stage1/scripts/round3-holdout.sh \
+  <manifest.json> <holdout.jsonl> apps/server/dist/tools/evaluateRules.js - \
+  <2차 모델 디렉터리> <찌리릿 가드 데이터 디렉터리> <새 출력 디렉터리>
+```
+
 ## 워커 실행
 
 학습한 모델로 서버에 1차 점수를 준다. 서버와 주고받는 약속은 [워커 계약 v1](../contract/README.md)이다.

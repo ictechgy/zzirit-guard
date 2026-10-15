@@ -50,6 +50,19 @@ uv run python -m zg_stage2.worker --model-dir "$ZG_DATA_DIR/ml/stage2/kanana-saf
   - 실제 4비트 모델에서는 확률이 최대 0.06 다르다(72문장 기준, 범주는 모두 같음). 스파이크에서도 본 수치 차이다.
 - **한도와 로그:** 1차 워커와 같다(동시 연결 4개, 요청 마감 5초, 추론 대기 5초, 멈춘 추론 10초면 종료 코드 70). 로그에는 건수와 지연만 남긴다.
 
+## 평가셋 전체 점수
+
+[M2 3차 계획](../../docs/ml/2026-10-15-m2-round3-plan.md)의 경로 끝 후보율은 워커와 같은 `load_kanana`·`classify_one`으로 평가셋 전체를 한 번 채점한다.
+
+```sh
+uv run python -m zg_stage2.score_eval_set \
+  --model-dir "$ZG_DATA_DIR/ml/stage2/kanana-safeguard-8b-mlx-4bit" \
+  --eval-file ../stage1/eval_data/chat-dev-v2.jsonl \
+  --output <새 stage2-scores.json>
+```
+
+결과에는 id별 유해 확률·범주, 모델 식별자와 입력 sha256만 있고 원문은 없다. JSONL은 stage1 로더와 같이 `\n`만 줄 경계로 본다(`splitlines()`를 쓰지 않는다). id 누락·중복, `bad_text`/`text_too_long`, NaN·범위 밖 확률이 하나라도 있으면 출력 파일을 만들지 않으며, 거절 오류에는 원문 대신 문장 id를 넣는다. 기존 출력도 덮어쓰지 않는다.
+
 ## 공용 모듈
 
 `zg_stage2/worker_contract.py`, `worker_runtime.py`, `worker_server.py`, `tests/worker_cases.py`는 1차 워커(`workers/stage1`)에서 패키지 이름만 바꿔 복사한 것이다.

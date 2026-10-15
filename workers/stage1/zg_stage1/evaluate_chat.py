@@ -72,6 +72,9 @@ MIX_SUM_TOLERANCE = 1e-6
 # 규칙 경로 결과의 판정 값(evaluateRules.ts). pass가 아니면 규칙이 먼저 잡은 것이다.
 RULE_DECISIONS: frozenset[str] = frozenset({"auto_hide", "candidate", "pass"})
 
+# 2차 워커가 후보로 올리는 고정 확률. 점수 파일도 이 기준으로 만들었는지 확인한다.
+STAGE2_CANDIDATE_THRESHOLD = 0.5
+
 
 class RuleRoute(NamedTuple):
     """문장 하나의 규칙 경로 결과: 규칙이 잡았는지(pass가 아님), 키워드 경로에 걸렸는지, AI 단계를 건너뛰는 가벼운 반응인지."""
@@ -117,6 +120,7 @@ class ScoredItem(NamedTuple):
     score: float
     route: RuleRoute = RuleRoute(rule_flagged=False, keyword=False)
     threshold_multiplier: float = 1.0
+    stage2_score: float | None = None
 
     def is_routed(self, threshold: float) -> bool:
         """매니저나 2차 중 어디로든 올라가는지: 규칙이 잡거나, 2차로 가거나(goes_to_stage2).
@@ -133,6 +137,12 @@ class ScoredItem(NamedTuple):
             return self.route.keyword or self.score >= threshold
         return self.route.keyword or self.score >= threshold * self.threshold_multiplier - SCALED_THRESHOLD_TOLERANCE
 
+    def is_endpoint_candidate(self, threshold: float) -> bool:
+        """경로 끝 후보: 규칙 판정 또는 실제 2차 경로에서 kanana 확률이 0.5 이상인 문장."""
+        if self.stage2_score is None:
+            raise MetricError("경로 끝 후보율을 계산하려면 모든 문장의 2차 점수가 필요합니다. --stage2-scores를 확인하세요.")
+        return self.route.rule_flagged or (self.goes_to_stage2(threshold) and self.stage2_score >= STAGE2_CANDIDATE_THRESHOLD)
+
 
 def validate_traffic_mix(mix: Mapping[str, float]) -> None:
     """구성비가 알려진 범주만 담고, 모두 0 이상이고, 합이 1인지 확인한다."""
@@ -146,7 +156,11 @@ def validate_traffic_mix(mix: Mapping[str, float]) -> None:
 
 
 def scored_pairs(
-    items: Sequence[ChatEvalItem], scores: Sequence[float], routes: Mapping[str, RuleRoute] | None = None, short_rule: ShortRule | None = None
+    items: Sequence[ChatEvalItem],
+    scores: Sequence[float],
+    routes: Mapping[str, RuleRoute] | None = None,
+    short_rule: ShortRule | None = None,
+    stage2_scores: Mapping[str, float] | None = None,
 ) -> list[ScoredItem]:
     """지표에 들어가는(ambiguous가 아닌) 문장과 점수·규칙 경로·임계값 배수의 묶음. routes가 없으면 규칙·키워드 없음으로 본다."""
     if len(items) != len(scores):
@@ -154,7 +168,13 @@ def scored_pairs(
     no_route = RuleRoute(rule_flagged=False, keyword=False)
     pairs = zip(items, scores, strict=True)
     return [
-        ScoredItem(item, score, no_route if routes is None else routes[item.item_id], threshold_multiplier_for(item.text, short_rule))
+        ScoredItem(
+            item,
+            score,
+            no_route if routes is None else routes[item.item_id],
+            threshold_multiplier_for(item.text, short_rule),
+            None if stage2_scores is None else stage2_scores[item.item_id],
+        )
         for item, score in pairs
         if item.is_scored
     ]
@@ -187,6 +207,11 @@ def stage2_rates_by_category(pairs: Sequence[ScoredItem], threshold: float) -> d
     return rates_by_category(pairs, lambda pair: pair.goes_to_stage2(threshold))
 
 
+def endpoint_candidate_rates_by_category(pairs: Sequence[ScoredItem], threshold: float) -> dict[str, float]:
+    """범주별 경로 끝 후보율. 2차에 가지 않은 문장의 kanana 점수는 쓰지 않는다."""
+    return rates_by_category(pairs, lambda pair: pair.is_endpoint_candidate(threshold))
+
+
 def weighted_forward_rate(rates: Mapping[str, float], mix: Mapping[str, float]) -> float:
     """구성비로 가중한 전달률. 구성비가 있는 범주가 평가셋에 없으면 오류다.
 
@@ -208,13 +233,42 @@ def summarize_at_chat_threshold(pairs: Sequence[ScoredItem], threshold: float, m
     rates = forward_rates_by_category(pairs, threshold)
     critical = rates_for(rates, CRITICAL_CATEGORIES)
     allow = rates_for(rates, ALLOW_CATEGORIES)
-    return {
+    summary = {
         "threshold": threshold,
         "weighted_forward_rate": round(weighted_forward_rate(stage2_rates_by_category(pairs, threshold), mix), METRIC_DECIMALS),
         "critical_recall_min": round(min(critical), METRIC_DECIMALS),
         "critical_recall_mean": round(sum(critical) / len(critical), METRIC_DECIMALS),
         "allow_forward_max": round(max(allow), METRIC_DECIMALS),
         "by_category": {category: round(rate, METRIC_DECIMALS) for category, rate in rates.items()},
+    }
+    if pairs and all(pair.stage2_score is not None for pair in pairs):
+        endpoint = endpoint_candidate_rates_by_category(pairs, threshold)
+        summary["endpoint_candidate_by_category"] = {category: round(rate, METRIC_DECIMALS) for category, rate in endpoint.items()}
+    return summary
+
+
+def add_exact_budget_result(
+    summary: dict,
+    pairs: Sequence[ScoredItem],
+    threshold: float,
+    mix: Mapping[str, float],
+    budget: float,
+) -> None:
+    """2차 점수를 쓰는 새 보고서의 결정점에만 반올림 전 부하와 예산 판정을 더한다."""
+    exact = weighted_forward_rate(stage2_rates_by_category(pairs, threshold), mix)
+    summary["weighted_forward_rate_exact"] = exact
+    summary["within_budget"] = exact <= budget
+
+
+def item_flags_at_threshold(pairs: Sequence[ScoredItem], threshold: float) -> dict[str, dict[str, bool]]:
+    """dev 결정점의 문장별 경로 결과. pairs에서 빠진 ambiguous는 자연스럽게 제외된다."""
+    return {
+        pair.item.item_id: {
+            "routed": pair.is_routed(threshold),
+            "goes_to_stage2": pair.goes_to_stage2(threshold),
+            "endpoint": pair.is_endpoint_candidate(threshold),
+        }
+        for pair in pairs
     }
 
 
@@ -268,12 +322,15 @@ def build_dev_report(
     budget: float,
     routes: Mapping[str, RuleRoute] | None = None,
     short_rule: ShortRule | None = None,
+    stage2_scores: Mapping[str, float] | None = None,
 ) -> dict:
     """개발셋 결과: 임계값 표, 예산 임계값과 그 요약, 문장별 점수(id만), 짧은 문장 규칙. 원문은 넣지 않는다."""
-    pairs = scored_pairs(items, scores, routes, short_rule)
+    pairs = scored_pairs(items, scores, routes, short_rule, stage2_scores)
     threshold = select_budget_threshold(pairs, mix, budget)
     at_threshold = None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix)
-    return {
+    if threshold is not None and at_threshold is not None and stage2_scores is not None:
+        add_exact_budget_result(at_threshold, pairs, threshold, mix, budget)
+    report = {
         "split": "dev",
         "counts": describe_counts(items, pairs),
         "auc": compute_chat_auc(pairs),
@@ -283,6 +340,9 @@ def build_dev_report(
         "short_rule": None if short_rule is None else short_rule.to_dict(),
         "scores": {item.item_id: round(score, METRIC_DECIMALS) for item, score in zip(items, scores, strict=True)},
     }
+    if threshold is not None and stage2_scores is not None:
+        report["item_flags"] = item_flags_at_threshold(pairs, threshold)
+    return report
 
 
 def build_holdout_report(
@@ -292,15 +352,20 @@ def build_holdout_report(
     threshold: float,
     routes: Mapping[str, RuleRoute] | None = None,
     short_rule: ShortRule | None = None,
+    stage2_scores: Mapping[str, float] | None = None,
+    budget: float | None = None,
 ) -> dict:
     """보류셋 결과: 개발셋에서 고른 임계값 하나의 집계와 AUC만. 임계값 표·문장별 점수는 넣지 않는다(보류셋 튜닝 방지)."""
-    pairs = scored_pairs(items, scores, routes, short_rule)
+    pairs = scored_pairs(items, scores, routes, short_rule, stage2_scores)
+    summary = summarize_at_chat_threshold(pairs, threshold, mix)
+    if stage2_scores is not None and budget is not None:
+        add_exact_budget_result(summary, pairs, threshold, mix, budget)
     return {
         "split": "holdout",
         "counts": describe_counts(items, pairs),
         "auc": compute_chat_auc(pairs),
         "traffic_mix": dict(mix),
-        "decision": {"mode": "fixed", "threshold": threshold, "at_threshold": summarize_at_chat_threshold(pairs, threshold, mix)},
+        "decision": {"mode": "fixed", "threshold": threshold, "at_threshold": summary},
         "short_rule": None if short_rule is None else short_rule.to_dict(),
     }
 
@@ -308,19 +373,21 @@ def build_holdout_report(
 def build_argument_parser() -> argparse.ArgumentParser:
     """CLI 인자. 개발셋에는 --forward-budget, 보류셋에는 --dev-report를 준다."""
     parser = argparse.ArgumentParser(prog="python -m zg_stage1.evaluate_chat", description="채팅 평가셋으로 1차 분류기 평가(기본 CPU)")
-    parser.add_argument("--model-dir", type=Path, required=True, help="train이 만든 출력 디렉터리")
+    parser.add_argument("--model-dir", type=Path, action="append", required=True, help="train이 만든 출력 디렉터리(앙상블은 순서대로 여러 번 지정)")
     parser.add_argument("--eval-file", type=Path, required=True, help="채팅 평가셋 JSONL(개발셋 또는 보류셋)")
     decision = parser.add_mutually_exclusive_group(required=True)
     decision.add_argument("--forward-budget", type=probability_argument, help="F_max(개발셋에서 임계값을 고를 때)")
     decision.add_argument("--dev-report", type=Path, help="같은 모델의 개발셋 결과 JSON(보류셋을 볼 때)")
     parser.add_argument("--mix-file", type=Path, help="트래픽 구성비 JSON(범주→비율, 합 1). 없으면 기본 가정")
     parser.add_argument("--rule-routes", type=Path, help="서버 규칙 평가 도구가 낸 문장별 규칙·키워드 결과 JSONL(없으면 1차만 평가)")
+    parser.add_argument("--stage2-scores", type=Path, help="zg_stage2.score_eval_set이 만든 같은 평가셋의 id별 2차 점수 JSON")
     parser.add_argument(
         "--short-rule", type=short_rule_argument, help="짧은 문장 임계값 N:k(공백 뺀 N자 이하 문장은 임계값의 k배, k>1). 보류셋은 개발셋과 같아야 한다"
     )
     parser.add_argument("--device", choices=modeling.DEVICE_CHOICES, default="cpu", help="점수 계산 장치(기본 cpu)")
     parser.add_argument("--batch-size", type=positive_integer, default=modeling.DEFAULT_INFERENCE_BATCH_SIZE, help="점수 계산 배치 크기")
     parser.add_argument("--output", type=Path, help="결과 JSON 경로(기본: <모델>/chat-eval-<셋>.json)")
+    parser.add_argument("--raw-scores-dir", type=Path, help="보류셋 원시 1차 점수를 새 디렉터리에 저장(판정 스크립트 전용)")
     parser.add_argument("--overwrite", action="store_true", help="이미 있는 결과 파일을 덮어쓴다(개발셋만)")
     return parser
 
@@ -328,6 +395,33 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def compute_model_weights_sha256(model_directory: Path) -> str:
     """모델 가중치 파일의 sha256. 보류셋 평가가 개발셋에서 임계값을 고른 바로 그 모델인지 확인하는 데 쓴다."""
     return compute_file_sha256(model_directory / modeling.WEIGHTS_FILE_NAME)
+
+
+def model_directories(arguments: argparse.Namespace) -> list[Path]:
+    """argparse의 반복 목록과 기존 단위 테스트의 Path 값을 한 모양으로 정규화한다."""
+    value = arguments.model_dir
+    return [value] if isinstance(value, Path) else list(value)
+
+
+def model_training_seed(model_directory: Path) -> int:
+    """보고서 구성 검사에 쓸 학습 시드를 모델 카드에서 읽는다."""
+    card = read_model_card(model_directory)
+    hyperparameters = card.get("hyperparameters") if isinstance(card, dict) else None
+    seed = hyperparameters.get("seed") if isinstance(hyperparameters, dict) else None
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise DatasetFormatError(f"{model_directory.name}의 model-card.json에 정수 hyperparameters.seed가 없습니다. 학습 출처를 확인하세요.")
+    return seed
+
+
+def model_training_data_sha256(model_directory: Path) -> str:
+    """보고서 구성 검사에 쓸 실제 학습 파일 sha256을 모델 카드에서 읽는다."""
+    card = read_model_card(model_directory)
+    training_data = card.get("training_data") if isinstance(card, dict) else None
+    train = training_data.get("train") if isinstance(training_data, dict) else None
+    sha256 = train.get("sha256") if isinstance(train, dict) else None
+    if not isinstance(sha256, str) or not sha256:
+        raise DatasetFormatError(f"{model_directory.name}의 model-card.json에 training_data.train.sha256 학습 데이터 지문이 없습니다. 학습 출처를 확인하세요.")
+    return sha256
 
 
 def require_valid_threshold(value: object, file_name: str) -> float:
@@ -369,10 +463,11 @@ def require_same_traffic_mix(report: Mapping, traffic_mix: Mapping[str, float] |
 
 def read_dev_threshold(
     dev_report_path: Path,
-    model_weights_sha256: str,
+    model_weights_sha256: str | Sequence[str],
     policy_sha256: str | None,
     short_rule: ShortRule | None = None,
     traffic_mix: Mapping[str, float] | None = None,
+    stage2_model_identifier: str | None = None,
 ) -> float:
     """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나, 다른 모델의 결과거나, 임계값이 잘못됐으면 오류다.
 
@@ -393,7 +488,21 @@ def read_dev_threshold(
         raise DatasetFormatError(message)
     require_same_short_rule(report, short_rule, dev_report_path.name)
     require_same_traffic_mix(report, traffic_mix, dev_report_path.name)
+    if stage2_model_identifier is not None:
+        stage2 = report.get("stage2_scores")
+        if not isinstance(stage2, dict) or stage2.get("model_identifier") != stage2_model_identifier:
+            raise DatasetFormatError(f"{dev_report_path.name}과 2차 모델 식별자가 다릅니다. 개발셋과 같은 --stage2-scores 모델을 쓰세요.")
     return require_valid_threshold(report["decision"].get("threshold"), dev_report_path.name)
+
+
+def read_dev_budget(dev_report_path: Path) -> float:
+    """보류셋 정확 예산 판정에 쓸 dev 보고서의 예산을 읽는다."""
+    report = json.loads(dev_report_path.read_text(encoding="utf-8"))
+    decision = report.get("decision")
+    value = decision.get("budget") if isinstance(decision, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(float(value)) or not 0 <= float(value) <= 1:
+        raise DatasetFormatError(f"{dev_report_path.name}의 가중 전달 예산이 유한한 0~1 값이 아닙니다. 개발셋을 다시 평가하세요.")
+    return float(value)
 
 
 class RouteRecord(NamedTuple):
@@ -440,6 +549,42 @@ def load_rule_routes(path: Path, items: Sequence[ChatEvalItem], eval_path: Path)
     return routes, ensure_routes_match_eval_file(records, eval_path, path.name)
 
 
+def load_stage2_scores(path: Path, items: Sequence[ChatEvalItem], eval_path: Path | None = None) -> tuple[dict[str, float], dict[str, str]]:
+    """2차 점수 파일의 기준·모델·확률과 평가셋 id 집합을 검증한다."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise DatasetFormatError(f"{path.name}: 2차 점수 JSON을 읽을 수 없습니다({error.msg}). score_eval_set을 다시 실행하세요.") from error
+    if not isinstance(document, dict) or document.get("candidate_threshold") != STAGE2_CANDIDATE_THRESHOLD:
+        raise DatasetFormatError(f"{path.name}: 2차 후보 임계값이 0.5인 score_eval_set 결과가 아닙니다. 도구를 다시 실행하세요.")
+    model = document.get("model")
+    identifier = model.get("identifier") if isinstance(model, dict) else None
+    if not isinstance(identifier, str) or not identifier:
+        raise DatasetFormatError(f"{path.name}: 2차 모델 식별자가 없습니다. score_eval_set 결과를 다시 만드세요.")
+    raw_scores = document.get("scores")
+    if not isinstance(raw_scores, dict) or set(raw_scores) != {item.item_id for item in items}:
+        raise DatasetFormatError(f"{path.name}의 id가 평가셋과 다릅니다. 같은 평가셋으로 score_eval_set을 다시 실행하세요.")
+    if eval_path is not None:
+        provenance = document.get("eval_file")
+        expected_hash = compute_file_sha256(eval_path)
+        if not isinstance(provenance, dict) or provenance.get("sha256") != expected_hash:
+            raise DatasetFormatError(f"{path.name}은 이 평가셋 파일의 점수가 아닙니다. 같은 --eval-file로 score_eval_set을 다시 실행하세요.")
+    scores: dict[str, float] = {}
+    for identifier_key, value in raw_scores.items():
+        probability = value.get("unsafe_probability") if isinstance(value, dict) else None
+        category = value.get("category") if isinstance(value, dict) else None
+        if not isinstance(probability, int | float) or isinstance(probability, bool):
+            raise DatasetFormatError(f"{path.name}: id {identifier_key!r}의 2차 확률이 유한한 0~1 값이 아닙니다. score_eval_set을 다시 실행하세요.")
+        numeric_probability = float(probability)
+        if not math.isfinite(numeric_probability) or not 0 <= numeric_probability <= 1:
+            raise DatasetFormatError(f"{path.name}: id {identifier_key!r}의 2차 확률이 유한한 0~1 값이 아닙니다. score_eval_set을 다시 실행하세요.")
+        if category not in {f"S{index}" for index in range(1, 8)}:
+            raise DatasetFormatError(f"{path.name}: id {identifier_key!r}의 2차 범주가 S1~S7이 아닙니다. score_eval_set을 다시 실행하세요.")
+        scores[str(identifier_key)] = numeric_probability
+    metadata = {"name": path.name, "sha256": compute_file_sha256(path), "model_identifier": identifier}
+    return scores, metadata
+
+
 def require_matching_decision(arguments: argparse.Namespace, split: str) -> None:
     """개발셋에는 예산, 보류셋에는 개발셋 결과를 요구한다. 보류셋으로 임계값을 고르지 못하게 하기 위해서다."""
     if split == "holdout" and arguments.dev_report is None:
@@ -460,21 +605,85 @@ def resolve_output_path(arguments: argparse.Namespace, split: str) -> Path:
 
     왜: 보류셋은 모델마다 한 번만 본다. 다른 경로로 몇 번이고 다시 돌릴 수 있으면 그 결과를 보고 설정을 바꾸게 된다.
     """
-    if split == "holdout" and arguments.output is not None:
-        raise DatasetFormatError("보류셋 결과는 모델 디렉터리의 chat-eval-holdout.json에만 씁니다. --output을 빼세요.")
-    output = arguments.output or arguments.model_dir / f"chat-eval-{split}.json"
+    directories = model_directories(arguments)
+    is_ensemble = len(directories) > 1
+    if split == "holdout" and is_ensemble and arguments.output is None:
+        raise DatasetFormatError("앙상블 보류셋 결과는 모델 하나의 디렉터리에 둘 수 없습니다. 새 --output 경로를 주세요.")
+    if split == "holdout" and not is_ensemble and arguments.output is not None:
+        raise DatasetFormatError("단일 모델 보류셋 결과는 모델 디렉터리의 chat-eval-holdout.json에만 씁니다. --output을 빼세요.")
+    output = arguments.output or directories[0] / f"chat-eval-{split}.json"
     if output.exists() and (split == "holdout" or not arguments.overwrite):
         raise OutputExistsError(f"{output.name}이 이미 있습니다. 개발셋 결과는 --overwrite로 바꿀 수 있고, 보류셋 결과는 바꾸지 않습니다.")
     return output
 
 
-def score_items(arguments: argparse.Namespace, items: Sequence[ChatEvalItem]) -> list[float]:
-    """학습된 모델로 문장의 유해 확률을 계산한다."""
+def score_model_items(arguments: argparse.Namespace, model_directory: Path, items: Sequence[ChatEvalItem]) -> list[float]:
+    """학습된 모델 하나로 문장의 유해 확률을 계산한다."""
     device = modeling.resolve_device(arguments.device)
-    max_length = resolve_max_length(arguments.model_dir, read_model_card(arguments.model_dir))
-    tokenizer = modeling.load_trained_tokenizer(arguments.model_dir)
-    model = modeling.move_model_to_device(modeling.load_trained_classifier(arguments.model_dir), device).eval()
+    max_length = resolve_max_length(model_directory, read_model_card(model_directory))
+    tokenizer = modeling.load_trained_tokenizer(model_directory)
+    model = modeling.move_model_to_device(modeling.load_trained_classifier(model_directory), device).eval()
     return modeling.score_texts(model, tokenizer, [item.text for item in items], device, max_length, arguments.batch_size)
+
+
+def average_model_scores(scores_by_model: Sequence[Sequence[float]]) -> list[float]:
+    """모델별 점수의 문장별 산술 평균. 한 모델이어도 값을 바꾸지 않는다."""
+    if not scores_by_model:
+        raise MetricError("앙상블에 모델 점수가 없습니다. --model-dir를 하나 이상 주세요.")
+    expected = len(scores_by_model[0])
+    if any(len(scores) != expected for scores in scores_by_model):
+        raise MetricError("앙상블 모델별 점수 개수가 다릅니다. 모두 같은 평가셋을 채점했는지 확인하세요.")
+    for scores in scores_by_model:
+        ensure_valid_scores_and_labels(scores, [0] * len(scores))
+    return [sum(scores[index] for scores in scores_by_model) / len(scores_by_model) for index in range(expected)]
+
+
+def score_items(arguments: argparse.Namespace, items: Sequence[ChatEvalItem]) -> list[float]:
+    """모든 --model-dir를 채점하고 둘 이상이면 문장별 평균을 낸다."""
+    components = [score_model_items(arguments, directory, items) for directory in model_directories(arguments)]
+    arguments.raw_score_components = components
+    return average_model_scores(components)
+
+
+def write_raw_score_artifacts(
+    directory: Path,
+    eval_file: Path,
+    items: Sequence[ChatEvalItem],
+    model_dirs: Sequence[Path],
+    model_hashes: Sequence[str],
+    model_seeds: Sequence[int],
+    components: Sequence[Sequence[float]],
+) -> None:
+    """보류셋 판정 후 공개할 단일/앙상블 원시 점수를 원문 없이 묶어 쓴다."""
+    if directory.exists():
+        raise OutputExistsError(f"{directory.name}이 이미 있습니다. 원시 점수를 덮어쓰지 않도록 새 --raw-scores-dir을 주세요.")
+    directory.mkdir(mode=0o700, parents=True)
+    evaluation = describe_file_provenance(eval_file)
+    for index, (model_dir, weight, seed, scores) in enumerate(zip(model_dirs, model_hashes, model_seeds, components, strict=True), start=1):
+        write_json_atomically(
+            directory / f"component-{index}.json",
+            {
+                "kind": "component",
+                "model_dir": model_dir.name,
+                "model_seed": seed,
+                "model_weights_sha256": weight,
+                "eval_file": evaluation,
+                "scores": {item.item_id: score for item, score in zip(items, scores, strict=True)},
+            },
+        )
+    if len(components) > 1:
+        averaged = average_model_scores(components)
+        write_json_atomically(
+            directory / "average.json",
+            {
+                "kind": "average",
+                "model_dirs": [path.name for path in model_dirs],
+                "model_seeds": list(model_seeds),
+                "model_weights_sha256": list(model_hashes),
+                "eval_file": evaluation,
+                "scores": {item.item_id: score for item, score in zip(items, averaged, strict=True)},
+            },
+        )
 
 
 def format_summary_row(row: dict) -> str:
@@ -498,16 +707,22 @@ def format_chat_report_markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
-def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEvalItem], mix: Mapping[str, float], model_sha: str) -> dict:
+def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEvalItem], mix: Mapping[str, float], model_sha: str | Sequence[str]) -> dict:
     """셋에 맞는 보고서를 만든다. 보류셋은 채점 전에 개발셋 결과를 확인한다(다른 모델이면 채점하지 않는다)."""
     routes, policy = (None, None) if arguments.rule_routes is None else load_rule_routes(arguments.rule_routes, items, arguments.eval_file)
     route_provenance = None if arguments.rule_routes is None else describe_file_provenance(arguments.rule_routes) | {"policy_sha256": policy}
     provenance = {"rule_routes": route_provenance}
+    stage2_path = getattr(arguments, "stage2_scores", None)
+    stage2_scores, stage2_provenance = (None, None) if stage2_path is None else load_stage2_scores(stage2_path, items, arguments.eval_file)
+    if stage2_provenance is not None:
+        provenance["stage2_scores"] = stage2_provenance
     if items[0].split == "holdout":
-        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule, mix)
-        report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes, arguments.short_rule)
+        stage2_identifier = None if stage2_provenance is None else stage2_provenance["model_identifier"]
+        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule, mix, stage2_identifier)
+        budget = read_dev_budget(arguments.dev_report) if stage2_scores is not None else None
+        report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes, arguments.short_rule, stage2_scores, budget)
         return report | provenance | {"dev_report": describe_file_provenance(arguments.dev_report)}
-    return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes, arguments.short_rule) | provenance
+    return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes, arguments.short_rule, stage2_scores) | provenance
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -515,13 +730,49 @@ def main(argv: Sequence[str] | None = None) -> None:
     arguments = build_argument_parser().parse_args(argv)
     items = load_validated_eval_set(arguments.eval_file)
     require_matching_decision(arguments, items[0].split)
+    if arguments.raw_scores_dir is not None and items[0].split != "holdout":
+        raise DatasetFormatError("--raw-scores-dir은 봉인 보류셋 판정 스크립에서만 쓸 수 있습니다.")
+    if arguments.raw_scores_dir is not None and arguments.raw_scores_dir.exists():
+        raise OutputExistsError(f"{arguments.raw_scores_dir.name}이 이미 있습니다. 새 --raw-scores-dir을 주세요.")
     mix = load_traffic_mix(arguments.mix_file)
     output = resolve_output_path(arguments, items[0].split)
-    model_sha = compute_model_weights_sha256(arguments.model_dir)
+    directories = model_directories(arguments)
+    model_hashes = [compute_model_weights_sha256(directory) for directory in directories]
+    include_model_seeds = arguments.stage2_scores is not None or arguments.raw_scores_dir is not None
+    model_seeds = [model_training_seed(directory) for directory in directories] if include_model_seeds else []
+    model_training_hashes = [model_training_data_sha256(directory) for directory in directories] if include_model_seeds else []
+    model_sha: str | list[str] = model_hashes[0] if len(model_hashes) == 1 else model_hashes
     report = build_report_for_split(arguments, items, mix, model_sha)
-    report |= {"created_at": utc_timestamp(), "model_dir": arguments.model_dir.name, "model_weights_sha256": model_sha}
+    if len(directories) == 1:
+        report |= {
+            "created_at": utc_timestamp(),
+            "model_dir": directories[0].name,
+            "model_weights_sha256": model_sha,
+        }
+        if include_model_seeds:
+            report["model_seed"] = model_seeds[0]
+            report["model_training_data_sha256"] = model_training_hashes[0]
+    else:
+        report |= {
+            "created_at": utc_timestamp(),
+            "model_dirs": [directory.name for directory in directories],
+            "model_weights_sha256": model_sha,
+        }
+        if include_model_seeds:
+            report["model_seeds"] = model_seeds
+            report["model_training_data_sha256s"] = model_training_hashes
     report |= {"eval_file": describe_file_provenance(arguments.eval_file)}
     write_json_atomically(output, report)
+    if arguments.raw_scores_dir is not None:
+        write_raw_score_artifacts(
+            arguments.raw_scores_dir,
+            arguments.eval_file,
+            items,
+            directories,
+            model_hashes,
+            model_seeds,
+            arguments.raw_score_components,
+        )
     print(format_chat_report_markdown(report))
     print(f"\n저장: {output.name}")
 

@@ -13,16 +13,21 @@ from zg_stage1.data import compute_file_sha256
 from zg_stage1.errors import DatasetFormatError, MetricError, OutputExistsError
 from zg_stage1.evaluate_chat import (
     DEFAULT_TRAFFIC_MIX,
+    average_model_scores,
     build_dev_report,
     build_holdout_report,
     candidate_thresholds,
+    endpoint_candidate_rates_by_category,
     forward_rates_by_category,
     format_chat_report_markdown,
     load_traffic_mix,
+    load_stage2_scores,
     RuleRoute,
     ShortRule,
     load_rule_routes,
     message_length,
+    model_training_data_sha256,
+    model_training_seed,
     short_rule_argument,
     read_dev_threshold,
     require_matching_decision,
@@ -33,6 +38,7 @@ from zg_stage1.evaluate_chat import (
     summarize_at_chat_threshold,
     validate_traffic_mix,
     weighted_forward_rate,
+    write_raw_score_artifacts,
 )
 
 
@@ -338,3 +344,222 @@ def test_holdout_requires_same_traffic_mix(tmp_path: Path) -> None:
     assert read_dev_threshold(path, "abc", policy_sha256=None, traffic_mix=HALF_HALF_MIX) == 0.42
     with pytest.raises(DatasetFormatError, match="트래픽 구성비"):
         read_dev_threshold(path, "abc", policy_sha256=None, traffic_mix={"short_normal": 1.0})
+
+
+def test_endpoint_candidate_uses_only_the_actual_stage2_path() -> None:
+    """규칙은 바로 후보이고, 2차 확률은 실제 2차로 간 문장에만 적용하며 가벼운 반응은 AI를 건너뛴다."""
+    items = [
+        item("rule", "allow", "quote_report"),
+        item("below", "allow", "long_normal"),
+        item("keyword", "allow", "friendly_profanity"),
+        item("skip", "allow", "short_normal"),
+        item("stage1", "allow", "game_combat"),
+    ]
+    routes = {
+        "rule": RuleRoute(True, False),
+        "below": RuleRoute(False, False),
+        "keyword": RuleRoute(False, True),
+        "skip": RuleRoute(False, False, True),
+        "stage1": RuleRoute(False, False),
+    }
+    stage2 = {"rule": 0.1, "below": 0.9, "keyword": 0.6, "skip": 0.9, "stage1": 0.49}
+    pairs = scored_pairs(items, [0.1, 0.1, 0.1, 0.9, 0.9], routes=routes, stage2_scores=stage2)
+    assert [pair.is_endpoint_candidate(0.5) for pair in pairs] == [True, False, True, False, False]
+    assert endpoint_candidate_rates_by_category(pairs, 0.5) == {
+        "friendly_profanity": 1.0,
+        "game_combat": 0.0,
+        "long_normal": 0.0,
+        "quote_report": 1.0,
+        "short_normal": 0.0,
+    }
+
+
+def stage2_score_payload(items: list[ChatEvalItem], *, model: str = "kanana@abc") -> dict:
+    """C 모듈의 출력과 같은 작은 2차 점수 문서."""
+    return {
+        "model": {"directory_name": "kanana", "identifier": model},
+        "eval_file": {"name": "eval.jsonl", "sha256": "a" * 64},
+        "candidate_threshold": 0.5,
+        "scores": {item.item_id: {"unsafe_probability": 0.25, "category": "S1"} for item in items},
+        "prefix_fallbacks": 0,
+        "created_at": "2026-10-15T00:00:00+00:00",
+    }
+
+
+def test_stage2_scores_require_exact_eval_id_set(tmp_path: Path) -> None:
+    """2차 점수의 id는 평가셋과 한 개도 빠지거나 더하지 않고 정확히 같아야 한다."""
+    items = [item("a", "allow", "long_normal"), item("b", "harmful", "threat")]
+    path = tmp_path / "stage2.json"
+    payload = stage2_score_payload(items)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    scores, provenance = load_stage2_scores(path, items)
+    assert scores == {"a": 0.25, "b": 0.25}
+    assert provenance["name"] == "stage2.json" and provenance["model_identifier"] == "kanana@abc"
+    for bad_scores in ({"a": payload["scores"]["a"]}, payload["scores"] | {"extra": payload["scores"]["a"]}):
+        payload["scores"] = bad_scores
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        with pytest.raises(DatasetFormatError, match="id가 평가셋과 다릅니다"):
+            load_stage2_scores(path, items)
+
+
+def test_dev_report_adds_endpoint_rates_only_with_stage2_scores() -> None:
+    """2차 점수를 주면 결정점과 임계값 표에 경로 끝 비율을 더하고, 주지 않은 기존 출력에는 키가 생기지 않는다."""
+    items, scores = full_coverage(0.9, 0.1)
+    stage2 = {item.item_id: (0.6 if item.category == "quote_report" else 0.1) for item in items}
+    routes = {item.item_id: RuleRoute(False, item.category == "quote_report") for item in items}
+    old_report = build_dev_report(items, scores, DEFAULT_TRAFFIC_MIX, 0.5)
+    report = build_dev_report(items, scores, DEFAULT_TRAFFIC_MIX, 0.5, routes=routes, stage2_scores=stage2)
+    assert "endpoint_candidate_by_category" not in old_report["decision"]["at_threshold"]
+    assert "endpoint_candidate_by_category" not in old_report["threshold_table"][0]
+    assert report["decision"]["at_threshold"]["endpoint_candidate_by_category"]["quote_report"] == 1.0
+    assert all("endpoint_candidate_by_category" in row for row in report["threshold_table"])
+
+
+def test_stage2_dev_report_records_exact_decision_flags_and_budget() -> None:
+    """2차 선택을 쓴 dev 보고서는 반올림 점수가 아닌 원 점수의 경로 플래그와 예산 판정을 남긴다."""
+    items, scores = full_coverage(0.9, 0.1)
+    short_index = len(HARMFUL_CATEGORIES) + ALLOW_CATEGORIES.index("short_normal")
+    friendly_index = len(HARMFUL_CATEGORIES) + ALLOW_CATEGORIES.index("friendly_profanity")
+    scores[short_index] = 0.5
+    scores[friendly_index] = 0.50004
+    items.append(item("ambiguous", "ambiguous", "abuse"))
+    scores.append(0.99)
+    routes = {entry.item_id: RuleRoute(False, False) for entry in items}
+    stage2 = {entry.item_id: 0.6 for entry in items}
+
+    report = build_dev_report(items, scores, HALF_HALF_MIX, 0.75, routes=routes, stage2_scores=stage2)
+
+    assert report["decision"]["threshold"] == 0.500001
+    assert report["scores"][items[friendly_index].item_id] == 0.5
+    assert report["item_flags"][items[friendly_index].item_id] == {
+        "routed": True,
+        "goes_to_stage2": True,
+        "endpoint": True,
+    }
+    assert "ambiguous" not in report["item_flags"]
+    at_threshold = report["decision"]["at_threshold"]
+    assert at_threshold["weighted_forward_rate_exact"] == 0.5
+    assert at_threshold["within_budget"] is True
+
+
+def test_exact_budget_fields_are_opt_in_and_holdout_uses_dev_budget() -> None:
+    """2차 점수·예산을 준 새 경로만 exact 필드를 추가하고 기존 출력은 바꾸지 않는다."""
+    dev_items, scores = full_coverage(0.9, 0.1)
+    old = build_dev_report(dev_items, scores, DEFAULT_TRAFFIC_MIX, 0.5)
+    assert "item_flags" not in old
+    assert "weighted_forward_rate_exact" not in old["decision"]["at_threshold"]
+    assert "within_budget" not in old["decision"]["at_threshold"]
+
+    holdout_items, holdout_scores = full_coverage(0.9, 0.1, split="holdout")
+    stage2 = {entry.item_id: 0.1 for entry in holdout_items}
+    report = build_holdout_report(
+        holdout_items,
+        holdout_scores,
+        DEFAULT_TRAFFIC_MIX,
+        0.42,
+        stage2_scores=stage2,
+        budget=0.304,
+    )
+    at_threshold = report["decision"]["at_threshold"]
+    assert at_threshold["weighted_forward_rate_exact"] == pytest.approx(0.08)
+    assert at_threshold["within_budget"] is True
+    assert "item_flags" not in report
+
+
+def test_ensemble_scores_are_arithmetic_mean_and_validate_shape() -> None:
+    """앙상블 점수는 모델 순서와 무관한 문장별 산술 평균이며 길이·확률 오류를 숨기지 않는다."""
+    assert average_model_scores([[0.2, 0.6], [0.4, 0.8], [0.9, 0.1]]) == pytest.approx([0.5, 0.5])
+    with pytest.raises(MetricError, match="개수"):
+        average_model_scores([[0.2], [0.3, 0.4]])
+    with pytest.raises(MetricError, match="0~1"):
+        average_model_scores([[0.2], [float("nan")]])
+
+
+def test_holdout_requires_same_ensemble_weights_in_order(tmp_path: Path) -> None:
+    """보류셋은 개발셋 앙상블과 가중치 목록 및 순서가 모두 같아야 한다."""
+    path = tmp_path / "dev.json"
+    report = {
+        "split": "dev",
+        "model_weights_sha256": ["first", "second", "third"],
+        "decision": {"mode": "budget", "threshold": 0.42},
+        "rule_routes": None,
+        "short_rule": None,
+    }
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert read_dev_threshold(path, ["first", "second", "third"], policy_sha256=None) == 0.42
+    for current in (["second", "first", "third"], ["first", "second"]):
+        with pytest.raises(DatasetFormatError, match="다른 모델"):
+            read_dev_threshold(path, current, policy_sha256=None)
+
+
+def test_holdout_requires_same_stage2_model_identifier(tmp_path: Path) -> None:
+    """2차 점수를 쓰는 보류셋은 개발셋과 같은 kanana 식별자여야 한다."""
+    path = tmp_path / "dev.json"
+    report = {
+        "split": "dev",
+        "model_weights_sha256": "weights",
+        "decision": {"mode": "budget", "threshold": 0.42},
+        "rule_routes": None,
+        "short_rule": None,
+        "stage2_scores": {"name": "scores.json", "sha256": "x", "model_identifier": "kanana@old"},
+    }
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert read_dev_threshold(path, "weights", policy_sha256=None, stage2_model_identifier="kanana@old") == 0.42
+    with pytest.raises(DatasetFormatError, match="2차 모델"):
+        read_dev_threshold(path, "weights", policy_sha256=None, stage2_model_identifier="kanana@new")
+
+
+def test_ensemble_holdout_requires_explicit_new_output(tmp_path: Path) -> None:
+    """앙상블 보류셋은 첫 모델 디렉터리에 암묵적으로 쓰지 않고 명시한 새 경로만 허용한다."""
+    model_dirs = [tmp_path / "m1", tmp_path / "m2"]
+    with pytest.raises(DatasetFormatError, match="--output"):
+        resolve_output_path(argparse.Namespace(output=None, model_dir=model_dirs, overwrite=False), "holdout")
+    output = tmp_path / "ensemble-holdout.json"
+    namespace = argparse.Namespace(output=output, model_dir=model_dirs, overwrite=False)
+    assert resolve_output_path(namespace, "holdout") == output
+    output.write_text("{}", encoding="utf-8")
+    with pytest.raises(OutputExistsError):
+        resolve_output_path(namespace, "holdout")
+
+
+def test_raw_score_artifacts_include_components_and_ensemble_average(tmp_path: Path) -> None:
+    """보류셋 원시 점수는 구성 모델별 값과 앙상블 평균·시드·입력 지문을 원문 없이 남긴다."""
+    items = [item("a", "allow", "short_normal", split="holdout"), item("b", "harmful", "threat", split="holdout")]
+    eval_file = tmp_path / "holdout.jsonl"
+    eval_file.write_text("sealed-placeholder\n", encoding="utf-8")
+    output = tmp_path / "raw"
+    write_raw_score_artifacts(
+        output,
+        eval_file,
+        items,
+        [Path("model-a"), Path("model-b")],
+        ["wa", "wb"],
+        [20261011, 20261021],
+        [[0.1, 0.8], [0.3, 0.6]],
+    )
+    first = json.loads((output / "component-1.json").read_text(encoding="utf-8"))
+    averaged = json.loads((output / "average.json").read_text(encoding="utf-8"))
+    assert first["model_seed"] == 20261011 and first["scores"] == {"a": 0.1, "b": 0.8}
+    assert averaged["model_seeds"] == [20261011, 20261021]
+    assert averaged["scores"] == pytest.approx({"a": 0.2, "b": 0.7})
+    assert first["eval_file"]["sha256"] == compute_file_sha256(eval_file)
+    assert "문장" not in json.dumps(first, ensure_ascii=False)
+    with pytest.raises(OutputExistsError):
+        write_raw_score_artifacts(output, eval_file, items, [Path("model-a")], ["wa"], [20261011], [[0.1, 0.8]])
+
+
+def test_model_training_identity_comes_from_model_card(tmp_path: Path) -> None:
+    """보고서 모델 출처는 model-card의 시드와 실제 학습 파일 sha256에서 읽는다."""
+    model = tmp_path / "arbitrary-name"
+    model.mkdir()
+    (model / "model-card.json").write_text(
+        '{"hyperparameters":{"seed":20261011},"training_data":{"train":{"sha256":"train-sha"}}}',
+        encoding="utf-8",
+    )
+    assert model_training_seed(model) == 20261011
+    assert model_training_data_sha256(model) == "train-sha"
+    (model / "model-card.json").write_text('{"hyperparameters":{}}', encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="seed"):
+        model_training_seed(model)
+    with pytest.raises(DatasetFormatError, match="학습 데이터"):
+        model_training_data_sha256(model)

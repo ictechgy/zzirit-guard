@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -146,6 +146,53 @@ def load_labeled_texts(path: str | Path, limit: int | None = None) -> list[Label
         raise DatasetFormatError(f"{file_path.name}: 읽은 줄이 없습니다. 파일이 비었는지, 경로가 맞는지 확인하세요.")
     ensure_unique_identifiers(located_records)
     return [record for _, record in located_records]
+
+
+def require_target_label(record: dict, location: str) -> list[str]:
+    """정책 정렬 제외에 쓰는 target_label을 검증한다.
+
+    왜 선택 기능 안에서만 읽나: 기존 K-HATERS 로더와 학습 파일 형식은 target_label 없이도 동작해야 하며,
+    D를 고른 실행만 원본 주석의 완전성을 요구하기 때문이다.
+    """
+    value = record.get("target_label")
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise DatasetFormatError(f"{location}: 'target_label'은 비어 있지 않은 문자열만 담은 목록이어야 합니다. K-HATERS 원본 형식과 줄 내용을 확인하세요.")
+    return value
+
+
+def load_labeled_texts_excluding_untargeted_offensive(path: str | Path, limit: int | None = None) -> tuple[list[LabeledText], list[str]]:
+    """모든 target_label을 검증하고 offensive이면서 빈 목록인 줄을 제외한다.
+
+    중복 id 검사는 제외 전 전체 입력에 적용한다. 같은 id가 둘 다 빠진다는 이유로 손상된 입력을 숨기지 않기 위해서다.
+    """
+    file_path = Path(path)
+    located: list[tuple[str, LabeledText, bool]] = []
+    for location, line in iterate_nonblank_lines(file_path, limit):
+        raw = parse_json_object(line, location)
+        target_label = require_target_label(raw, location)
+        labeled = parse_labeled_text(line, location)
+        located.append((location, labeled, labeled.original_label == "offensive" and not target_label))
+    if not located:
+        raise DatasetFormatError(f"{file_path.name}: 읽은 줄이 없습니다. 파일이 비었는지, 경로가 맞는지 확인하세요.")
+    ensure_unique_identifiers([(location, record) for location, record, _drop in located])
+    kept = [record for _location, record, drop in located if not drop]
+    dropped_ids = [record.record_id for _location, record, drop in located if drop]
+    return kept, dropped_ids
+
+
+def compute_identifier_list_sha256(identifiers: Sequence[str]) -> str:
+    """K-HATERS 정수 id를 숫자 오름차순으로 한 줄씩 적고 마지막 줄바꿈까지 해시한다."""
+    numeric: list[int] = []
+    for identifier in identifiers:
+        try:
+            value = int(identifier)
+        except (TypeError, ValueError) as error:
+            raise DatasetFormatError(f"K-HATERS id {identifier!r}가 정수가 아닙니다. 원본 id 형식을 확인하세요.") from error
+        if str(value) != str(identifier):
+            raise DatasetFormatError(f"K-HATERS id {identifier!r}가 정규 정수 표기가 아닙니다. 원본 id 형식을 확인하세요.")
+        numeric.append(value)
+    payload = "".join(f"{identifier}\n" for identifier in sorted(numeric))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def ensure_unique_identifiers(located_records: list[tuple[str, LabeledText]]) -> None:
