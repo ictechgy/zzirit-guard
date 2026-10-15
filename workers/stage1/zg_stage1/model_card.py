@@ -162,5 +162,6 @@ def require_completed_training(card: dict | None, directory_name: str) -> None:
     if status != COMPLETED_STATUS:
         raise ModelFormatError(
             f"{directory_name}의 학습이 끝나지 않았습니다(model-card.json status={status!r}). "
-            "학습이 끝나 status가 completed가 된 뒤 평가하세요. 중간 체크포인트는 최종 모델과 다를 수 있습니다."
+            "학습이 끝나 status가 completed가 된 뒤 평가하세요. 중간 체크포인트는 최종 모델과 다를 수 있습니다. "
+            "강제 종료로 카드가 running·interrupted로 남았다면 다시 학습하세요."
         )

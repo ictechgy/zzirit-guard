@@ -32,6 +32,7 @@ from zg_stage1.evaluate_chat import (
     read_dev_threshold,
     require_matching_decision,
     resolve_output_path,
+    score_items,
     score_model_items,
     scored_pairs,
     select_budget_threshold,
@@ -582,3 +583,15 @@ def test_completed_or_cardless_models_pass_training_check() -> None:
     """학습이 끝난 카드와 카드 없는 디렉터리(기존 허용)는 통과한다."""
     require_completed_training({"status": "completed"}, "model")
     require_completed_training(None, "model")
+
+
+def test_ensemble_checks_every_card_before_scoring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """앙상블은 채점을 시작하기 전에 모든 모델의 학습 완료를 확인한다(마지막 모델에서 멈춰 앞 채점을 버리지 않게)."""
+    finished, unfinished = tmp_path / "finished", tmp_path / "unfinished"
+    for directory, status in ((finished, "completed"), (unfinished, "running")):
+        directory.mkdir()
+        (directory / "model-card.json").write_text(json.dumps({"status": status}), encoding="utf-8")
+    monkeypatch.setattr("zg_stage1.evaluate_chat.score_model_items", lambda *arguments: pytest.fail("채점을 시작하면 안 됨"))
+    arguments = argparse.Namespace(model_dir=[finished, unfinished], device="cpu", batch_size=8)
+    with pytest.raises(ModelFormatError, match="unfinished"):
+        score_items(arguments, [])

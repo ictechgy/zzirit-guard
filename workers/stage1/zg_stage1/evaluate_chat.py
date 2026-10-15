@@ -641,8 +641,14 @@ def average_model_scores(scores_by_model: Sequence[Sequence[float]]) -> list[flo
 
 
 def score_items(arguments: argparse.Namespace, items: Sequence[ChatEvalItem]) -> list[float]:
-    """모든 --model-dir를 채점하고 둘 이상이면 문장별 평균을 낸다."""
-    components = [score_model_items(arguments, directory, items) for directory in model_directories(arguments)]
+    """모든 --model-dir를 채점하고 둘 이상이면 문장별 평균을 낸다.
+
+    채점 전에 모든 모델의 학습 완료를 먼저 확인한다. 앙상블의 마지막 모델에서 멈추면 앞 모델의 채점 시간을 버리기 때문이다.
+    """
+    directories = model_directories(arguments)
+    for directory in directories:
+        require_completed_training(read_model_card(directory), directory.name)
+    components = [score_model_items(arguments, directory, items) for directory in directories]
     arguments.raw_score_components = components
     return average_model_scores(components)
 

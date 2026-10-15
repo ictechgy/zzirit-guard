@@ -10,7 +10,7 @@ import pytest
 
 from tests.conftest import write_jsonl
 from zg_stage1.data import compute_identifier_list_sha256
-from zg_stage1.errors import DatasetFormatError, OutputExistsError
+from zg_stage1.errors import DatasetFormatError, ModelFormatError, OutputExistsError
 from zg_stage1.validation_auc import load_validation_records, main
 
 
@@ -101,3 +101,15 @@ def test_existing_output_is_refused_before_model_loading(tmp_path: Path, monkeyp
     with pytest.raises(OutputExistsError, match="덮어쓰지"):
         main(["--model-dir", str(model_dir), "--val-file", str(val_file), "--output", str(output)])
     assert output.read_text(encoding="utf-8") == "앞선 결과\n"
+
+
+def test_unfinished_training_is_refused_before_model_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """학습 중(status running) 카드의 모델은 불러오기 전에 거부한다. 중간 체크포인트의 AUC를 근거로 쓰지 않게 하기 위해서다."""
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "model-card.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    val_file = write_jsonl(tmp_path / "val.jsonl", [validation_row("1", "normal")])
+    monkeypatch.setattr("zg_stage1.validation_auc.modeling.resolve_device", lambda requested: requested)
+    monkeypatch.setattr("zg_stage1.validation_auc.modeling.load_trained_classifier", lambda directory: pytest.fail("모델을 불러오면 안 됨"))
+    with pytest.raises(ModelFormatError, match="학습이 끝나지 않았습니다"):
+        main(["--model-dir", str(model_dir), "--val-file", str(val_file), "--output", str(tmp_path / "auc.json"), "--device", "cpu"])
