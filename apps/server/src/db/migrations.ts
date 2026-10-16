@@ -157,6 +157,30 @@ export const MIGRATIONS: readonly string[] = [
         WHERE audit_log.action = 'hide' AND audit_log.result = 'ok'
     ) GROUP BY chat_channel_id, sender_channel_id, message_time;
   `,
+  // v4: critical 규칙을 더한다. SQLite CHECK 제약은 바꿀 수 없어 표를 새로 만들어 옮긴다.
+  // id와 sqlite_sequence를 함께 옮기기 때문에 예전 판정 이유의 규칙 번호가 바뀌지 않고, 지운 번호도 재사용하지 않게 한다.
+  `
+  CREATE TEMP TABLE rule_entry_sequence_v4 AS SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry';
+  CREATE TABLE rule_entry_v4 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('strong','weak','exception','allow','allow_domain','threat','keyword_route','spam','critical')),
+    pattern TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (channel_id, kind, pattern)
+  );
+  INSERT INTO rule_entry_v4 (id, channel_id, kind, pattern, created_by, created_at)
+    SELECT id, channel_id, kind, pattern, created_by, created_at FROM rule_entry;
+  DROP TABLE rule_entry;
+  ALTER TABLE rule_entry_v4 RENAME TO rule_entry;
+  DELETE FROM sqlite_sequence WHERE name IN ('rule_entry', 'rule_entry_v4');
+  INSERT INTO sqlite_sequence (name, seq)
+    SELECT 'rule_entry', MAX(seq) FROM (
+      SELECT seq FROM rule_entry_sequence_v4 UNION ALL SELECT MAX(id) AS seq FROM rule_entry
+    ) WHERE seq IS NOT NULL HAVING COUNT(*) > 0;
+  DROP TABLE rule_entry_sequence_v4;
+  `,
 ];
 
 /**

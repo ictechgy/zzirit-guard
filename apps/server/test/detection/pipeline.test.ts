@@ -111,6 +111,30 @@ describe("DetectionPipeline", () => {
     expect(result.reason).toMatch(/:privileged$/);
   });
 
+  it("핵심 규칙은 협박 뒤에 신고되고 2차 AI로 보내지 않는다", () => {
+    const added = rules.add("c1", "critical", "핵심낱말", "m");
+    const result = pipeline.evaluate(chat("핵심낱말이 있는 문장"));
+    expect(result).toMatchObject({ decision: "candidate", reason: `rule:critical:${added.id}`, aiEligible: false, keywordRouteId: null });
+  });
+
+  it("핵심 규칙은 허용어에게 지고, 금칙어 약·광고·협박보다 느리게 적용된다", () => {
+    rules.add("c1", "critical", "허용대상", "m");
+    rules.add("c1", "weak", "허용대상", "m");
+    rules.add("c1", "critical", "\uaf41머니", "m");
+    rules.add("c1", "critical", "찾아간다", "m");
+    rules.add("c1", "allow", "허용대상 가자", "m");
+    expect(pipeline.evaluate(chat("허용대상 가자"))).toMatchObject({ decision: "pass", reason: "rule:allow" });
+    expect(pipeline.evaluate(chat("허용대상 확인"))).toMatchObject({ reason: expect.stringMatching(/^rule:weak:/) });
+    expect(pipeline.evaluate(chat("\uaf41머니 지급"))).toMatchObject({ reason: expect.stringMatching(/^rule:spam:/) });
+    expect(pipeline.evaluate(chat("찾아간다 말한다"))).toMatchObject({ reason: expect.stringMatching(/^rule:threat:/) });
+  });
+
+  it("핵심 규칙은 권한자와 역할 미상 메시지에서도 후보이며 자동 숨김하지 않는다", () => {
+    rules.add("c1", "critical", "권한자도후보", "m");
+    expect(pipeline.evaluate(chat("권한자도후보", { userRoleCode: "streaming_chat_manager" }))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:critical:/) });
+    expect(pipeline.evaluate(chat("권한자도후보", { userRoleCode: "unknown" }))).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:critical:/) });
+  });
+
   it.each(["common_user", ""])("역할 코드가 '%s'여도 보낸 사람이 채널 주인(스트리머 본인)이면 자동 숨김하지 않는다(F9.5)", (userRoleCode) => {
     const result = pipeline.evaluate(chat("느금마 진짜 웃기네", { senderChannelId: "c1", userRoleCode }));
     expect(result).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/:privileged$/) });

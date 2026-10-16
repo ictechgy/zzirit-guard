@@ -39,6 +39,14 @@ describe("RuleRepository", () => {
     expect(() => repository.add("c1", "weak", "바보", "m")).toThrow(/이미 있는/);
   });
 
+  it("핵심 규칙을 추가하고 스냅숏에 모은다", () => {
+    const repository = createRepository();
+    const added = repository.add("c1", "critical", "핵심 낱말", "m");
+    expect(repository.snapshot("c1").critical).toEqual([
+      expect.objectContaining({ id: added.id, kind: "critical", normalizedPattern: "핵심낱말" }),
+    ]);
+  });
+
   it("기본 규칙을 한 번만 넣는다", () => {
     const repository = createRepository();
     repository.seedDefaults("c1");

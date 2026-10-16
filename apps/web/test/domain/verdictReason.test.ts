@@ -13,6 +13,7 @@ describe("describeReason", () => {
     ["rule:link_idn", "한글 주소(후보)"],
     ["rule:link_port", "포트가 붙은 주소(후보)"],
     ["rule:spam:41", "광고 낱말 #41"],
+    ["rule:critical:42", "바로 후보 #42"],
     ["rule:strong:12:unknown_role", "금칙어 강 #12 · 보낸 사람의 역할을 알 수 없어 후보로 낮춤"],
     ["rule:link:unknown_role", "광고 링크 · 보낸 사람의 역할을 알 수 없어 후보로 낮춤"],
     ["model:kanana", "model:kanana"],

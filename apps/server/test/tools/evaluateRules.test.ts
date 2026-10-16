@@ -1,7 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  EvaluateRulesArgumentError, ensureHoldoutUsesDefaults, evaluateRuleRoutes, parseEvaluationItems, parseKeywordPatterns, type EvaluationItem,
+  EvaluateRulesArgumentError, ensureHoldoutUsesDefaults, ensureRulesDoNotDuplicateKeywords, evaluateRuleRoutes, parseEvaluationItems, parseKeywordPatterns,
+  parseRulePatterns, runEvaluateRulesCommand,
+  type EvaluationItem,
 } from "../../src/tools/evaluateRules.js";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  temporaryDirectories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }));
+});
+
+function temporaryFile(name: string, content: string | Buffer): string {
+  const directory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-"));
+  temporaryDirectories.push(directory);
+  const file = join(directory, name);
+  writeFileSync(file, content);
+  return file;
+}
 
 /** 개발셋 문장 하나. */
 function devItem(id: string, text: string): EvaluationItem {
@@ -36,9 +57,38 @@ describe("evaluateRuleRoutes", () => {
     const base = evaluateRuleRoutes([devItem("a", "가")], [], "abc");
     const same = evaluateRuleRoutes([devItem("b", "나")], [], "def");
     const extra = evaluateRuleRoutes([devItem("a", "가")], ["우울"], "abc");
+    const criticalExtra = evaluateRuleRoutes([devItem("a", "가")], [], "abc", [{ kind: "critical", pattern: "핵심" }]);
     expect(base[0]?.evalSha256).toBe("abc");
     expect(base[0]?.policySha256).toBe(same[0]?.policySha256);
     expect(extra[0]?.policySha256).not.toBe(base[0]?.policySha256);
+    expect(criticalExtra[0]?.policySha256).not.toBe(base[0]?.policySha256);
+    expect(base[0]?.rulesFileSha256).toBeNull();
+    expect(base[0]?.rulesCanonicalSha256).toBeNull();
+  });
+
+  it("추가 critical 규칙은 후보와 critical 이유로 평가되고 AI 대상으로 보내지지 않는다", () => {
+    const routes = evaluateRuleRoutes([devItem("critical", "자살 관련")], [], "", [{ kind: "critical", pattern: "자 살" }]);
+    expect(routes[0]).toMatchObject({ decision: "candidate" });
+    expect(routes[0]?.reason).toMatch(/^rule:critical:\d+$/);
+  });
+
+  it("규칙 파일의 원본·정규형 해시를 결과 줄마다 기록한다", () => {
+    const content = "keyword_route\t우 울\ncritical\t핵심\n";
+    const parsed = parseRulePatterns(content);
+    const expectedCanonical = "critical\t핵심\nkeyword_route\t우울\n";
+    const routes = evaluateRuleRoutes(
+      [devItem("a", "일반")], [], "", parsed.rules,
+      createHash("sha256").update(content).digest("hex"),
+      createHash("sha256").update(expectedCanonical).digest("hex"),
+    );
+    expect(routes[0]?.rulesFileSha256).toBe(createHash("sha256").update(content).digest("hex"));
+    expect(routes[0]?.rulesCanonicalSha256).toBe(createHash("sha256").update(expectedCanonical).digest("hex"));
+  });
+
+  it("규칙 파일이 없으면 두 규칙 해시는 null이다", () => {
+    const [route] = evaluateRuleRoutes([devItem("a", "일반")]);
+    expect(route?.rulesFileSha256).toBeNull();
+    expect(route?.rulesCanonicalSha256).toBeNull();
   });
 });
 
@@ -78,9 +128,115 @@ describe("입력 읽기와 보류셋 보호", () => {
     expect(parseKeywordPatterns("# 자해\n우울\n\n  죽고싶  \n")).toEqual(["우울", "죽고싶"]);
   });
 
-  it("보류셋에는 추가 키워드를 쓸 수 없고, 개발셋에는 쓸 수 있다", () => {
+  it("규칙 TSV는 빈 줄·주석을 건너뛰고 허용된 종류를 읽는다", () => {
+    expect(parseRulePatterns("# 설명\n\ncritical\t  핵심  \nkeyword_route\t우울\n").rules).toEqual([
+      { kind: "critical", pattern: "핵심", normalizedPattern: "핵심", inputLine: 3 },
+      { kind: "keyword_route", pattern: "우울", normalizedPattern: "우울", inputLine: 4 },
+    ]);
+  });
+
+  it.each([
+    ["critical\t두\t탭", "탭은 종류와 패턴"],
+    ["unknown\t비밀문구", "종류는 critical 또는 keyword_route", "비밀문구"],
+    ["critical\t   ", "빈 패턴", "   "],
+    [`critical\t${"가".repeat(51)}`, "패턴은 50자 이하", "가가가"],
+  ])("규칙 TSV 오류는 입력 줄과 해결 방향을 보여 주고 문구 원문은 숨긴다: %s", (line, guidance, forbidden = "") => {
+    expect(() => parseRulePatterns(`${line}\n`)).toThrow(/1번째 줄/);
+    expect(() => parseRulePatterns(`${line}\n`)).toThrow(guidance);
+    if (forbidden !== "") expect(() => parseRulePatterns(`${line}\n`)).not.toThrow(forbidden);
+  });
+
+  it("규칙 파일 안에서는 같은 종류의 정규화 중복을 거부하고, 종류가 다르면 허용한다", () => {
+    expect(() => parseRulePatterns("critical\t핵 심\ncritical\t핵심\n")).toThrow(/중복/);
+    expect(() => parseRulePatterns("critical\t승격\nkeyword_route\t승 격\n")).not.toThrow();
+  });
+
+  it("--keywords와 같은 keyword_route는 rules 입력 줄을 기준으로 원문 없이 거부하고 critical 승격은 허용한다", () => {
+    expect(() => ensureRulesDoNotDuplicateKeywords([{ kind: "keyword_route", pattern: "비밀", inputLine: 7 }], [" 비 밀 "])).toThrow(/7번째 줄/);
+    expect(() => ensureRulesDoNotDuplicateKeywords([{ kind: "keyword_route", pattern: "비밀", inputLine: 7 }], [" 비 밀 "])).toThrow(/중복|겹치는/);
+    try {
+      ensureRulesDoNotDuplicateKeywords([{ kind: "keyword_route", pattern: "비밀", inputLine: 7 }], [" 비 밀 "]);
+    } catch (error) {
+      expect((error as Error).message).not.toContain("비밀");
+    }
+    expect(() => ensureRulesDoNotDuplicateKeywords([{ kind: "critical", pattern: "비밀", inputLine: 7 }], [" 비 밀 "])).not.toThrow();
+  });
+
+  it("기본 규칙과 같은 종류의 정규화 중복을 거부한다", () => {
+    expect(() => parseRulePatterns("keyword_route\t자 살\n")).toThrow(/기본 규칙/);
+    expect(() => parseRulePatterns("critical\t자 살\n")).not.toThrow();
+  });
+
+  it("보류셋에는 추가 키워드·규칙을 쓸 수 없고, 개발셋에는 쓸 수 있다", () => {
     expect(() => ensureHoldoutUsesDefaults([{ id: "h", text: "가", split: "holdout" }], ["우울"])).toThrow(EvaluateRulesArgumentError);
     expect(() => ensureHoldoutUsesDefaults([{ id: "h", text: "가", split: "holdout" }], [])).not.toThrow();
     expect(() => ensureHoldoutUsesDefaults([devItem("d", "가")], ["우울"])).not.toThrow();
+    expect(() => ensureHoldoutUsesDefaults([{ id: "h", text: "가", split: "holdout" }], [], [{ kind: "critical", pattern: "핵심" }])).toThrow(EvaluateRulesArgumentError);
+    expect(() => ensureHoldoutUsesDefaults([{ id: "h", text: "가", split: "holdout" }], [], [], true)).toThrow(EvaluateRulesArgumentError);
+    expect(() => ensureHoldoutUsesDefaults([devItem("d", "가")], [], [{ kind: "critical", pattern: "핵심" }])).not.toThrow();
+  });
+
+  it("실제 명령 경로는 rules 파일의 raw/canonical 해시와 출력 파일을 기록한다", () => {
+    const evalFile = temporaryFile("eval.jsonl", '{"id":"a","text":"일반","split":"dev"}\n');
+    const rulesContent = Buffer.from("keyword_route\t  사용자규칙  \r\n", "utf8");
+    const rulesFile = temporaryFile("rules.tsv", rulesContent);
+    const outputDirectory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-output-"));
+    temporaryDirectories.push(outputDirectory);
+    const outputFile = join(outputDirectory, "routes.jsonl");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    runEvaluateRulesCommand(["--eval-file", evalFile, "--output", outputFile, "--rules", rulesFile]);
+
+    const [route] = readFileSync(outputFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(route?.rulesFileSha256).toBe(createHash("sha256").update(rulesContent).digest("hex"));
+    expect(route?.rulesCanonicalSha256).toBe(createHash("sha256").update("keyword_route\t사용자규칙\n").digest("hex"));
+    expect(log).toHaveBeenCalledWith(JSON.stringify({ items: 1, keywordPatterns: 0, keywordMatches: 0, decisions: { pass: 1 } }));
+    expect(log.mock.calls.flat().join(" ")).not.toContain("사용자규칙");
+  });
+
+  it("실제 명령 경로에서 rules가 없으면 해시는 null이고 요약 형식은 기존과 같다", () => {
+    const evalFile = temporaryFile("eval.jsonl", '{"id":"a","text":"일반","split":"dev"}\n');
+    const outputDirectory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-output-"));
+    temporaryDirectories.push(outputDirectory);
+    const outputFile = join(outputDirectory, "routes.jsonl");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    runEvaluateRulesCommand(["--eval-file", evalFile, "--output", outputFile]);
+
+    const [route] = readFileSync(outputFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(route?.rulesFileSha256).toBeNull();
+    expect(route?.rulesCanonicalSha256).toBeNull();
+    expect(log).toHaveBeenCalledWith(JSON.stringify({ items: 1, keywordPatterns: 0, keywordMatches: 0, decisions: { pass: 1 } }));
+  });
+
+  it("실제 명령 경로에서 --keywords와 --rules 충돌은 원문 없이 rules 줄에서 거부한다", () => {
+    const evalFile = temporaryFile("eval.jsonl", '{"id":"a","text":"일반","split":"dev"}\n');
+    const keywordsFile = temporaryFile("keywords.txt", "비 밀\n");
+    const rulesFile = temporaryFile("rules.tsv", "keyword_route\t비밀\n");
+    const outputDirectory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-output-"));
+    temporaryDirectories.push(outputDirectory);
+    const outputFile = join(outputDirectory, "routes.jsonl");
+
+    let thrown: unknown;
+    try {
+      runEvaluateRulesCommand(["--eval-file", evalFile, "--output", outputFile, "--keywords", keywordsFile, "--rules", rulesFile]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EvaluateRulesArgumentError);
+    expect((thrown as Error).message).toContain("1번째 줄");
+    expect((thrown as Error).message).not.toContain("비밀");
+    expect(existsSync(outputFile)).toBe(false);
+  });
+
+  it("빈 --rules도 보류셋에서 금지한다", () => {
+    const evalFile = temporaryFile("holdout.jsonl", '{"id":"h","text":"일반","split":"holdout"}\n');
+    const rulesFile = temporaryFile("empty-rules.tsv", "\n# only comment\n");
+    const outputDirectory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-output-"));
+    temporaryDirectories.push(outputDirectory);
+    const outputFile = join(outputDirectory, "routes.jsonl");
+
+    expect(() => runEvaluateRulesCommand(["--eval-file", evalFile, "--output", outputFile, "--rules", rulesFile])).toThrow(/보류셋/);
+    expect(existsSync(outputFile)).toBe(false);
   });
 });

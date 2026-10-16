@@ -285,6 +285,16 @@ describe("판정 조치", () => {
 });
 
 describe("규칙·감사 기록", () => {
+  it("critical 규칙을 추가하고 목록에서 조회한다", async () => {
+    const headers = mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER"));
+    const added = await harness.app.inject({ method: "POST", url: "/api/rules", headers, payload: { kind: "critical", pattern: "핵심 낱말" } });
+    expect(added.statusCode).toBe(200);
+    expect(added.json()).toMatchObject({ kind: "critical", pattern: "핵심 낱말" });
+    const listed = await harness.app.inject({ method: "GET", url: "/api/rules", headers: { cookie: `zg_session=${harness.login("STREAMING_CHAT_MANAGER")}` } });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual([expect.objectContaining({ kind: "critical", pattern: "핵심 낱말" })]);
+  });
+
   it("잘못된 규칙은 400과 이유를 준다", async () => {
     const response = await harness.app.inject({ method: "POST", url: "/api/rules", headers: mutatingHeaders(harness.login("STREAMING_CHANNEL_MANAGER")), payload: { kind: "weak", pattern: "!!!" } });
     expect(response.statusCode).toBe(400);

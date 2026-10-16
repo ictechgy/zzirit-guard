@@ -117,7 +117,7 @@ function buildContext(deps: DetectionPipelineDeps, event: ChatEvent, normalized:
 }
 
 /**
- * 스펙 5.2 순서: 금칙어 강 → 떼도배 → 광고 → 전화번호 → 허용어 → 금칙어 약 → 광고 낱말 → 개인 도배 → 협박 → 주소 → 요주의 사용자.
+ * 스펙 5.2 순서: 금칙어 강 → 떼도배 → 광고 → 전화번호 → 허용어 → 금칙어 약 → 광고 낱말 → 개인 도배 → 협박 → 핵심 낱말 → 주소 → 요주의 사용자.
  * 광고 낱말(rule:spam)은 링크·연락처 없이 낱말만으로 광고하는 메시지("꽁머니 지급", "리딩방 무료")를 후보로 올린다. 낱말만으로는
  * 대화일 수 있어 되돌릴 수 없는 자동 숨김 대신 후보로 둔다. 허용어보다 뒤라서 채널 허용어가 이길 수 있다.
  * 허용어는 금칙어 강·떼도배·광고·전화번호보다 뒤라서 그것들을 무력화하지 못한다.
@@ -142,6 +142,8 @@ function decide(deps: DetectionPipelineDeps, context: RuleContext): { decision: 
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.spam), "candidate", "spam"),
     (c) => (c.personalFloodTriggered ? { decision: "candidate", reason: "rule:personal_flood" } : null),
     (c) => matchRule(findFirstMatch(c.compact, c.snapshot.threat), "candidate", "threat"),
+    // 허용어 뒤에 두어 채널 허용어가 이기게 하고, 금칙어 약·광고보다 늦게 판정해 핵심 범주를 별도 이유로 알린다.
+    (c) => matchRule(findFirstMatch(c.compact, c.snapshot.critical), "candidate", "critical"),
     (c) => (looksLikeAddress(c.event.content) ? { decision: "candidate", reason: "rule:address" } : null),
     (c) => (isWatched(deps, c.event) ? { decision: "candidate", reason: "rule:watch_user" } : null),
   ];

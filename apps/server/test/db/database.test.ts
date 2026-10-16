@@ -1,7 +1,26 @@
 import BetterSqlite3 from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
+import { createRuleRepository, type RuleSnapshot } from "../../src/detection/ruleRepository.js";
 import { MIGRATIONS, runMigrations } from "../../src/db/migrations.js";
+
+/** 스냅숏의 비교용 공개 필드만 추려 버전별 이전 결과를 확인한다. */
+function snapshotShape(snapshot: RuleSnapshot) {
+  const groups = {
+    strong: snapshot.strong,
+    weak: snapshot.weak,
+    exception: snapshot.exception,
+    threat: snapshot.threat,
+    keywordRoute: snapshot.keywordRoute,
+    spam: snapshot.spam,
+    critical: snapshot.critical,
+  };
+  return {
+    ...Object.fromEntries(Object.entries(groups).map(([kind, rules]) => [kind, rules.map(({ id, kind: ruleKind, pattern }) => ({ id, kind: ruleKind, pattern }))])),
+    allow: [...snapshot.allow].sort(),
+    allowDomains: [...snapshot.allowDomains],
+  };
+}
 
 describe("openDatabase", () => {
   it("지운 행이 파일에 남지 않게 secure_delete를 켠다(F5)", () => {
@@ -79,6 +98,45 @@ describe("openDatabase", () => {
       { sender_channel_id: "a", message_time: 1, state: "hidden", updated_at: 200 },
       { sender_channel_id: "b", message_time: 2, state: "hidden", updated_at: 900 },
     ]);
+  });
+
+  it.each([
+    [1, ["strong", "threat", "keyword_route", "weak"], ["strong", "keyword_route"], 4, 5],
+    [2, ["strong", "threat", "keyword_route", "spam", "weak"], ["strong", "keyword_route", "spam"], 5, 6],
+    [3, ["strong", "threat", "keyword_route", "spam", "weak"], ["strong", "keyword_route", "spam"], 5, 6],
+  ] as const)("v%d 규칙 표를 v4로 올릴 때 실제 규칙·삭제된 번호·sqlite_sequence를 보존한다", (version, kinds, remainingKinds, expectedSequence, expectedNextId) => {
+    const database = new BetterSqlite3(":memory:");
+    MIGRATIONS.slice(0, version).forEach((statement) => database.exec(statement as string));
+    database.pragma(`user_version = ${version}`);
+    const insert = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', ?, ?, 'test', 0)");
+    kinds.forEach((kind, index) => insert.run(kind, `이전규칙${index + 1}`));
+    database.prepare("DELETE FROM rule_entry WHERE id = 2").run();
+    database.prepare("DELETE FROM rule_entry WHERE id = ?").run(kinds.length);
+    expect(database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry'").get()).toEqual({ seq: expectedSequence });
+    expect(database.prepare("SELECT MAX(id) AS maxId FROM rule_entry").get()).toEqual({ maxId: expectedSequence - 1 });
+    runMigrations(database);
+    expect(database.prepare("SELECT id, kind FROM rule_entry ORDER BY id").all()).toEqual(remainingKinds.map((kind, index) => ({ id: index === 0 ? 1 : index + 2, kind })));
+    expect(database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry'").get()).toEqual({ seq: expectedSequence });
+    const currentInsert = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', ?, ?, 'test', 0)");
+    expect(Number(currentInsert.run("critical", "핵심낱말").lastInsertRowid)).toBe(expectedNextId);
+    expect(() => currentInsert.run("unknown", "x")).toThrow(/CHECK/);
+  });
+
+  it.each([0, 1, 2, 3])("버전 %d DB를 현재 스키마로 올린 후 seedDefaults하면 새 DB와 규칙 스냅숏이 같다", (version) => {
+    const migrated = new BetterSqlite3(":memory:");
+    if (version > 0) MIGRATIONS.slice(0, version).forEach((statement) => migrated.exec(statement as string));
+    migrated.pragma(`user_version = ${version}`);
+    runMigrations(migrated);
+    migrated.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    const fresh = openDatabase(":memory:");
+    fresh.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    const migratedRepository = createRuleRepository(migrated, () => 0);
+    const freshRepository = createRuleRepository(fresh, () => 0);
+    migratedRepository.seedDefaults("c1");
+    freshRepository.seedDefaults("c1");
+    expect(snapshotShape(migratedRepository.snapshot("c1"))).toEqual(snapshotShape(freshRepository.snapshot("c1")));
+    expect(migrated.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+    expect(fresh.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
   });
 
   it("알 수 없는 규칙 종류를 거부한다", () => {
