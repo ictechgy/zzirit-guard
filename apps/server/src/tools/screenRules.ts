@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { DEFAULT_RULES } from "../detection/defaultRules.js";
 import { normalizeForMatching, normalizeKeepingWhitespace } from "../detection/normalize.js";
 import { findFirstMatch, locateExceptions, type ExceptionAwareText } from "../detection/wordMatch.js";
-import type { RuleEntry } from "../detection/ruleRepository.js";
+import { MAX_RULE_PATTERN_LENGTH, type RuleEntry } from "../detection/ruleRepository.js";
 
 export interface ScreenThresholds {
   maxHitsA: number;
@@ -112,6 +112,9 @@ function parseCandidates(content: string): Candidate[] {
     const kind = fields[0] as string;
     const pattern = fields[1] as string;
     if (kind !== "critical") throw new ScreenRulesArgumentError(`${lineNumber}번째 후보 줄의 종류가 잘못됐습니다. 종류를 critical로 고쳐 주세요`);
+    if (pattern.trim().length > MAX_RULE_PATTERN_LENGTH) {
+      throw new ScreenRulesArgumentError(`${lineNumber}번째 후보 줄의 문구가 너무 깁니다. ${MAX_RULE_PATTERN_LENGTH}자 이하로 줄여 주세요`);
+    }
     const normalizedPattern = normalizeForMatching(pattern);
     if (normalizedPattern === "") throw new ScreenRulesArgumentError(`${lineNumber}번째 후보 줄의 문구가 비었습니다. 정규화 후 글자가 남는 문구를 주세요`);
     const duplicateOf = firstByNormalized.get(normalizedPattern) ?? null;

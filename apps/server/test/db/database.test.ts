@@ -122,6 +122,35 @@ describe("openDatabase", () => {
     expect(() => currentInsert.run("unknown", "x")).toThrow(/CHECK/);
   });
 
+  it.each([1, 2, 3])("v%d 규칙 표가 비었어도 v4 이전은 sqlite_sequence의 지운 번호를 보존한다", (version) => {
+    const database = new BetterSqlite3(":memory:");
+    MIGRATIONS.slice(0, version).forEach((statement) => database.exec(statement as string));
+    database.pragma(`user_version = ${version}`);
+    database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', 'strong', '이전규칙', 'test', 0)").run();
+    database.prepare("DELETE FROM rule_entry").run();
+    expect(database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry'").get()).toEqual({ seq: 1 });
+
+    runMigrations(database);
+
+    expect(database.prepare("SELECT COUNT(*) AS count FROM rule_entry").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry'").get()).toEqual({ seq: 1 });
+    const inserted = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', 'critical', '새규칙', 'test', 0)").run();
+    expect(Number(inserted.lastInsertRowid)).toBe(2);
+  });
+
+  it.each([1, 2, 3])("v%d 규칙 표에 삽입 이력이 없어도 v4 이전과 첫 critical 삽입이 안전하다", (version) => {
+    const database = new BetterSqlite3(":memory:");
+    MIGRATIONS.slice(0, version).forEach((statement) => database.exec(statement as string));
+    database.pragma(`user_version = ${version}`);
+    expect(database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry'").get()).toBeUndefined();
+
+    runMigrations(database);
+
+    expect(database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'rule_entry'").get()).toBeUndefined();
+    const inserted = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', 'critical', '첫규칙', 'test', 0)").run();
+    expect(Number(inserted.lastInsertRowid)).toBe(1);
+  });
+
   it.each([0, 1, 2, 3])("버전 %d DB를 현재 스키마로 올린 후 seedDefaults하면 새 DB와 규칙 스냅숏이 같다", (version) => {
     const migrated = new BetterSqlite3(":memory:");
     if (version > 0) MIGRATIONS.slice(0, version).forEach((statement) => migrated.exec(statement as string));

@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { DEFAULT_RULES } from "../../src/detection/defaultRules.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -64,6 +65,15 @@ describe("evaluateRuleRoutes", () => {
     expect(criticalExtra[0]?.policySha256).not.toBe(base[0]?.policySha256);
     expect(base[0]?.rulesFileSha256).toBeNull();
     expect(base[0]?.rulesCanonicalSha256).toBeNull();
+  });
+
+  it("critical 판정 단계를 포함한 evaluate-rules@2로 정책 지문을 만든다", () => {
+    const [route] = evaluateRuleRoutes([devItem("a", "일반")]);
+    const expected = createHash("sha256")
+      .update(["evaluate-rules@2", ...DEFAULT_RULES.map((rule) => `${rule.kind}\t${rule.pattern}`).sort()].join("\n"))
+      .digest("hex");
+
+    expect(route?.policySha256).toBe(expected);
   });
 
   it("추가 critical 규칙은 후보와 critical 이유로 평가되고 AI 대상으로 보내지지 않는다", () => {
@@ -177,7 +187,7 @@ describe("입력 읽기와 보류셋 보호", () => {
   });
 
   it("실제 명령 경로는 rules 파일의 raw/canonical 해시와 출력 파일을 기록한다", () => {
-    const evalFile = temporaryFile("eval.jsonl", '{"id":"a","text":"일반","split":"dev"}\n');
+    const evalFile = temporaryFile("eval.jsonl", '{"id":"a","text":"고유평가원문","split":"dev"}\n');
     const rulesContent = Buffer.from("keyword_route\t  사용자규칙  \r\n", "utf8");
     const rulesFile = temporaryFile("rules.tsv", rulesContent);
     const outputDirectory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-output-"));
@@ -192,6 +202,31 @@ describe("입력 읽기와 보류셋 보호", () => {
     expect(route?.rulesCanonicalSha256).toBe(createHash("sha256").update("keyword_route\t사용자규칙\n").digest("hex"));
     expect(log).toHaveBeenCalledWith(JSON.stringify({ items: 1, keywordPatterns: 0, keywordMatches: 0, decisions: { pass: 1 } }));
     expect(log.mock.calls.flat().join(" ")).not.toContain("사용자규칙");
+    expect(log.mock.calls.flat().join(" ")).not.toContain("고유평가원문");
+  });
+
+  it.each([
+    ["critical\t비공개규칙\t추가필드", "탭", "비공개규칙"],
+    [`critical\t${"비".repeat(51)}`, "50자", "비비비"],
+  ])("실제 --rules 오류는 줄 번호와 수정 방향만 알리고 원문은 숨긴다: %s", (rulesContent, guidance, forbidden) => {
+    const evalFile = temporaryFile("eval.jsonl", '{"id":"a","text":"일반","split":"dev"}\n');
+    const rulesFile = temporaryFile("rules.tsv", `${rulesContent}\n`);
+    const outputDirectory = mkdtempSync(join(tmpdir(), "zzirit-evaluate-rules-output-"));
+    temporaryDirectories.push(outputDirectory);
+    const outputFile = join(outputDirectory, "routes.jsonl");
+    let thrown: unknown;
+
+    try {
+      runEvaluateRulesCommand(["--eval-file", evalFile, "--output", outputFile, "--rules", rulesFile]);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(EvaluateRulesArgumentError);
+    expect((thrown as Error).message).toContain("1번째 줄");
+    expect((thrown as Error).message).toContain(guidance);
+    expect((thrown as Error).message).not.toContain(forbidden);
+    expect(existsSync(outputFile)).toBe(false);
   });
 
   it("실제 명령 경로에서 rules가 없으면 해시는 null이고 요약 형식은 기존과 같다", () => {

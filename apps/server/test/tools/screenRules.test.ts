@@ -9,6 +9,7 @@ import {
   runScreenRulesCli,
   type ScreenThresholds,
 } from "../../src/tools/screenRules.js";
+import { parseRulePatterns } from "../../src/tools/evaluateRules.js";
 
 const permissive: ScreenThresholds = { maxHitsA: 3, maxHitsB: 9, maxUnionA: 41, maxUnionB: 139 };
 
@@ -84,6 +85,36 @@ describe("screenCandidates", () => {
     expect(result.report.output_tsv_canonical_sha256).toBe(createHash("sha256").update(Buffer.from(canonical, "utf8")).digest("hex"));
     expect(result.outputTsv.endsWith("\n")).toBe(true);
     expect(canonical.endsWith("\n")).toBe(true);
+  });
+
+  it("출력 TSV를 평가 도구가 읽은 정규형 해시는 보고서의 정규형 해시와 같다", () => {
+    const result = screenCandidates(
+      "critical\t  ＡＢＣ  \ncritical\tabc\ncritical\t 가 나 \ncritical\t가나\ncritical\tＺＥＴＡ\n",
+      [],
+      "",
+      "normal",
+      permissive,
+    );
+    const parsed = parseRulePatterns(result.outputTsv);
+
+    expect(createHash("sha256").update(parsed.canonical).digest("hex")).toBe(result.report.output_tsv_canonical_sha256);
+  });
+
+  it.each([
+    ["critical\t비공개후보\t추가필드", "탭", "비공개후보"],
+    [`critical\t${"비".repeat(51)}`, "50자", "비비비"],
+  ])("잘못된 후보 줄은 줄 번호와 수정 방향만 알리고 원문은 숨긴다: %s", (candidate, guidance, forbidden) => {
+    let thrown: unknown;
+    try {
+      screenCandidates(`# 설명\n${candidate}\n`, [], "", "normal", permissive);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ScreenRulesArgumentError);
+    expect((thrown as Error).message).toContain("2번째 후보 줄");
+    expect((thrown as Error).message).toContain(guidance);
+    expect((thrown as Error).message).not.toContain(forbidden);
   });
 
   it("2단계는 합집합 감소량, 전체 적중 수, 정규화 사전순 동률 순서로 제거한다", () => {

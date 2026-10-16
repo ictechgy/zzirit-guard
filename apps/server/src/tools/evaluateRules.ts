@@ -14,7 +14,7 @@ import { DEFAULT_RULES } from "../detection/defaultRules.js";
 import { createDuplicateTracker } from "../detection/messageTraits.js";
 import { normalizeForMatching } from "../detection/normalize.js";
 import { createDetectionPipeline, type DetectionPipeline } from "../detection/pipeline.js";
-import { createRuleRepository, type RuleRepository } from "../detection/ruleRepository.js";
+import { createRuleRepository, MAX_RULE_PATTERN_LENGTH, type RuleRepository } from "../detection/ruleRepository.js";
 import { findFirstMatch, locateExceptions } from "../detection/wordMatch.js";
 import { createAuditLog } from "../records/auditLog.js";
 import type { RuleKind } from "@zzirit-guard/shared";
@@ -23,7 +23,7 @@ import type { RuleKind } from "@zzirit-guard/shared";
  * 평가 도구 버전. 규칙 목록 지문에 함께 넣는다. 판정 순서나 정규화처럼 같은 목록이라도 결과가 바뀌는 변경을 하면 올린다.
  * 왜: 개발셋과 보류셋의 규칙 결과가 같은 목록이어도 서로 다른 판정 방식으로 만들어졌다면 섞으면 안 되기 때문이다.
  */
-const EVALUATOR_VERSION = "evaluate-rules@1";
+const EVALUATOR_VERSION = "evaluate-rules@2";
 
 /** 평가용 채널 식별자. 메모리 DB에만 있다. */
 const EVALUATION_CHANNEL_ID = "evaluation";
@@ -178,9 +178,6 @@ export function parseEvaluationItems(content: string): EvaluationItem[] {
 export function parseKeywordPatterns(content: string): string[] {
   return content.split("\n").map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
 }
-
-/** 규칙 파일의 최대 문구 길이. 저장소의 사용자 규칙 제한과 맞춘다. */
-const MAX_RULE_PATTERN_LENGTH = 50;
 
 /** 규칙 TSV 오류를 줄 번호와 수정 방향만으로 설명한다. 문구 원문은 비공개 후보일 수 있어 넣지 않는다. */
 function ruleFileError(line: number, guidance: string): EvaluateRulesArgumentError {
