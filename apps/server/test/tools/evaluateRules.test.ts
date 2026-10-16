@@ -114,9 +114,9 @@ describe("기본 목록이 흔한 방송 채팅을 건드리지 않는다", () =
     expect(route?.reason).not.toMatch(/^rule:spam/);
   });
 
-  it.each(["너네 집 앞에 찾아가서 기다릴게", "집 앞까지 따라갈거임", "퇴근길 따라간다 조심해"])("집 앞·따라가기 협박은 키워드 경로로 간다: %s", (text) => {
+  it.each(["너네 집 앞에 찾아가서 기다릴게", "집 앞까지 따라갈거임", "퇴근길 따라간다 조심해"])("채택된 집 앞·따라가기 협박은 바로 후보로 끝나 AI로 가지 않는다: %s", (text) => {
     const [route] = evaluateRuleRoutes([devItem("threat", text)]);
-    expect(route?.keyword).not.toBeNull();
+    expect(route).toMatchObject({ decision: "candidate", reason: expect.stringMatching(/^rule:critical:/), keyword: null, skipAi: false });
   });
 
   it("벗어나 예외가 옷 벗어 요구를 가리지 않는다", () => {

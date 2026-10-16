@@ -79,7 +79,10 @@ describe("종단 간: 연결 → 섀도 → 자동 숨김 → 매니저 권한",
     const headers = { cookie: `zg_session=${owner}`, origin: ORIGIN, "x-zzirit-request": "1" };
     const defaultRuleCount = (await app.http.inject({ method: "GET", url: "/api/rules", headers })).json<unknown[]>().length;
     expect((await app.http.inject({ method: "POST", url: "/api/rules", headers, payload: { kind: "strong", pattern: "커스텀금칙어" } })).statusCode).toBe(200);
-    expect((await app.http.inject({ method: "PUT", url: "/api/settings", headers, payload: { breakerPerMinute: 30 } })).statusCode).toBe(200);
+    expect((await app.http.inject({
+      method: "PUT", url: "/api/settings", headers,
+      payload: { breakerPerMinute: 30, stage2Policy: "keyword_route", relaxedCandidateThreshold: 0.3 },
+    })).statusCode).toBe(200);
     expect((await app.http.inject({ method: "POST", url: "/api/auto-hide", headers, payload: { enabled: true } })).statusCode).toBe(200);
     expect((await app.http.inject({ method: "POST", url: "/api/channel/disconnect", headers })).statusCode).toBe(200);
     expect(app.status().channelConnected).toBe(false);
@@ -91,7 +94,9 @@ describe("종단 간: 연결 → 섀도 → 자동 숨김 → 매니저 권한",
     const rules = (await app.http.inject({ method: "GET", url: "/api/rules", headers: headersAgain })).json<Array<{ pattern: string }>>();
     expect(rules).toHaveLength(defaultRuleCount + 1);
     expect(rules.some((rule) => rule.pattern === "커스텀금칙어")).toBe(true);
-    expect((await app.http.inject({ method: "GET", url: "/api/settings", headers: headersAgain })).json()).toMatchObject({ breakerPerMinute: 30 });
+    expect((await app.http.inject({ method: "GET", url: "/api/settings", headers: headersAgain })).json()).toMatchObject({
+      breakerPerMinute: 30, stage2Policy: "keyword_route", relaxedCandidateThreshold: 0.3,
+    });
     expect(app.status()).toMatchObject({ channelConnected: true, autoHideEnabled: false });
   });
 

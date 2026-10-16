@@ -17,7 +17,11 @@ afterEach(() => {
 /** 채널 관리자. */
 const manager: MeDto = { channelId: "m1", channelName: "관리자", role: "STREAMING_CHANNEL_MANAGER", permissions: ["edit_rules", "edit_chat_settings", "view_audit"] };
 /** 기본 설정값. */
-const settings: SettingsDto = { breakerPerMinute: 30, retentionDaysContent: 7, retentionDaysAudit: 90, stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99 };
+const settings: SettingsDto = {
+  breakerPerMinute: 30, retentionDaysContent: 7, retentionDaysAudit: 90,
+  stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99,
+  stage2Policy: "category", relaxedCandidateThreshold: 0.2,
+};
 
 /** 응답하지 않는 요청을 가진 fetch. 진행 중 상태를 붙잡는다. */
 function stubPending(getRoutes: Record<string, () => Response>) {
@@ -260,8 +264,28 @@ describe("LimitsSection AI 임계값(로드맵 2단계 계획 R10)", () => {
     expect(sentBodies(fetchMock)).toEqual([{ stage1Threshold: 0.012 }]);
   });
 
+  it("2차 정책 세 가지 설명과 기본 범주 완화를 보여 주고 정책·완화 기준만 저장한다", async () => {
+    const fetchMock = stubFetch({
+      "GET /api/settings": () => json(200, settings),
+      "PUT /api/settings": (init) => json(200, { ...settings, ...(JSON.parse(String(init?.body)) as Partial<SettingsDto>) }),
+    });
+    render(<LimitsSection me={manager} aiEnabled />);
+    expect(await screen.findByText("S3·S4·S5 범주만 완화합니다.")).toBeTruthy();
+    expect(screen.getByText("모든 범주에 후보 기준을 그대로 씁니다.")).toBeTruthy();
+    expect(screen.getByText("키워드 경로로 온 채팅만 완화합니다.")).toBeTruthy();
+    expect((screen.getByLabelText("범주 완화") as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(screen.getByLabelText("고정"));
+    const relaxed = screen.getByLabelText(/AI 완화 후보 임계값/);
+    await userEvent.clear(relaxed);
+    await userEvent.type(relaxed, "0.3");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장했습니다.")).toBeTruthy();
+    expect(sentBodies(fetchMock)).toEqual([{ stage2Policy: "fixed", relaxedCandidateThreshold: 0.3 }]);
+  });
+
   it.each([
     ["AI 1차 임계값", "1", /AI 1차 임계값.*0보다 크고 1보다 작은/],
+    ["AI 완화 후보 임계값", "1", /AI 완화 후보 임계값.*0보다 크고 1보다 작은/],
     ["AI '확실' 임계값", "0.3", /후보 임계값은 확실 임계값보다 클 수 없습니다/],
   ])("%s를 %s로 바꾸면 보내지 않고 알린다", async (label, value, pattern) => {
     const fetchMock = stubFetch({ "GET /api/settings": () => json(200, settings) });

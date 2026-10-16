@@ -1,6 +1,9 @@
 import BetterSqlite3 from "better-sqlite3";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
+import { DEFAULT_RULES_IN_SEED_ORDER } from "../../src/detection/defaultRules.js";
 import { createRuleRepository, type RuleSnapshot } from "../../src/detection/ruleRepository.js";
 import { MIGRATIONS, runMigrations } from "../../src/db/migrations.js";
 
@@ -151,7 +154,7 @@ describe("openDatabase", () => {
     expect(Number(inserted.lastInsertRowid)).toBe(1);
   });
 
-  it.each([0, 1, 2, 3])("버전 %d DB를 현재 스키마로 올린 후 seedDefaults하면 새 DB와 규칙 스냅숏이 같다", (version) => {
+  it.each([0, 1, 2, 3, 4])("버전 %d DB를 현재 스키마로 올린 후 seedDefaults하면 새 DB와 규칙 스냅숏이 같다", (version) => {
     const migrated = new BetterSqlite3(":memory:");
     if (version > 0) MIGRATIONS.slice(0, version).forEach((statement) => migrated.exec(statement as string));
     migrated.pragma(`user_version = ${version}`);
@@ -166,6 +169,48 @@ describe("openDatabase", () => {
     expect(snapshotShape(migratedRepository.snapshot("c1"))).toEqual(snapshotShape(freshRepository.snapshot("c1")));
     expect(migrated.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     expect(fresh.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+  });
+
+  it("v4 기본 키워드 경로를 번호 그대로 critical로 옮기고 운영자 규칙은 건드리지 않는다", () => {
+    const database = new BetterSqlite3(":memory:");
+    MIGRATIONS.slice(0, 4).forEach((statement) => database.exec(statement as string));
+    database.pragma("user_version = 4");
+    const path = fileURLToPath(new URL("../../../../docs/ml/m2-round4-decisions/r1-public.tsv", import.meta.url));
+    const patterns = readFileSync(path, "utf8").trim().split("\n").map((line) => line.split("\t")[1] as string);
+    const insert = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES (?, ?, ?, ?, 0)");
+    insert.run("c1", "keyword_route", patterns[0], "default");
+    insert.run("c1", "keyword_route", patterns[1], "manager");
+    insert.run("c2", "critical", patterns[2], "manager");
+    insert.run("c2", "keyword_route", patterns[2], "default");
+    const ids = database.prepare("SELECT id, channel_id, pattern FROM rule_entry ORDER BY id").all() as Array<{ id: number; channel_id: string; pattern: string }>;
+
+    runMigrations(database);
+
+    expect(database.prepare("SELECT id, channel_id, kind, pattern, created_by FROM rule_entry ORDER BY id").all()).toEqual([
+      { ...ids[0], kind: "critical", created_by: "default" },
+      { ...ids[1], kind: "keyword_route", created_by: "manager" },
+      { ...ids[2], kind: "critical", created_by: "manager" },
+    ]);
+  });
+
+  it("v4 기본값을 이전한 뒤 seedDefaults를 반복해도 새 DB와 같은 규칙 집합이다", () => {
+    const migrated = new BetterSqlite3(":memory:");
+    MIGRATIONS.slice(0, 4).forEach((statement) => migrated.exec(statement as string));
+    migrated.pragma("user_version = 4");
+    migrated.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    const insert = migrated.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', ?, ?, 'default', 0)");
+    DEFAULT_RULES_IN_SEED_ORDER.forEach(({ kind, pattern }) => insert.run(kind === "critical" ? "keyword_route" : kind, pattern));
+    runMigrations(migrated);
+
+    const fresh = openDatabase(":memory:");
+    fresh.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
+    const migratedRepository = createRuleRepository(migrated, () => 0);
+    const freshRepository = createRuleRepository(fresh, () => 0);
+    migratedRepository.seedDefaults("c1");
+    migratedRepository.seedDefaults("c1");
+    freshRepository.seedDefaults("c1");
+
+    expect(snapshotShape(migratedRepository.snapshot("c1"))).toEqual(snapshotShape(freshRepository.snapshot("c1")));
   });
 
   it("알 수 없는 규칙 종류를 거부한다", () => {

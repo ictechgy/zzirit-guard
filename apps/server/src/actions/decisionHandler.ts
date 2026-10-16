@@ -12,6 +12,7 @@ import type { AutoHideSwitch } from "./autoHideSwitch.js";
 import type { ActionOutcome, Executor } from "./executor.js";
 import type { MessageHideGuard } from "./messageHideGuard.js";
 import { settleHideClaim, type VerdictClaims } from "./verdictClaims.js";
+import { stage2EndpointDecision } from "./stage2Policy.js";
 
 /** 실시간 화면으로 보내는 통로. Task 18의 RealtimeHub가 구현한다. */
 export interface Broadcaster {
@@ -81,9 +82,6 @@ export function createDecisionHandler(deps: DecisionHandlerDeps): DecisionHandle
   };
 }
 
-/** 2차 범주 중 '도움 필요'로 올리는 범주(S6 자살·자해, 스펙 5.2 ⑤). */
-const NEEDS_CARE_CATEGORY = "S6";
-
 /**
  * AI 결과를 판정으로 기록한다. 후보 임계값 미만이면 저장하지 않는다(최소 저장, 스펙 9장).
  * 같은 메시지에 판정이 이미 있으면(그 사이 떼도배로 소급 숨김 등) 후보는 만들지 않는다. 숨김 판단은 이미 있기 때문이다.
@@ -96,8 +94,15 @@ const NEEDS_CARE_CATEGORY = "S6";
 function recordAiResult(deps: DecisionHandlerDeps, submission: AiSubmission, result: AiResult): void {
   const { channelId, ref } = submission;
   const thresholds = deps.settings.get(channelId);
-  if (result.unsafeProbability < thresholds.candidateThreshold) return;
-  const decision = result.category === NEEDS_CARE_CATEGORY ? "needs_care" : "candidate";
+  const decision = stage2EndpointDecision({
+    policy: thresholds.stage2Policy,
+    candidateThreshold: thresholds.candidateThreshold,
+    relaxedCandidateThreshold: thresholds.relaxedCandidateThreshold,
+    keywordRoute: submission.keywordRouteId !== null,
+    unsafeProbability: result.unsafeProbability,
+    category: result.category,
+  });
+  if (decision === "pass") return;
   if (decision === "candidate" && deps.verdicts.existsForMessage(channelId, toTarget(ref))) return;
   const verdict = deps.verdicts.insert({
     ...toVerdictFields(channelId, ref), decision, reason: `ai:${result.category}`,

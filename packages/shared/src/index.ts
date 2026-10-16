@@ -30,6 +30,9 @@ export type Permission =
  */
 export type AiCategory = "S1" | "S2" | "S3" | "S4" | "S5" | "S6" | "S7";
 
+/** 2차 후보 기준 정책. fixed는 기본 기준, keyword_route는 키워드 경로, category는 S3·S4·S5에 완화 기준을 쓴다. */
+export type Stage2Policy = "fixed" | "keyword_route" | "category";
+
 /** 저장된 판정 1건(후보·섀도·자동 숨김 등). */
 export interface VerdictDto {
   id: number;
@@ -129,6 +132,10 @@ export interface SettingsDto {
   stage1Threshold: number;
   /** 2차 유해 확률이 이 값 이상이면 후보(0 초과 1 미만). */
   candidateThreshold: number;
+  /** 2차 후보 기준을 완화할 대상. 기본값은 채택된 S3·S4·S5 범주 완화다. */
+  stage2Policy: Stage2Policy;
+  /** 정책 대상에 쓰는 완화 후보 기준(0 초과 1 미만). 기본 후보 기준보다 높으면 기준을 올리지 않는다. */
+  relaxedCandidateThreshold: number;
   /** 2차 유해 확률이 이 값 이상이면 '확실'(0 초과 1 이하, 후보 임계값 이상). */
   sureThreshold: number;
 }
