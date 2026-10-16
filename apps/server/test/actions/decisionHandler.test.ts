@@ -247,8 +247,8 @@ describe("DecisionHandler", () => {
 });
 
 /** AI 단계가 넘기는 채팅. */
-function aiSubmission(sender = "viewer-1", content = "애매한 말"): AiSubmission {
-  return { channelId: "c1", ref: ref(sender, content), keywordRouteId: null };
+function aiSubmission(sender = "viewer-1", content = "애매한 말", keywordRouteId: number | null = null): AiSubmission {
+  return { channelId: "c1", ref: ref(sender, content), keywordRouteId };
 }
 
 /** 2차 결과. */
@@ -296,6 +296,35 @@ describe("DecisionHandler AI 결과(로드맵 2단계)", () => {
     createSettingsRepository(database).update("c1", { candidateThreshold: 0.8 });
     handler.handleAiResult(aiSubmission(), aiResult(0.7));
     expect(verdicts.listRecent("c1", 0)).toEqual([]);
+  });
+
+  it.each([
+    ["fixed", false, "S4", 0.2, false],
+    ["keyword_route", false, "S4", 0.2, false],
+    ["keyword_route", true, "S1", 0.2, true],
+    ["category", false, "S3", 0.2, true],
+    ["category", false, "S4", 0.2, true],
+    ["category", false, "S5", 0.2, true],
+    ["category", false, "S2", 0.2, false],
+  ] as const)("정책 %s·키워드 %s·범주 %s에 맞는 기준을 적용한다", (stage2Policy, keywordRoute, category, probability, expected) => {
+    createSettingsRepository(database).update("c1", { stage2Policy, relaxedCandidateThreshold: 0.2 });
+    handler.handleAiResult(aiSubmission("viewer-1", "애매한 말", keywordRoute ? 7 : null), aiResult(probability, category));
+    expect(verdicts.listRecent("c1", 0).length > 0).toBe(expected);
+  });
+
+  it("S6은 완화 정책보다 기본 후보 기준이 우선한다", () => {
+    createSettingsRepository(database).update("c1", { stage2Policy: "category", relaxedCandidateThreshold: 0.2 });
+    handler.handleAiResult(aiSubmission(), aiResult(0.2, "S6"));
+    expect(verdicts.listRecent("c1", 0)).toEqual([]);
+    handler.handleAiResult(aiSubmission(), aiResult(0.5, "S6"));
+    expect(verdicts.listRecent("c1", 0)[0]?.decision).toBe("needs_care");
+  });
+
+  it("완화 기준 바로 아래는 통과하고 같은 값은 후보로 올린다", () => {
+    createSettingsRepository(database).update("c1", { stage2Policy: "category", relaxedCandidateThreshold: 0.2 });
+    handler.handleAiResult(aiSubmission("below"), aiResult(0.199999, "S3"));
+    handler.handleAiResult(aiSubmission("at"), aiResult(0.2, "S3"));
+    expect(verdicts.listRecent("c1", 0).map(({ senderChannelId }) => senderChannelId)).toEqual(["at"]);
   });
 
   it("AI 대상 판정이면 키워드 경로 번호와 함께 AI 단계에 넘긴다", () => {

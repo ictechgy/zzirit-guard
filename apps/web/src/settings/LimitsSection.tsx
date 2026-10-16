@@ -1,4 +1,4 @@
-import type { MeDto, SettingsDto } from "@zzirit-guard/shared";
+import type { MeDto, SettingsDto, Stage2Policy } from "@zzirit-guard/shared";
 import { useEffect, useState } from "react";
 import { apiSend, describeApiError } from "../api/client";
 import { useApiResource } from "../api/useApiResource";
@@ -8,7 +8,7 @@ import { useBusyTask } from "../api/useBusyTask";
 type IntegerKey = "breakerPerMinute" | "retentionDaysContent" | "retentionDaysAudit";
 
 /** AI 임계값(비율). */
-type FractionKey = "stage1Threshold" | "candidateThreshold" | "sureThreshold";
+type FractionKey = "stage1Threshold" | "candidateThreshold" | "relaxedCandidateThreshold" | "sureThreshold";
 
 /**
  * 정수 설정 항목 이름과 허용 범위. 범위는 서버 SETTING_RULES(apps/server/src/records/settingsRepository.ts)와 같아야 한다.
@@ -27,7 +27,15 @@ const FIELDS: ReadonlyArray<{ key: IntegerKey; label: string; min: number; max: 
 const AI_FIELDS: ReadonlyArray<{ key: FractionKey; label: string; includesOne: boolean }> = [
   { key: "stage1Threshold", label: "AI 1차 임계값(이 점수 이상이면 2차로 보냄)", includesOne: false },
   { key: "candidateThreshold", label: "AI 후보 임계값(2차 확률이 이 값 이상이면 후보)", includesOne: false },
+  { key: "relaxedCandidateThreshold", label: "AI 완화 후보 임계값(선택한 2차 정책 대상에 적용)", includesOne: false },
   { key: "sureThreshold", label: "AI '확실' 임계값(2차 확률이 이 값 이상이면 확실 배지)", includesOne: true },
+];
+
+/** 운영자가 영향 범위를 비교할 수 있도록 세 정책과 설명을 항상 함께 보여 준다. */
+const STAGE2_POLICIES: ReadonlyArray<{ value: Stage2Policy; label: string; description: string }> = [
+  { value: "fixed", label: "고정", description: "모든 범주에 후보 기준을 그대로 씁니다." },
+  { value: "keyword_route", label: "키워드 경로 완화", description: "키워드 경로로 온 채팅만 완화합니다." },
+  { value: "category", label: "범주 완화", description: "S3·S4·S5 범주만 완화합니다." },
 ];
 
 /**
@@ -41,6 +49,7 @@ function findInvalidField(draft: SettingsDto, includeAi: boolean): string | null
   if (!includeAi) return null;
   const fraction = AI_FIELDS.find(({ key, includesOne }) => !Number.isFinite(draft[key]) || draft[key] <= 0 || (includesOne ? draft[key] > 1 : draft[key] >= 1));
   if (fraction) return `${fraction.label}은(는) 0보다 크고 1${fraction.includesOne ? " 이하" : "보다 작은"} 수여야 합니다.`;
+  if (!STAGE2_POLICIES.some(({ value }) => value === draft.stage2Policy)) return "AI 2차 후보 정책을 다시 선택하세요.";
   return draft.candidateThreshold > draft.sureThreshold ? "AI 후보 임계값은 확실 임계값보다 클 수 없습니다." : null;
 }
 
@@ -57,6 +66,7 @@ const NO_CHANGES_MESSAGE = "바꾼 값이 없습니다.";
 function changedFields(baseline: SettingsDto, draft: SettingsDto, includeAi: boolean): Partial<SettingsDto> {
   const patch: Partial<SettingsDto> = {};
   for (const { key } of [...FIELDS, ...(includeAi ? AI_FIELDS : [])]) if (draft[key] !== baseline[key]) patch[key] = draft[key];
+  if (includeAi && draft.stage2Policy !== baseline.stage2Policy) patch.stage2Policy = draft.stage2Policy;
   return patch;
 }
 
@@ -67,7 +77,8 @@ function changedFields(baseline: SettingsDto, draft: SettingsDto, includeAi: boo
  * @param settings 서버가 보낸 설정
  */
 function shouldIncludeAi(aiEnabled: boolean, settings: SettingsDto): boolean {
-  return aiEnabled && AI_FIELDS.every(({ key }) => typeof settings[key] === "number");
+  return aiEnabled && AI_FIELDS.every(({ key }) => typeof settings[key] === "number")
+    && STAGE2_POLICIES.some(({ value }) => value === settings.stage2Policy);
 }
 
 /** 한도·보관 기간 속성. */
@@ -121,13 +132,25 @@ export function LimitsSection({ me, refreshKey = 0, aiEnabled = false }: LimitsS
             onChange={(event) => { setMessage(null); setDraft({ ...draft, [field.key]: Number(event.target.value) }); }} />
         </label>
       ))}
-      {baseline && shouldIncludeAi(aiEnabled, baseline) && AI_FIELDS.map((field) => (
-        <label key={field.key} className="field">
-          {field.label}
-          <input type="number" min={0} max={1} step={0.001} value={draft[field.key]} disabled={!canEdit || busy.isBusy}
-            onChange={(event) => { setMessage(null); setDraft({ ...draft, [field.key]: Number(event.target.value) }); }} />
-        </label>
-      ))}
+      {baseline && shouldIncludeAi(aiEnabled, baseline) && <>
+        <fieldset disabled={!canEdit || busy.isBusy}>
+          <legend>AI 2차 후보 정책</legend>
+          {STAGE2_POLICIES.map((policy) => (
+            <label key={policy.value} className="field">
+              <span><input type="radio" name="stage2-policy" value={policy.value} aria-label={policy.label} checked={draft.stage2Policy === policy.value}
+                onChange={() => { setMessage(null); setDraft({ ...draft, stage2Policy: policy.value }); }} />{policy.label}</span>
+              <small>{policy.description}</small>
+            </label>
+          ))}
+        </fieldset>
+        {AI_FIELDS.map((field) => (
+          <label key={field.key} className="field">
+            {field.label}
+            <input type="number" min={0} max={1} step={0.001} value={draft[field.key]} disabled={!canEdit || busy.isBusy}
+              onChange={(event) => { setMessage(null); setDraft({ ...draft, [field.key]: Number(event.target.value) }); }} />
+          </label>
+        ))}
+      </>}
       {canEdit && <button type="button" disabled={busy.isBusy} onClick={save}>저장</button>}
       {message && <p role="status">{message}</p>}
     </section>

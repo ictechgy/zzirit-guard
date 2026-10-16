@@ -66,7 +66,22 @@ describe("SettingsRepository 자동 숨김 스위치(S6, C03)", () => {
 
 describe("SettingsRepository AI 임계값(로드맵 2단계 계획 R10)", () => {
   it("기본값은 스펙 11장 값이다", () => {
-    expect(settings.get("c1")).toMatchObject({ stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99 });
+    expect(settings.get("c1")).toMatchObject({
+      stage1Threshold: 0.05, candidateThreshold: 0.5, sureThreshold: 0.99,
+      stage2Policy: "category", relaxedCandidateThreshold: 0.2,
+    });
+  });
+
+  it("2차 정책과 완화 기준을 저장하고 다시 읽는다", () => {
+    expect(settings.update("c1", { stage2Policy: "keyword_route", relaxedCandidateThreshold: 0.3 })).toMatchObject({
+      stage2Policy: "keyword_route", relaxedCandidateThreshold: 0.3,
+    });
+    expect(settings.get("c1")).toMatchObject({ stage2Policy: "keyword_route", relaxedCandidateThreshold: 0.3 });
+  });
+
+  it("알 수 없는 2차 정책과 범위 밖 완화 기준을 거부한다", () => {
+    expectValidationError({ stage2Policy: "unknown" }, /stage2Policy/);
+    expectValidationError({ relaxedCandidateThreshold: 1 }, /relaxedCandidateThreshold/);
   });
 
   it("비율은 소수를 받는다(정수 설정의 정수 검사는 그대로다)", () => {

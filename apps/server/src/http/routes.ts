@@ -136,6 +136,8 @@ const settingsBodySchema = z
     retentionDaysAudit: z.number().int().optional(),
     stage1Threshold: z.number().optional(),
     candidateThreshold: z.number().optional(),
+    stage2Policy: z.enum(["fixed", "keyword_route", "category"]).optional(),
+    relaxedCandidateThreshold: z.number().optional(),
     sureThreshold: z.number().optional(),
   })
   .strict();
@@ -564,6 +566,7 @@ function toMe(manager: ManagerSession): MeDto {
 function toSettingsDto(settings: ChannelSettings): SettingsDto {
   return {
     breakerPerMinute: settings.breakerPerMinute, retentionDaysContent: settings.retentionDaysContent, retentionDaysAudit: settings.retentionDaysAudit,
-    stage1Threshold: settings.stage1Threshold, candidateThreshold: settings.candidateThreshold, sureThreshold: settings.sureThreshold,
+    stage1Threshold: settings.stage1Threshold, candidateThreshold: settings.candidateThreshold,
+    stage2Policy: settings.stage2Policy, relaxedCandidateThreshold: settings.relaxedCandidateThreshold, sureThreshold: settings.sureThreshold,
   };
 }

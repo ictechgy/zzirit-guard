@@ -181,6 +181,36 @@ export const MIGRATIONS: readonly string[] = [
     ) WHERE seq IS NOT NULL HAVING COUNT(*) > 0;
   DROP TABLE rule_entry_sequence_v4;
   `,
+  // v5: M2 4차에서 채택한 공개 R1 기본 행을 바로 후보로 승격하고, 채택된 2차 범주 완화 정책 설정을 더한다.
+  // 같은 채널에 운영자가 이미 만든 critical이 있으면 기본 keyword_route만 지워 UNIQUE 충돌을 피한다. 운영자 행은 바꾸지 않는다.
+  // 규칙 id를 UPDATE로 유지해 과거 판정 이유가 계속 같은 번호를 가리키게 한다.
+  `
+  ALTER TABLE setting ADD COLUMN stage2_policy TEXT NOT NULL DEFAULT 'category'
+    CHECK (stage2_policy IN ('fixed', 'keyword_route', 'category'));
+  ALTER TABLE setting ADD COLUMN relaxed_candidate_threshold REAL NOT NULL DEFAULT 0.2;
+
+  DELETE FROM rule_entry
+    WHERE kind = 'keyword_route' AND created_by = 'default'
+      AND pattern IN (
+        '죽여버린','죽일거','가만안둬','가만안둔','각오해','밤길조심','뒤통수조심','패버린','때려죽','묻어버','불질러',
+        '잡으러간','뒤따라간','덮친','뒤조심','무사하지못','몸으로배','사는지알','혼자다니지마','편히잘생각','집앞에찾아',
+        '집앞까지','집앞에서기다','찾아가서기다','따라갈거','따라간다','회사어디','신상뿌','학번','졸앨','차번호','번호판',
+        '본계','뒷계','민증','주민번호','생년월일','폰번','카톡아이디','사원증','집아는','주소아는','공일공'
+      )
+      AND EXISTS (
+        SELECT 1 FROM rule_entry AS existing
+          WHERE existing.channel_id = rule_entry.channel_id
+            AND existing.kind = 'critical' AND existing.pattern = rule_entry.pattern
+      );
+  UPDATE rule_entry SET kind = 'critical'
+    WHERE kind = 'keyword_route' AND created_by = 'default'
+      AND pattern IN (
+        '죽여버린','죽일거','가만안둬','가만안둔','각오해','밤길조심','뒤통수조심','패버린','때려죽','묻어버','불질러',
+        '잡으러간','뒤따라간','덮친','뒤조심','무사하지못','몸으로배','사는지알','혼자다니지마','편히잘생각','집앞에찾아',
+        '집앞까지','집앞에서기다','찾아가서기다','따라갈거','따라간다','회사어디','신상뿌','학번','졸앨','차번호','번호판',
+        '본계','뒷계','민증','주민번호','생년월일','폰번','카톡아이디','사원증','집아는','주소아는','공일공'
+      );
+  `,
 ];
 
 /**
