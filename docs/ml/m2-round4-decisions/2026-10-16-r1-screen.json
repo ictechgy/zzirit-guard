@@ -1,0 +1,525 @@
+{
+ "plan": "docs/ml/2026-10-16-m2-round4-plan.md",
+ "plan_commit": "9912052",
+ "tool_commit": "5f1a7d4",
+ "tool": "apps/server/src/tools/screenRules.ts",
+ "candidates": {
+  "public_keyword_route_threat": 29,
+  "public_keyword_route_doxxing": 26,
+  "private_minors_K": 30,
+  "private_minors_K_file_sha256_prefix": "260b3d27b2b0"
+ },
+ "corpus_a": {
+  "line_count": 13821,
+  "files": [
+   {
+    "line_count": 3668,
+    "sha256": "3b7ef3e4c896767859b060e325356bbdd151f8c031e9a29ae3066cdae92e9e47"
+   },
+   {
+    "line_count": 4609,
+    "sha256": "45b0c99925fbbd1493017b2ba50ef48161e73836a1ad1efedf1bd3f5425ff479"
+   },
+   {
+    "line_count": 5544,
+    "sha256": "853147a9897e2a23ce61058433869ba0abe9c0534ef3b12c3e7db024ce0c5900"
+   }
+  ]
+ },
+ "corpus_b": {
+  "line_count": 46643,
+  "sha256": "3039eb0970ee2d3c67ee46f7bea94e3c559dcdc2ff5cce44c7d58b429035d07a",
+  "label": "normal",
+  "file": "K-HATERS train_v2"
+ },
+ "corpus_a_files": [
+  "workers/stage1/train_data/hard-negatives-v2.jsonl",
+  "allow-k2",
+  "allow-k3"
+ ],
+ "thresholds": {
+  "maxHitsA": 3,
+  "maxHitsB": 9,
+  "maxUnionA": 41,
+  "maxUnionB": 139
+ },
+ "union_after_stage1": {
+  "a": 13,
+  "b": 47
+ },
+ "union_after_stage2": {
+  "a": 13,
+  "b": 47
+ },
+ "remaining": {
+  "total": 61,
+  "public": 43,
+  "private": 18
+ },
+ "public_candidates": [
+  {
+   "input_line": 1,
+   "group": "threat",
+   "pattern": "죽여버린",
+   "hits_a": 0,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 2,
+   "group": "threat",
+   "pattern": "죽일거",
+   "hits_a": 0,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 3,
+   "group": "threat",
+   "pattern": "가만안둬",
+   "hits_a": 0,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 4,
+   "group": "threat",
+   "pattern": "가만안둔",
+   "hits_a": 0,
+   "hits_b": 2,
+   "kept": true
+  },
+  {
+   "input_line": 5,
+   "group": "threat",
+   "pattern": "각오해",
+   "hits_a": 2,
+   "hits_b": 2,
+   "kept": true
+  },
+  {
+   "input_line": 6,
+   "group": "threat",
+   "pattern": "밤길조심",
+   "hits_a": 1,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 7,
+   "group": "threat",
+   "pattern": "뒤통수조심",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 8,
+   "group": "threat",
+   "pattern": "기다려라",
+   "hits_a": 0,
+   "hits_b": 14,
+   "kept": false
+  },
+  {
+   "input_line": 9,
+   "group": "threat",
+   "pattern": "패버린",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 10,
+   "group": "threat",
+   "pattern": "때려죽",
+   "hits_a": 0,
+   "hits_b": 5,
+   "kept": true
+  },
+  {
+   "input_line": 11,
+   "group": "threat",
+   "pattern": "묻어버",
+   "hits_a": 0,
+   "hits_b": 2,
+   "kept": true
+  },
+  {
+   "input_line": 12,
+   "group": "threat",
+   "pattern": "테러",
+   "hits_a": 1,
+   "hits_b": 102,
+   "kept": false
+  },
+  {
+   "input_line": 13,
+   "group": "threat",
+   "pattern": "폭파",
+   "hits_a": 0,
+   "hits_b": 29,
+   "kept": false
+  },
+  {
+   "input_line": 14,
+   "group": "threat",
+   "pattern": "불질러",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 15,
+   "group": "threat",
+   "pattern": "잡으러간",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 16,
+   "group": "threat",
+   "pattern": "뒤따라간",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 17,
+   "group": "threat",
+   "pattern": "덮친",
+   "hits_a": 0,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 18,
+   "group": "threat",
+   "pattern": "뒤조심",
+   "hits_a": 1,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 19,
+   "group": "threat",
+   "pattern": "무사하지못",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 20,
+   "group": "threat",
+   "pattern": "몸으로배",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 21,
+   "group": "threat",
+   "pattern": "사는지알",
+   "hits_a": 0,
+   "hits_b": 3,
+   "kept": true
+  },
+  {
+   "input_line": 22,
+   "group": "threat",
+   "pattern": "혼자다니지마",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 23,
+   "group": "threat",
+   "pattern": "편히잘생각",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 24,
+   "group": "threat",
+   "pattern": "집앞에찾아",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 25,
+   "group": "threat",
+   "pattern": "집앞까지",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 26,
+   "group": "threat",
+   "pattern": "집앞에서기다",
+   "hits_a": 1,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 27,
+   "group": "threat",
+   "pattern": "찾아가서기다",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 28,
+   "group": "threat",
+   "pattern": "따라갈거",
+   "hits_a": 0,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 29,
+   "group": "threat",
+   "pattern": "따라간다",
+   "hits_a": 0,
+   "hits_b": 5,
+   "kept": true
+  },
+  {
+   "input_line": 30,
+   "group": "doxxing",
+   "pattern": "실명",
+   "hits_a": 10,
+   "hits_b": 19,
+   "kept": false
+  },
+  {
+   "input_line": 31,
+   "group": "doxxing",
+   "pattern": "본명",
+   "hits_a": 95,
+   "hits_b": 1,
+   "kept": false
+  },
+  {
+   "input_line": 32,
+   "group": "doxxing",
+   "pattern": "집주소",
+   "hits_a": 6,
+   "hits_b": 1,
+   "kept": false
+  },
+  {
+   "input_line": 33,
+   "group": "doxxing",
+   "pattern": "사는곳",
+   "hits_a": 14,
+   "hits_b": 7,
+   "kept": false
+  },
+  {
+   "input_line": 34,
+   "group": "doxxing",
+   "pattern": "다니는학교",
+   "hits_a": 4,
+   "hits_b": 0,
+   "kept": false
+  },
+  {
+   "input_line": 35,
+   "group": "doxxing",
+   "pattern": "학교어디",
+   "hits_a": 5,
+   "hits_b": 0,
+   "kept": false
+  },
+  {
+   "input_line": 36,
+   "group": "doxxing",
+   "pattern": "회사어디",
+   "hits_a": 2,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 37,
+   "group": "doxxing",
+   "pattern": "전화번호",
+   "hits_a": 13,
+   "hits_b": 3,
+   "kept": false
+  },
+  {
+   "input_line": 38,
+   "group": "doxxing",
+   "pattern": "신상공개",
+   "hits_a": 0,
+   "hits_b": 61,
+   "kept": false
+  },
+  {
+   "input_line": 39,
+   "group": "doxxing",
+   "pattern": "신상뿌",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 40,
+   "group": "doxxing",
+   "pattern": "얼굴공개",
+   "hits_a": 1,
+   "hits_b": 26,
+   "kept": false
+  },
+  {
+   "input_line": 41,
+   "group": "doxxing",
+   "pattern": "학번",
+   "hits_a": 0,
+   "hits_b": 3,
+   "kept": true
+  },
+  {
+   "input_line": 42,
+   "group": "doxxing",
+   "pattern": "졸앨",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 43,
+   "group": "doxxing",
+   "pattern": "차번호",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 44,
+   "group": "doxxing",
+   "pattern": "번호판",
+   "hits_a": 0,
+   "hits_b": 3,
+   "kept": true
+  },
+  {
+   "input_line": 45,
+   "group": "doxxing",
+   "pattern": "본계",
+   "hits_a": 0,
+   "hits_b": 1,
+   "kept": true
+  },
+  {
+   "input_line": 46,
+   "group": "doxxing",
+   "pattern": "뒷계",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 47,
+   "group": "doxxing",
+   "pattern": "민증",
+   "hits_a": 0,
+   "hits_b": 4,
+   "kept": true
+  },
+  {
+   "input_line": 48,
+   "group": "doxxing",
+   "pattern": "주민번호",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 49,
+   "group": "doxxing",
+   "pattern": "생년월일",
+   "hits_a": 0,
+   "hits_b": 2,
+   "kept": true
+  },
+  {
+   "input_line": 50,
+   "group": "doxxing",
+   "pattern": "폰번",
+   "hits_a": 3,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 51,
+   "group": "doxxing",
+   "pattern": "카톡아이디",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 52,
+   "group": "doxxing",
+   "pattern": "사원증",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 53,
+   "group": "doxxing",
+   "pattern": "집아는",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 54,
+   "group": "doxxing",
+   "pattern": "주소아는",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  },
+  {
+   "input_line": 55,
+   "group": "doxxing",
+   "pattern": "공일공",
+   "hits_a": 0,
+   "hits_b": 0,
+   "kept": true
+  }
+ ],
+ "private_summary": {
+  "candidates": 30,
+  "kept": 18,
+  "dropped_hits_a_over_3": 11,
+  "dropped_hits_b_over_9": 2,
+  "kept_hits_a_total": 3,
+  "kept_hits_b_total": 7
+ },
+ "r1": {
+  "lines": 61,
+  "sha256": "90e7e3418c194c3ffa02e99cdcac132fcb5d5d72aa1ce774bf53ac0b6a3ed70e",
+  "canonical_sha256": "9d9fb54c2fd406818b839ad91d3961e099743fe35aadb4f992f29f6d352c087c"
+ },
+ "r1_public": {
+  "file": "r1-public.tsv",
+  "lines": 43,
+  "sha256": "a8c53795bbb31ab8333c4f543580f189348d51eed3a40a9062cdac1e0abcc2ad",
+  "canonical_sha256": "07573e3f1251be71e730b25ffff12c6e1704f26bd0f8488ee54bd7eb18e3544c"
+ },
+ "r1_private": {
+  "lines": 18,
+  "sha256": "d84e21b1cbb97221825e08a0f85cb7536a342ecfa6e0a6639211245a3dd07024",
+  "canonical_sha256": "a706fd5ce08fc97f19003d51c76cd5c92426de16e8ddf0b91bcce0adde4deede"
+ }
+}
