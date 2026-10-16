@@ -26,6 +26,7 @@ from zg_stage1.evaluate_chat import (
     load_traffic_mix,
     load_stage2_scores,
     RuleRoute,
+    ScoredItem,
     ShortRule,
     load_rule_routes,
     message_length,
@@ -39,7 +40,6 @@ from zg_stage1.evaluate_chat import (
     score_model_items,
     scored_pairs,
     select_budget_threshold,
-    stage2_endpoint_decision,
     stage2_rates_by_category,
     summarize_at_chat_threshold,
     validate_traffic_mix,
@@ -184,7 +184,7 @@ def test_dev_threshold_requires_same_model(tmp_path: Path) -> None:
     assert read_dev_threshold(write_dev_report(tmp_path / "dev.json", "abc"), "abc", policy_sha256=None) == 0.42
     with pytest.raises(DatasetFormatError, match="다른 모델"):
         read_dev_threshold(write_dev_report(tmp_path / "other.json", "abc"), "xyz", policy_sha256=None)
-    with pytest.raises(DatasetFormatError, match="개발셋 예산 결과가 아닙니다"):
+    with pytest.raises(DatasetFormatError, match="개발셋 결과가 아닙니다"):
         read_dev_threshold(write_dev_report(tmp_path / "holdout.json", "abc", split="holdout"), "abc", policy_sha256=None)
 
 
@@ -418,20 +418,25 @@ def test_stage2_scores_require_exact_eval_id_set(tmp_path: Path) -> None:
 
 
 def test_stage2_policy_contract_vectors() -> None:
-    """서버와 공유하는 모든 경계 벡터를 Python 순수 함수에 적용한다."""
+    """서버 공유 벡터를 규칙 우선순위까지 포함한 ScoredItem 경로 끝 정의에 적용한다."""
     path = Path(__file__).parents[2] / "contract" / "stage2-policy-vectors.json"
     vectors = json.loads(path.read_text(encoding="utf-8"))["vectors"]
     for vector in vectors:
-        actual = stage2_endpoint_decision(
+        assert vector["rule_decision"] in {None, "candidate"}, vector["name"]
+        pair = ScoredItem(
+            item("contract", "allow", "long_normal"),
+            1.0,
+            RuleRoute(vector["rule_decision"] == "candidate", vector["keyword_route"]),
+            stage2_score=Stage2Score(vector["probability"], vector["category"]),
+        )
+        policy = Stage2Policy(
             vector["policy"],
             vector["base_threshold"],
             vector["relaxed_threshold"],
             frozenset(vector["relaxed_categories"]),
-            vector["keyword_route"],
-            vector["probability"],
-            vector["category"],
         )
-        assert actual == vector["expected"], vector["name"]
+        assert pair.endpoint_decision(0.5, policy) == vector["expected"], vector["name"]
+        assert pair.goes_to_stage2(0.5) is vector.get("expected_goes_to_stage2", True), vector["name"]
 
 
 def test_fixed_threshold_skips_budget_selection_and_records_mode() -> None:
@@ -441,6 +446,29 @@ def test_fixed_threshold_skips_budget_selection_and_records_mode() -> None:
     assert report["decision"]["mode"] == "fixed"
     assert report["decision"]["threshold"] == 0.37
     assert "budget" not in report["decision"]
+
+
+def test_fixed_and_budget_modes_match_at_the_same_threshold() -> None:
+    """예산이 고른 임계값을 fixed로 재사용하면 문장별 L0 판정과 모든 공통 결정점 지표가 같다."""
+    items, scores = full_coverage(0.9, 0.1)
+    routes = {entry.item_id: RuleRoute(False, False) for entry in items}
+    stage2 = {entry.item_id: Stage2Score(0.6, "S1") for entry in items}
+    budget_report = build_dev_report(items, scores, DEFAULT_TRAFFIC_MIX, 0.5, routes=routes, stage2_scores=stage2)
+    threshold = budget_report["decision"]["threshold"]
+    fixed_report = build_dev_report(
+        items,
+        scores,
+        DEFAULT_TRAFFIC_MIX,
+        None,
+        routes=routes,
+        stage2_scores=stage2,
+        fixed_threshold=threshold,
+    )
+    assert fixed_report["item_flags"] == budget_report["item_flags"]
+    budget_only = {"weighted_forward_rate_exact", "within_budget"}
+    assert fixed_report["decision"]["at_threshold"] == {
+        key: value for key, value in budget_report["decision"]["at_threshold"].items() if key not in budget_only
+    }
 
 
 def test_endpoint_decision_preserves_rule_and_stage_routing() -> None:
@@ -606,6 +634,19 @@ def test_holdout_requires_same_stage2_policy_and_accepts_fixed_zero(tmp_path: Pa
     assert read_dev_threshold(path, "weights", None, traffic_mix=HALF_HALF_MIX, stage2_policy=policy) == 0.0
     with pytest.raises(DatasetFormatError, match="2차 후보 기준 정책"):
         read_dev_threshold(path, "weights", None, traffic_mix=HALF_HALF_MIX, stage2_policy=Stage2Policy())
+
+
+def test_holdout_treats_missing_legacy_stage2_policy_as_default_fixed(tmp_path: Path) -> None:
+    """3차 보류셋용 옛 개발 보고서는 정책 필드가 없으면 기본 fixed(0.5/0.2/S3·S4·S5)다."""
+    path = write_dev_report(tmp_path / "legacy.json", "weights")
+    assert read_dev_threshold(path, "weights", None, stage2_policy=Stage2Policy()) == 0.42
+    with pytest.raises(DatasetFormatError, match="2차 후보 기준 정책"):
+        read_dev_threshold(
+            path,
+            "weights",
+            None,
+            stage2_policy=Stage2Policy("category", 0.5, 0.2, DEFAULT_RELAXED_STAGE2_CATEGORIES),
+        )
 
 
 def test_ensemble_holdout_requires_explicit_new_output(tmp_path: Path) -> None:

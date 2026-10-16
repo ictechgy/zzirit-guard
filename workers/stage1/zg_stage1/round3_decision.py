@@ -19,6 +19,7 @@ from zg_stage1.chat_eval_data import CRITICAL_CATEGORIES, ChatEvalItem, load_cha
 from zg_stage1.data import compute_file_sha256
 from zg_stage1.errors import DatasetFormatError, OutputExistsError, run_command_line
 from zg_stage1.evaluate_chat import (
+    DEFAULT_STAGE2_POLICY,
     STAGE2_CANDIDATE_THRESHOLD,
     RuleRoute,
     ShortRule,
@@ -469,6 +470,8 @@ def validate_dev_report(
     require_equal(decision.get("budget"), FORWARD_BUDGET, f"{file_name}의 가중 전달 예산")
     require_equal(dict(expected_short_rule), REQUIRED_SHORT_RULE, "판정 짧은 문장 규칙")
     require_equal(report.get("short_rule"), dict(expected_short_rule), f"{file_name}의 짧은 문장 규칙")
+    if "stage2_policy" in report:
+        require_equal(report.get("stage2_policy"), DEFAULT_STAGE2_POLICY.to_dict(), f"{file_name}의 2차 후보 기준 정책")
     routes = report.get("rule_routes")
     require_equal(routes.get("policy_sha256") if isinstance(routes, dict) else None, expected_policy, f"{file_name}의 규칙 지문")
     stage2 = report.get("stage2_scores")

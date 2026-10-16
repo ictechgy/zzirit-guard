@@ -97,6 +97,37 @@ def require_seed_list(value: object) -> tuple[int, ...]:
     return seeds
 
 
+def require_expected_rule_fingerprints(value: object) -> dict[str, str]:
+    """CONFIG가 고정한 R0·R1 지문을 정확히 읽고 두 규칙층이 섞이는 일을 막는다."""
+    if not isinstance(value, dict) or set(value) != {"R0", "R1"}:
+        raise DatasetFormatError("CONFIG expected_rule_fingerprints에는 R0·R1 규칙 지문을 정확히 넣으세요.")
+    fingerprints = {name: value[name] for name in ("R0", "R1")}
+    if any(not isinstance(fingerprint, str) or not fingerprint for fingerprint in fingerprints.values()):
+        raise DatasetFormatError("CONFIG expected_rule_fingerprints의 R0·R1은 비어 있지 않은 문자열이어야 합니다.")
+    if fingerprints["R0"] == fingerprints["R1"]:
+        raise DatasetFormatError("CONFIG expected_rule_fingerprints의 R0와 R1 규칙 지문은 서로 달라야 합니다.")
+    return fingerprints
+
+
+def require_expected_seed_inputs(value: object, seeds: Sequence[int]) -> dict[int, dict[str, float | str]]:
+    """시드별 1차 임계값과 단일 가중치 지문을 CONFIG에서 고정한다."""
+    if not isinstance(value, dict) or set(map(str, value)) != {str(seed) for seed in seeds}:
+        raise DatasetFormatError("CONFIG expected_seed_inputs에는 CONFIG seeds와 같은 시드별 입력을 정확히 넣으세요.")
+    result: dict[int, dict[str, float | str]] = {}
+    for seed in seeds:
+        raw = value.get(str(seed), value.get(seed))
+        if not isinstance(raw, dict) or set(raw) != {"threshold", "model_weights_sha256"}:
+            raise DatasetFormatError(f"CONFIG expected_seed_inputs.{seed}에는 threshold와 model_weights_sha256만 넣으세요.")
+        weight = raw.get("model_weights_sha256")
+        if not isinstance(weight, str) or not weight:
+            raise DatasetFormatError(f"CONFIG expected_seed_inputs.{seed}.model_weights_sha256는 비어 있지 않은 문자열이어야 합니다.")
+        result[seed] = {
+            "threshold": require_number(raw.get("threshold"), f"CONFIG expected_seed_inputs.{seed}.threshold"),
+            "model_weights_sha256": weight,
+        }
+    return result
+
+
 def load_traffic_mix_config(config_path: Path, value: object) -> dict[str, float]:
     """구성비는 CONFIG 안 값 또는 별도 JSON을 허용하되 evaluate_chat과 같은 검증을 쓴다."""
     raw = read_json_object(resolve_path(config_path, value, "traffic_mix"), "traffic_mix") if isinstance(value, str) else value
@@ -241,11 +272,13 @@ def require_report_seed(report: Mapping[str, Any], seed: int, context: str) -> N
         raise DatasetFormatError(f"{context}: model_seed가 CONFIG 시드 {seed}와 다릅니다. 올바른 모델 보고서를 연결하세요.")
 
 
-def require_fixed_decision(report: Mapping[str, Any], context: str) -> float:
-    """이번 비교는 같은 임계값을 고정하므로 budget 보고서나 빈 임계값을 거부한다."""
+def require_fixed_decision(report: Mapping[str, Any], context: str, *, allow_budget: bool = False) -> float:
+    """판정 칸은 fixed만, 진단 칸은 fixed 또는 budget의 유효한 임계값만 받는다."""
     decision = report.get("decision")
-    if not isinstance(decision, dict) or decision.get("mode") != "fixed":
-        raise DatasetFormatError(f"{context}: decision.mode가 fixed가 아닙니다. --fixed-threshold로 다시 평가하세요.")
+    allowed_modes = {"fixed", "budget"} if allow_budget else {"fixed"}
+    if not isinstance(decision, dict) or decision.get("mode") not in allowed_modes:
+        expected = "fixed 또는 budget" if allow_budget else "fixed"
+        raise DatasetFormatError(f"{context}: decision.mode가 {expected}가 아닙니다. 올바른 임계값 방식으로 다시 평가하세요.")
     return require_number(decision.get("threshold"), f"{context}의 고정 임계값")
 
 
@@ -269,10 +302,10 @@ def require_rule_fingerprint(report: Mapping[str, Any], context: str) -> str:
 
 
 def require_scores(report: Mapping[str, Any], expected_ids: set[str], context: str) -> dict[str, float]:
-    """진단용 1차 점수도 ambiguous를 뺀 id와 정확히 맞아야 한다."""
+    """진단용 1차 점수는 ambiguous를 포함한 평가셋 전체 id와 정확히 맞아야 한다."""
     raw = report.get("scores")
     if not isinstance(raw, dict) or set(raw) != expected_ids:
-        raise DatasetFormatError(f"{context}: scores id가 채점 개발셋과 다릅니다. 같은 평가셋으로 다시 평가하세요.")
+        raise DatasetFormatError(f"{context}: scores id가 전체 개발셋과 다릅니다. 같은 평가셋으로 다시 평가하세요.")
     return {str(identifier): require_number(value, f"{context} id {identifier!r}의 1차 점수") for identifier, value in raw.items()}
 
 
@@ -292,9 +325,45 @@ def require_flag_value(value: object, identifier: str, context: str) -> dict[str
     decision = value.get("endpoint_decision")
     if decision not in ENDPOINT_DECISIONS or value["endpoint"] != (decision != "pass"):
         raise DatasetFormatError(f"{context}: id {identifier!r}의 endpoint와 endpoint_decision이 모순됩니다. 보고서를 다시 만드세요.")
-    if (value["goes_to_stage2"] or value["endpoint"]) and not value["routed"]:
-        raise DatasetFormatError(f"{context}: id {identifier!r}의 경로 관계가 모순됩니다. 보고서를 다시 만드세요.")
+    if value["goes_to_stage2"] and not value["routed"]:
+        raise DatasetFormatError(f"{context}: id {identifier!r}의 goes_to_stage2는 참인데 routed가 거짓입니다. 보고서를 다시 만드세요.")
     return {"routed": value["routed"], "goes_to_stage2": value["goes_to_stage2"], "endpoint": value["endpoint"], "endpoint_decision": decision}
+
+
+def require_flag_decisions(
+    flags: Mapping[str, Mapping[str, bool | str]],
+    stage2_scores: Mapping[str, Stage2Score],
+    stage2_policy: Stage2Policy,
+    context: str,
+) -> None:
+    """각 문장 경로 상태와 실제 2차 점수로 가능한 경로 끝 판정을 교차 검사한다."""
+    for identifier, flag in flags.items():
+        routed = bool(flag["routed"])
+        goes_to_stage2 = bool(flag["goes_to_stage2"])
+        decision = flag["endpoint_decision"]
+        if goes_to_stage2:
+            score = stage2_scores[identifier]
+            keyword_values = (False, True) if stage2_policy.policy == "keyword_route" else (False,)
+            expected = {
+                stage2_endpoint_decision(
+                    stage2_policy.policy,
+                    stage2_policy.base,
+                    stage2_policy.relaxed,
+                    stage2_policy.categories,
+                    keyword,
+                    score.probability,
+                    score.category,
+                )
+                for keyword in keyword_values
+            }
+            if decision not in expected:
+                choices = "·".join(sorted(expected))
+                raise DatasetFormatError(f"{context}: id {identifier!r}의 2차 판정이 {decision!r}이지만 실제 점수·정책으로 가능한 값은 {choices}입니다.")
+        elif routed:
+            if decision != "candidate":
+                raise DatasetFormatError(f"{context}: id {identifier!r}는 2차에 가지 않고 routed가 참이므로 규칙 후보(candidate)여야 합니다.")
+        elif decision != "pass":
+            raise DatasetFormatError(f"{context}: id {identifier!r}는 routed와 goes_to_stage2가 모두 거짓이므로 통과(pass)여야 합니다.")
 
 
 def load_report(
@@ -304,9 +373,12 @@ def load_report(
     items: Sequence[ChatEvalItem],
     eval_sha256: str,
     stage2_sha256: str,
+    stage2_scores: Mapping[str, Stage2Score],
     traffic_mix: Mapping[str, float],
     *,
     expected_policy_kind: str | None,
+    allow_budget_decision: bool = False,
+    allow_missing_stage2_policy: bool = False,
 ) -> dict[str, Any]:
     """보고서 하나의 공통 입력·정책·문장별 증거를 판정 가능한 모양으로 검증한다."""
     context = f"{policy_name}/{seed} ({path.name})"
@@ -317,40 +389,65 @@ def load_report(
     require_provenance(report, "stage2_scores", stage2_sha256, context)
     require_report_mix(report, traffic_mix, context)
     require_report_seed(report, seed, context)
-    stage2_policy = stage2_policy_from_report(report.get("stage2_policy"), context)
+    if allow_missing_stage2_policy and "stage2_policy" not in report:
+        stage2_policy = Stage2Policy()
+    else:
+        stage2_policy = stage2_policy_from_report(report.get("stage2_policy"), context)
     require_round4_policy(stage2_policy, expected_policy_kind, context)
-    expected_ids = {item.item_id for item in scored_items(items)}
+    score_ids = {item.item_id for item in items}
+    flag_ids = {item.item_id for item in scored_items(items)}
+    flags = require_item_flags(report, flag_ids, context)
+    require_flag_decisions(flags, stage2_scores, stage2_policy, context)
     return {
         "policy": policy_name,
         "seed": seed,
-        "threshold": require_fixed_decision(report, context),
+        "threshold": require_fixed_decision(report, context, allow_budget=allow_budget_decision),
         "weights": require_weights(report, context),
         "rule_fingerprint": require_rule_fingerprint(report, context),
         "stage2_policy": stage2_policy,
-        "scores": require_scores(report, expected_ids, context),
-        "flags": require_item_flags(report, expected_ids, context),
+        "scores": require_scores(report, score_ids, context),
+        "flags": flags,
         "source": {"name": path.name, "sha256": compute_file_sha256(path)},
     }
 
 
-def require_same_seed_experiment(units: Mapping[str, Mapping[int, Mapping[str, Any]]], seeds: Sequence[int]) -> None:
-    """같은 시드의 여섯 칸은 같은 1차와 임계값이어야 층의 효과만 비교한다."""
+def require_same_seed_experiment(
+    units: Mapping[str, Mapping[int, Mapping[str, Any]]],
+    seeds: Sequence[int],
+    expected_inputs: Mapping[int, Mapping[str, float | str]],
+) -> None:
+    """여섯 칸의 1차 입력을 같은 시드끼리뿐 아니라 CONFIG 고정값과도 맞춘다."""
     for seed in seeds:
-        thresholds = {units[policy][seed]["threshold"] for policy in REQUIRED_POLICIES}
-        weights = {json.dumps(units[policy][seed]["weights"], sort_keys=True) for policy in REQUIRED_POLICIES}
-        if len(thresholds) != 1:
-            raise DatasetFormatError(f"시드 {seed}의 판정 정책 6개 임계값이 다릅니다. L0의 --fixed-threshold로 모두 다시 평가하세요.")
-        if len(weights) != 1:
-            raise DatasetFormatError(f"시드 {seed}의 판정 정책 6개 1차 가중치가 다릅니다. 같은 모델로 모두 다시 평가하세요.")
+        expected = expected_inputs[seed]
+        for policy in REQUIRED_POLICIES:
+            if units[policy][seed]["threshold"] != expected["threshold"]:
+                raise DatasetFormatError(f"시드 {seed}의 {policy} 임계값이 CONFIG expected_seed_inputs와 다릅니다. 고정 임계값으로 다시 평가하세요.")
+            if units[policy][seed]["weights"] != expected["model_weights_sha256"]:
+                raise DatasetFormatError(f"시드 {seed}의 {policy} 1차 가중치가 CONFIG expected_seed_inputs와 다릅니다. 같은 모델로 다시 평가하세요.")
 
 
-def require_rule_groups(units: Mapping[str, Mapping[int, Mapping[str, Any]]], seeds: Sequence[int]) -> None:
-    """T 칸에서 규칙이 함께 바뀌는 교란을 R0·R1 그룹별 지문으로 막는다."""
-    groups = (("L0", "L0+T1", "L0+T2"), ("L1", "L1+T1", "L1+T2"))
-    for group in groups:
-        fingerprints = {units[policy][seed]["rule_fingerprint"] for policy in group for seed in seeds}
-        if len(fingerprints) != 1:
-            raise DatasetFormatError(f"{'·'.join(group)} 전체 시드의 규칙 지문이 다릅니다. 같은 규칙 경로로 다시 평가하세요.")
+def require_rule_groups(units: Mapping[str, Mapping[int, Mapping[str, Any]]], seeds: Sequence[int], expected_fingerprints: Mapping[str, str]) -> None:
+    """R0·R1 계열의 모든 지문과 문장별 라우팅을 CONFIG 고정값에 맞춘다."""
+    groups = {
+        "R0": ("L0", "L0+T1", "L0+T2"),
+        "R1": ("L1", "L1+T1", "L1+T2"),
+    }
+    for rule_name, group in groups.items():
+        expected_fingerprint = expected_fingerprints[rule_name]
+        for seed in seeds:
+            baseline_flags = units[group[0]][seed]["flags"]
+            for policy in group:
+                if units[policy][seed]["rule_fingerprint"] != expected_fingerprint:
+                    raise DatasetFormatError(
+                        f"{rule_name} 규칙 지문이 CONFIG expected_rule_fingerprints와 다릅니다({policy}/{seed}). 같은 규칙 경로로 다시 평가하세요."
+                    )
+                for identifier, baseline in baseline_flags.items():
+                    current = units[policy][seed]["flags"][identifier]
+                    for key in ("goes_to_stage2", "routed"):
+                        if current[key] != baseline[key]:
+                            raise DatasetFormatError(
+                                f"시드 {seed} id {identifier!r}의 {key}가 같은 규칙 계열 {rule_name} 안에서 다릅니다({group[0]}·{policy})."
+                            )
 
 
 def group_items(items: Sequence[ChatEvalItem]) -> dict[str, list[ChatEvalItem]]:
@@ -469,7 +566,8 @@ def comparison_allow_failures(baseline: Sequence[Mapping[str, object]], candidat
     for index, (base, current) in enumerate(zip(baseline, candidate, strict=True)):
         base_rates = base["endpoint_rate_by_category"]
         current_rates = current["endpoint_rate_by_category"]
-        assert isinstance(base_rates, Mapping) and isinstance(current_rates, Mapping)
+        if not isinstance(base_rates, Mapping) or not isinstance(current_rates, Mapping):
+            raise DatasetFormatError("endpoint_rate_by_category는 범주별 비율 객체여야 합니다.")
         for category in ALLOW_CATEGORIES:
             increase = metric_float(current_rates[category], category) - metric_float(base_rates[category], category)
             if increase > ALLOW_CATEGORY_INCREASE_LIMIT + COMPARISON_EPSILON:
@@ -586,11 +684,19 @@ def bootstrap_report(selected: Sequence[Mapping[str, Any]], baseline: Sequence[M
 def collect_diagnostic_slots(config_path: Path, value: object, seeds: Sequence[int], prefix: str = "") -> dict[str, dict[int, Path]]:
     """진단 이름은 자유롭게 두되 잎은 언제나 같은 세 시드 보고서로 정규화한다."""
     if isinstance(value, list):
+        if not prefix:
+            raise DatasetFormatError("CONFIG diagnostics 최상위는 이름→진단 칸 객체여야 합니다.")
         return {prefix: seed_report_paths(config_path, value, seeds, f"diagnostics/{prefix}")}
     if not isinstance(value, dict):
-        return {}
+        location = f"diagnostics/{prefix}" if prefix else "diagnostics"
+        raise DatasetFormatError(f"CONFIG {location}는 중첩 객체 또는 시드별 보고서 목록이어야 합니다.")
     seed_keys = {str(seed) for seed in seeds}
-    if set(map(str, value)) == seed_keys:
+    actual_keys = set(map(str, value))
+    if actual_keys & seed_keys:
+        if not prefix:
+            raise DatasetFormatError("CONFIG diagnostics 최상위에는 진단 칸 이름이 필요합니다.")
+        if actual_keys != seed_keys:
+            raise DatasetFormatError(f"CONFIG diagnostics/{prefix}의 시드가 CONFIG seeds와 다릅니다. 세 시드 보고서를 모두 넣으세요.")
         return {prefix: seed_report_paths(config_path, value, seeds, f"diagnostics/{prefix}")}
     result: dict[str, dict[int, Path]] = {}
     for name, child in value.items():
@@ -598,6 +704,8 @@ def collect_diagnostic_slots(config_path: Path, value: object, seeds: Sequence[i
             continue
         child_prefix = f"{prefix}/{name}" if prefix else str(name)
         result |= collect_diagnostic_slots(config_path, child, seeds, child_prefix)
+    if prefix and not result:
+        raise DatasetFormatError(f"CONFIG diagnostics/{prefix}에 시드별 보고서가 없습니다.")
     return result
 
 
@@ -608,6 +716,7 @@ def load_diagnostics(
     items: Sequence[ChatEvalItem],
     eval_sha256: str,
     stage2_sha256: str,
+    stage2_scores: Mapping[str, Stage2Score],
     traffic_mix: Mapping[str, float],
     baseline_units: Mapping[int, Mapping[str, Any]],
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Path]]:
@@ -621,7 +730,19 @@ def load_diagnostics(
     for name, paths in slots.items():
         loaded[name] = []
         for seed in seeds:
-            report = load_report(paths[seed], name, seed, items, eval_sha256, stage2_sha256, traffic_mix, expected_policy_kind=None)
+            report = load_report(
+                paths[seed],
+                name,
+                seed,
+                items,
+                eval_sha256,
+                stage2_sha256,
+                stage2_scores,
+                traffic_mix,
+                expected_policy_kind=None,
+                allow_budget_decision=True,
+                allow_missing_stage2_policy=True,
+            )
             report["metrics"] = metrics_from_flags(items, report["flags"], traffic_mix, baseline_units[seed]["flags"])
             loaded[name].append(report)
     routes = diagnostic_route_paths(config_path, value.get("routes"))
@@ -698,7 +819,7 @@ def high_score_flags(unit: Mapping[str, Any], routes: Mapping[str, RuleRoute]) -
         route = routes[identifier]
         decision = original["endpoint_decision"]
         promoted = False
-        if not route.rule_flagged and not route.skip_ai and unit["scores"][identifier] >= HIGH_SCORE_THRESHOLD:
+        if decision == "pass" and not route.rule_flagged and not route.skip_ai and unit["scores"][identifier] >= HIGH_SCORE_THRESHOLD:
             decision = "candidate"
             promoted = True
         result[identifier] = {
@@ -777,6 +898,8 @@ def build_round4_decision(config_path: Path) -> dict[str, Any]:
     """CONFIG 전체를 사전 검사하고 18개 칸의 정확 지표·단계 판정·진단·부트스트랩을 만든다."""
     config = read_json_object(config_path, "round4 CONFIG")
     seeds = require_seed_list(config.get("seeds"))
+    expected_rule_fingerprints = require_expected_rule_fingerprints(config.get("expected_rule_fingerprints"))
+    expected_seed_inputs = require_expected_seed_inputs(config.get("expected_seed_inputs"), seeds)
     eval_path = resolve_path(config_path, config.get("eval_file"), "eval_file")
     items = load_decision_items(eval_path)
     require_development_set(items)
@@ -784,9 +907,17 @@ def build_round4_decision(config_path: Path) -> dict[str, Any]:
     stage2_path = resolve_path(config_path, config.get("stage2_scores"), "stage2_scores")
     stage2_scores, stage2_provenance = load_stage2_scores(stage2_path, items, eval_path)
     paths = required_unit_paths(config_path, config.get("units"), seeds)
-    units = load_required_units(paths, seeds, items, compute_file_sha256(eval_path), stage2_provenance["sha256"], traffic_mix)
-    require_same_seed_experiment(units, seeds)
-    require_rule_groups(units, seeds)
+    units = load_required_units(
+        paths,
+        seeds,
+        items,
+        compute_file_sha256(eval_path),
+        stage2_provenance["sha256"],
+        stage2_scores,
+        traffic_mix,
+    )
+    require_same_seed_experiment(units, seeds, expected_seed_inputs)
+    require_rule_groups(units, seeds, expected_rule_fingerprints)
     require_l0_invariant(units, seeds)
     attach_metrics(units, items, traffic_mix, seeds)
     metrics = {policy: [units[policy][seed]["metrics"] for seed in seeds] for policy in REQUIRED_POLICIES}
@@ -798,6 +929,7 @@ def build_round4_decision(config_path: Path) -> dict[str, Any]:
         items,
         compute_file_sha256(eval_path),
         stage2_provenance["sha256"],
+        stage2_scores,
         traffic_mix,
         units["L0"],
     )
@@ -820,12 +952,23 @@ def load_required_units(
     items: Sequence[ChatEvalItem],
     eval_sha256: str,
     stage2_sha256: str,
+    stage2_scores: Mapping[str, Stage2Score],
     traffic_mix: Mapping[str, float],
 ) -> dict[str, dict[int, dict[str, Any]]]:
     """정책 이름이 정한 stage2_policy까지 포함해 18개를 모두 읽는다."""
     return {
         policy: {
-            seed: load_report(paths[policy][seed], policy, seed, items, eval_sha256, stage2_sha256, traffic_mix, expected_policy_kind=POLICY_KIND[policy])
+            seed: load_report(
+                paths[policy][seed],
+                policy,
+                seed,
+                items,
+                eval_sha256,
+                stage2_sha256,
+                stage2_scores,
+                traffic_mix,
+                expected_policy_kind=POLICY_KIND[policy],
+            )
             for seed in seeds
         }
         for policy in REQUIRED_POLICIES
@@ -885,7 +1028,8 @@ def format_round4_markdown(report: Mapping[str, Any]) -> str:
 
 def unit_markdown_table(units: object) -> list[str]:
     """모든 범주의 후보 수/전체와 운영 비용을 한 행에 모은다."""
-    assert isinstance(units, list)
+    if not isinstance(units, list):
+        raise DatasetFormatError("판정 결과 units는 정책·시드별 목록이어야 합니다.")
     headers = ["정책", "시드", *REPORT_CATEGORIES, "핵심 최소(범주)", "허용 가중 오후보", "도움 필요/손실", "2차 부하"]
     lines = ["## 정책별 지표", "", "| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
     for unit in units:
@@ -907,7 +1051,8 @@ def unit_markdown_table(units: object) -> list[str]:
 
 def decision_markdown(decision: object) -> list[str]:
     """각 단계의 통과 여부와 실패 근거를 JSON과 같은 순서로 적는다."""
-    assert isinstance(decision, Mapping)
+    if not isinstance(decision, Mapping):
+        raise DatasetFormatError("판정 결과 decision은 객체여야 합니다.")
     step1 = decision["step1"]
     step2 = decision["step2"]
     lines = ["## 단계별 판정", "", f"- 1단계 R1: {'채택' if step1['adopted'] else '불채택'} — " + "; ".join(step1["reasons"])]
@@ -920,8 +1065,9 @@ def decision_markdown(decision: object) -> list[str]:
 
 def diagnostics_markdown(diagnostics: object) -> list[str]:
     """선택 진단 칸과 2차 단독·고득점·놓침을 원문 없는 요약으로 표시한다."""
-    assert isinstance(diagnostics, Mapping)
-    lines = ["## 진단", ""]
+    if not isinstance(diagnostics, Mapping):
+        raise DatasetFormatError("판정 결과 diagnostics는 객체여야 합니다.")
+    lines = ["## 진단", "", "1차 점수는 보고서의 4자리 값을 사용한다.", ""]
     report_slots = diagnostics.get("report_slots", {})
     if report_slots:
         lines += ["| 진단 칸 | 시드 | 핵심 최소 | 허용 가중 오후보 | 도움 필요/손실 | 2차 부하 |", "|---|---|---|---|---|---|"]

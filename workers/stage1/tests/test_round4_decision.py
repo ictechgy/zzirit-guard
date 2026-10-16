@@ -16,17 +16,25 @@ from zg_stage1.round4_decision import (
     bootstrap_minimum_differences,
     build_round4_decision,
     choose_final_policy,
+    comparison_allow_failures,
+    decision_markdown,
+    diagnostics_markdown,
+    format_round4_markdown,
+    high_score_flags,
+    unit_markdown_table,
     write_round4_decision,
 )
+from zg_stage1.evaluate_chat import RuleRoute
 
 SEEDS = (20261011, 20261021, 20261031)
 CORE = ("self_harm", "sexual", "minors", "threat", "doxxing")
 ALLOW = ("friendly_profanity", "game_combat", "quote_report", "number_url_like", "short_normal", "long_normal")
 CATEGORIES = (*CORE, "abuse", "spam", *ALLOW)
+AMBIGUOUS_ID = "ambiguous"
 
 
 def write_eval(path: Path) -> list[str]:
-    """범주마다 한 문장인 작은 개발셋. 출력 원문 누출 검사에는 고유 표식을 쓴다."""
+    """범주마다 한 채점 문장과 애매 문장 하나인 작은 개발셋."""
     identifiers: list[str] = []
     lines = []
     for index, category in enumerate(CATEGORIES):
@@ -47,6 +55,21 @@ def write_eval(path: Path) -> list[str]:
                 }
             )
         )
+    identifiers.append(AMBIGUOUS_ID)
+    lines.append(
+        json.dumps(
+            {
+                "id": AMBIGUOUS_ID,
+                "split": "dev",
+                "label": "ambiguous",
+                "category": "abuse",
+                "family": "fixed",
+                "author": "a",
+                "reviewer": "b",
+                "text": "SECRET-ROUND4-AMBIGUOUS",
+            }
+        )
+    )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return identifiers
 
@@ -70,11 +93,17 @@ def write_report(path: Path, eval_sha: str, stage2_sha: str, identifiers: list[s
     """판정기가 읽는 최소 evaluate_chat 보고서."""
     categories = CATEGORIES
     flags = {}
-    for identifier, category in zip(identifiers, categories, strict=True):
+    for identifier, category in zip(identifiers[: len(categories)], categories, strict=True):
         decision = endpoint_for(policy, category)
+        goes_to_stage2 = decision == "needs_care"
+        routed = decision != "pass"
+        if identifier == "i2" and policy.startswith("L0"):
+            goes_to_stage2 = True
+            routed = True
+            decision = "candidate" if policy.endswith("T2") else "pass"
         flags[identifier] = {
-            "routed": decision != "pass",
-            "goes_to_stage2": decision == "needs_care",
+            "routed": routed,
+            "goes_to_stage2": goes_to_stage2,
             "endpoint": decision != "pass",
             "endpoint_decision": decision,
         }
@@ -104,7 +133,13 @@ def build_fixture(tmp_path: Path) -> Path:
         "model": {"identifier": "stage2"},
         "eval_file": {"sha256": compute_file_sha256(eval_file)},
         "candidate_threshold": 0.5,
-        "scores": {identifier: {"unsafe_probability": 0.5, "category": "S6" if index == 0 else "S4"} for index, identifier in enumerate(identifiers)},
+        "scores": {
+            identifier: {
+                "unsafe_probability": 0.3 if identifier == "i2" else 0.5,
+                "category": "S6" if index == 0 else "S4",
+            }
+            for index, identifier in enumerate(identifiers)
+        },
     }
     stage2_file.write_text(json.dumps(stage2), encoding="utf-8")
     units: dict[str, dict[str, str]] = {}
@@ -120,6 +155,8 @@ def build_fixture(tmp_path: Path) -> Path:
         "stage2_scores": stage2_file.name,
         "seeds": list(SEEDS),
         "units": units,
+        "expected_rule_fingerprints": {"R0": "r0", "R1": "r1"},
+        "expected_seed_inputs": {str(seed): {"threshold": 0.25, "model_weights_sha256": f"weights-{seed}"} for seed in SEEDS},
     }
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -164,7 +201,145 @@ def test_requires_exact_six_by_three_units(tmp_path: Path) -> None:
         build_round4_decision(config_path)
 
 
-@pytest.mark.parametrize("mutation,message", [("threshold", "임계값"), ("policy", "2차 후보 기준")])
+def test_scores_cover_all_eval_ids_but_flags_cover_only_scored_ids(tmp_path: Path) -> None:
+    """애매 문장은 scores에는 남고 판정·item_flags에서는 빠진다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    report = json.loads((tmp_path / config["units"]["L0"][str(SEEDS[0])]).read_text(encoding="utf-8"))
+    assert AMBIGUOUS_ID in report["scores"]
+    assert AMBIGUOUS_ID not in report["item_flags"]
+    assert len(build_round4_decision(config_path)["units"]) == 18
+
+
+def test_requires_exact_distinct_rule_fingerprints_from_config(tmp_path: Path) -> None:
+    """R0·R1 지문은 CONFIG에 필수이며 서로 다르고 각 규칙 계열과 정확히 같아야 한다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["expected_rule_fingerprints"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="expected_rule_fingerprints"):
+        build_round4_decision(config_path)
+
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["expected_rule_fingerprints"]["R0"] = "wrong"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="R0.*지문"):
+        build_round4_decision(config_path)
+
+    config["expected_rule_fingerprints"] = {"R0": "same", "R1": "same"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="서로 달라야"):
+        build_round4_decision(config_path)
+
+
+def test_requires_exact_seed_thresholds_and_weights_from_config(tmp_path: Path) -> None:
+    """CONFIG의 시드별 입력은 필수이고 18개 보고서의 임계값·가중치와 정확히 맞아야 한다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["expected_seed_inputs"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="expected_seed_inputs"):
+        build_round4_decision(config_path)
+
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["expected_seed_inputs"][str(SEEDS[1])]["threshold"] = 0.26
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"20261021.*임계값"):
+        build_round4_decision(config_path)
+
+    config["expected_seed_inputs"][str(SEEDS[1])] = {
+        "threshold": 0.25,
+        "model_weights_sha256": "wrong",
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"20261021.*가중치"):
+        build_round4_decision(config_path)
+
+
+@pytest.mark.parametrize(
+    ("policy", "identifier", "changes", "reason"),
+    [
+        ("L0", "i0", {"endpoint_decision": "candidate"}, "2차 판정"),
+        ("L0+T1", "i0", {"endpoint_decision": "pass", "endpoint": False}, "2차 판정"),
+        ("L0", "i1", {"endpoint_decision": "needs_care"}, "규칙 후보"),
+        ("L0", "i3", {"endpoint_decision": "candidate", "endpoint": True}, "통과"),
+    ],
+)
+def test_cross_checks_each_item_flag_against_stage2_and_route_state(
+    tmp_path: Path,
+    policy: str,
+    identifier: str,
+    changes: dict[str, object],
+    reason: str,
+) -> None:
+    """문장별 경로 상태와 2차 정책 결과가 어긋나면 id와 이유를 보고한다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    report_path = tmp_path / config["units"][policy][str(SEEDS[0])]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["item_flags"][identifier] |= changes
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=rf"{identifier!r}.*{reason}"):
+        build_round4_decision(config_path)
+
+
+def test_same_seed_and_rule_family_requires_same_route_flags(tmp_path: Path) -> None:
+    """같은 규칙 계열에서는 T 정책이 문장별 routed·goes_to_stage2를 바꾸지 못한다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    report_path = tmp_path / config["units"]["L0+T2"][str(SEEDS[0])]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["item_flags"]["i3"] = {
+        "routed": True,
+        "goes_to_stage2": False,
+        "endpoint": True,
+        "endpoint_decision": "candidate",
+    }
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"i3.*같은 규칙 계열"):
+        build_round4_decision(config_path)
+
+
+def test_flag_cross_check_distinguishes_fixed_category_and_both_keyword_routes(tmp_path: Path) -> None:
+    """0.3/S4 점수는 fixed 통과·category 후보이며 keyword_route는 키워드 여부에 따라 둘 다 가능하다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    fixed_path = tmp_path / config["units"]["L0"][str(SEEDS[0])]
+    fixed = json.loads(fixed_path.read_text(encoding="utf-8"))
+    fixed["item_flags"]["i2"] |= {"endpoint": True, "endpoint_decision": "candidate"}
+    fixed_path.write_text(json.dumps(fixed), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"i2.*2차 판정"):
+        build_round4_decision(config_path)
+
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    category_path = tmp_path / config["units"]["L0+T2"][str(SEEDS[0])]
+    category = json.loads(category_path.read_text(encoding="utf-8"))
+    category["item_flags"]["i2"] |= {"endpoint": False, "endpoint_decision": "pass"}
+    category_path.write_text(json.dumps(category), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"i2.*2차 판정"):
+        build_round4_decision(config_path)
+
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    keyword_path = tmp_path / config["units"]["L0+T1"][str(SEEDS[0])]
+    keyword = json.loads(keyword_path.read_text(encoding="utf-8"))
+    keyword["item_flags"]["i2"] |= {"endpoint": True, "endpoint_decision": "candidate"}
+    keyword_path.write_text(json.dumps(keyword), encoding="utf-8")
+    assert len(build_round4_decision(config_path)["units"]) == 18
+    keyword["item_flags"]["i2"]["endpoint_decision"] = "needs_care"
+    keyword_path.write_text(json.dumps(keyword), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"i2.*2차 판정"):
+        build_round4_decision(config_path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [("threshold", "임계값"), ("policy", "2차 후보 기준"), ("mode", "decision.mode")],
+)
 def test_rejects_threshold_and_policy_mismatch(tmp_path: Path, mutation: str, message: str) -> None:
     """같은 시드 임계값과 이름별 T 정책이 다르면 판정을 멈춘다."""
     config_path = build_fixture(tmp_path)
@@ -173,8 +348,10 @@ def test_rejects_threshold_and_policy_mismatch(tmp_path: Path, mutation: str, me
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if mutation == "threshold":
         report["decision"]["threshold"] = 0.26
-    else:
+    elif mutation == "policy":
         report["stage2_policy"]["policy"] = "category"
+    else:
+        report["decision"]["mode"] = "budget"
     report_path.write_text(json.dumps(report), encoding="utf-8")
     with pytest.raises(DatasetFormatError, match=message):
         build_round4_decision(config_path)
@@ -184,10 +361,16 @@ def test_rejects_l0_endpoint_invariant_loss(tmp_path: Path) -> None:
     """L0 경로 끝 문장을 어느 비교 정책이든 잃으면 고정 임계값 실험이 아니다."""
     config_path = build_fixture(tmp_path)
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    path = tmp_path / config["units"]["L0+T2"][str(SEEDS[0])]
-    report = json.loads(path.read_text(encoding="utf-8"))
-    report["item_flags"]["i0"] |= {"endpoint": False, "endpoint_decision": "pass"}
-    path.write_text(json.dumps(report), encoding="utf-8")
+    for policy in ("L1", "L1+T1", "L1+T2"):
+        path = tmp_path / config["units"][policy][str(SEEDS[0])]
+        report = json.loads(path.read_text(encoding="utf-8"))
+        report["item_flags"]["i1"] = {
+            "routed": False,
+            "goes_to_stage2": False,
+            "endpoint": False,
+            "endpoint_decision": "pass",
+        }
+        path.write_text(json.dumps(report), encoding="utf-8")
     with pytest.raises(DatasetFormatError, match="불변식"):
         build_round4_decision(config_path)
 
@@ -266,7 +449,7 @@ def test_optional_diagnostics_include_report_routes_and_mechanisms(tmp_path: Pat
     config_path = build_fixture(tmp_path)
     config = json.loads(config_path.read_text(encoding="utf-8"))
     eval_path = tmp_path / config["eval_file"]
-    identifiers = [f"i{index}" for index in range(len(CATEGORIES))]
+    identifiers = [f"i{index}" for index in range(len(CATEGORIES))] + [AMBIGUOUS_ID]
     r0, r1 = tmp_path / "r0.jsonl", tmp_path / "r1.jsonl"
     write_routes(r0, compute_file_sha256(eval_path), identifiers, "r0")
     write_routes(r1, compute_file_sha256(eval_path), identifiers, "r1")
@@ -280,6 +463,80 @@ def test_optional_diagnostics_include_report_routes_and_mechanisms(tmp_path: Pat
     assert set(diagnostics["stage2_standalone"]) == set(REQUIRED_POLICIES)
     assert set(diagnostics["stage1_high_score"]) == {"L0", "L1"}
     assert set(diagnostics["stage2_misses"]) == {str(seed) for seed in SEEDS}
+
+
+def test_diagnostic_reports_accept_budget_mode_and_legacy_missing_stage2_policy(tmp_path: Path) -> None:
+    """임계값 재선택 진단은 budget이고, 3차 호환 보고서는 stage2_policy가 없어도 기본 fixed로 읽는다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    diagnostic_paths: dict[str, str] = {}
+    for seed in SEEDS:
+        source = tmp_path / config["units"]["L0"][str(seed)]
+        report = json.loads(source.read_text(encoding="utf-8"))
+        report.pop("stage2_policy")
+        report["decision"] = {"mode": "budget", "budget": 0.304, "threshold": 0.25}
+        target = tmp_path / f"diagnostic-{seed}.json"
+        target.write_text(json.dumps(report), encoding="utf-8")
+        diagnostic_paths[str(seed)] = target.name
+    config["diagnostics"] = {"reselected": diagnostic_paths}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    diagnostics = build_round4_decision(config_path)["diagnostics"]["report_slots"]["reselected"]
+    assert [unit["threshold"] for unit in diagnostics] == [0.25, 0.25, 0.25]
+
+
+@pytest.mark.parametrize(
+    "diagnostics",
+    [
+        {"slot": "report.json"},
+        {"slot": {str(SEEDS[0]): "report.json"}},
+        {"slot": {}},
+        {str(seed): "report.json" for seed in SEEDS},
+    ],
+)
+def test_diagnostic_slots_reject_malformed_shapes(tmp_path: Path, diagnostics: object) -> None:
+    """문자열 잎·시드 누락 객체·빈 객체를 조용히 버리지 않는다."""
+    config_path = build_fixture(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["diagnostics"] = diagnostics
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="diagnostics"):
+        build_round4_decision(config_path)
+
+
+def test_high_score_diagnostic_preserves_needs_care() -> None:
+    """0.9 이상이어도 이미 도움 필요인 문장을 일반 후보로 덮어쓰지 않는다."""
+    unit = {
+        "scores": {"care": 0.99},
+        "flags": {
+            "care": {
+                "routed": True,
+                "goes_to_stage2": True,
+                "endpoint": True,
+                "endpoint_decision": "needs_care",
+            }
+        },
+    }
+    result = high_score_flags(unit, {"care": RuleRoute(False, False)})
+    assert result["care"] == unit["flags"]["care"]
+
+
+def test_runtime_shape_validation_raises_explicit_errors() -> None:
+    """최적화 모드에서도 사라지는 assert 대신 입력 형식 오류를 낸다."""
+    with pytest.raises(DatasetFormatError):
+        comparison_allow_failures([{"endpoint_rate_by_category": []}], [{"endpoint_rate_by_category": []}])
+    with pytest.raises(DatasetFormatError):
+        unit_markdown_table({})
+    with pytest.raises(DatasetFormatError):
+        decision_markdown([])
+    with pytest.raises(DatasetFormatError):
+        diagnostics_markdown([])
+
+
+def test_diagnostic_markdown_documents_rounded_stage1_scores(tmp_path: Path) -> None:
+    """진단 설명은 1차 점수가 보고서의 네 자리 값임을 명시한다."""
+    report = build_round4_decision(build_fixture(tmp_path))
+    assert "1차 점수는 보고서의 4자리 값" in format_round4_markdown(report)
 
 
 def test_outputs_do_not_overwrite_or_leak_text(tmp_path: Path) -> None:

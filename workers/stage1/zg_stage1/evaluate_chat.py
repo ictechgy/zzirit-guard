@@ -421,7 +421,8 @@ def build_dev_report(
     if fixed_threshold is not None:
         threshold = fixed_threshold
     else:
-        assert budget is not None
+        if budget is None:
+            raise DatasetFormatError("개발셋 예산 임계값을 고르려면 --forward-budget 값이 필요합니다.")
         threshold = select_budget_threshold(pairs, mix, budget)
     at_threshold = None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix, stage2_policy)
     if threshold is not None and at_threshold is not None and stage2_scores is not None and budget is not None:
@@ -604,10 +605,11 @@ def require_same_traffic_mix(report: Mapping, traffic_mix: Mapping[str, float] |
 
 
 def require_same_stage2_policy(report: Mapping, stage2_policy: Stage2Policy | None, file_name: str) -> None:
-    """보류셋은 개발셋에서 고정한 2차 후보 정책을 그대로 써야 한다."""
+    """보류셋은 개발셋 정책을 따르며, 필드가 없는 3차 보고서는 기본 fixed로 해석한다."""
     if stage2_policy is None:
         return
-    if report.get("stage2_policy") != stage2_policy.to_dict():
+    actual = DEFAULT_STAGE2_POLICY.to_dict() if "stage2_policy" not in report else report.get("stage2_policy")
+    if actual != stage2_policy.to_dict():
         raise DatasetFormatError(f"{file_name}과 2차 후보 기준 정책이 다릅니다. 개발셋의 --stage2-policy와 완화 기준·범주를 그대로 주세요.")
 
 
@@ -627,7 +629,7 @@ def read_dev_threshold(
     """
     report = json.loads(dev_report_path.read_text(encoding="utf-8"))
     if report.get("split") != "dev" or report.get("decision", {}).get("mode") not in {"budget", "fixed"}:
-        raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 예산 결과가 아닙니다. --forward-budget으로 만든 개발셋 결과를 주세요.")
+        raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 결과가 아닙니다. --forward-budget 또는 --fixed-threshold로 만든 개발셋 결과를 주세요.")
     if report.get("model_weights_sha256") != model_weights_sha256:
         raise DatasetFormatError(f"{dev_report_path.name}은 다른 모델의 결과입니다. 같은 --model-dir로 개발셋을 먼저 평가하세요.")
     dev_routes = report.get("rule_routes")
