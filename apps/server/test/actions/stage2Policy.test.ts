@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AiCategory, Stage2Policy } from "@zzirit-guard/shared";
 import { describe, expect, it } from "vitest";
-import { stage2EndpointDecision } from "../../src/actions/stage2Policy.js";
+import { RELAXED_STAGE2_CATEGORIES, stage2EndpointDecision } from "../../src/actions/stage2Policy.js";
 
 interface PolicyVector {
   name: string;
@@ -24,6 +24,14 @@ function policyVectors(): PolicyVector[] {
 }
 
 describe("2차 후보 정책 계약", () => {
+  it("S6을 일부러 넣은 예외 벡터 밖에서는 서버와 같은 완화 범주를 쓴다", () => {
+    const comparableVectors = policyVectors().filter(({ relaxed_categories }) => !relaxed_categories.includes("S6"));
+    expect(comparableVectors.length).toBeGreaterThan(0);
+    comparableVectors.forEach(({ relaxed_categories }) => {
+      expect(new Set(relaxed_categories)).toEqual(RELAXED_STAGE2_CATEGORIES);
+    });
+  });
+
   it.each(policyVectors().filter(({ rule_decision }) => rule_decision === null))("$name", (vector) => {
     expect(stage2EndpointDecision({
       policy: vector.policy,

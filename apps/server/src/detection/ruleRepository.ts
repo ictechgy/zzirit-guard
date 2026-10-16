@@ -1,7 +1,7 @@
 import type { RuleEntryDto, RuleKind } from "@zzirit-guard/shared";
 import type { Database } from "../db/database.js";
 import type { Clock } from "../time.js";
-import { DEFAULT_RULES_IN_SEED_ORDER } from "./defaultRules.js";
+import { DEFAULT_RULES } from "./defaultRules.js";
 import { normalizeForMatching, normalizeKeepingWhitespace } from "./normalize.js";
 
 /** 사용자 입력 규칙이 잘못된 경우. 메시지를 그대로 매니저에게 보여 준다. */
@@ -151,7 +151,7 @@ function seedDefaults(database: Database, channelId: string, now: number): void 
   const insert = database.prepare(
     "INSERT OR IGNORE INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES (?, ?, ?, 'default', ?)",
   );
-  database.transaction(() => DEFAULT_RULES_IN_SEED_ORDER.forEach((rule) => insert.run(channelId, rule.kind, rule.pattern, now)))();
+  database.transaction(() => DEFAULT_RULES.forEach((rule) => insert.run(channelId, rule.kind, rule.pattern, now)))();
 }
 
 /** 종류별 비교용 패턴. 도메인은 소문자·scheme·www 제거, 나머지는 금칙어 정규화. */

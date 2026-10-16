@@ -33,6 +33,11 @@ interface ImportArguments {
   expectedSha256: string;
 }
 
+interface ExistingRuleMaps {
+  critical: Map<string, number>;
+  keywordRoute: Map<string, number>;
+}
+
 /** TSV를 검사한다. 오류에는 비공개 문구 대신 줄 번호와 고칠 방법만 쓴다. */
 function parseImportRules(content: string): ImportRule[] {
   const rules: ImportRule[] = [];
@@ -96,26 +101,42 @@ function importRules(database: Database, channelId: string, rules: readonly Impo
     const channel = database.prepare("SELECT 1 FROM channel WHERE channel_id = ?").get(channelId);
     if (!channel) throw new ImportRulesError("채널이 DB에 없습니다. 채널 ID를 확인하거나 스트리머가 먼저 채널을 연결하세요.");
     const counts: ImportCounts = { inserted: 0, converted: 0, existing: 0 };
-    rules.forEach((rule) => importOne(database, channelId, rule, counts));
+    const existing = readExistingRules(database, channelId);
+    rules.forEach((rule) => importOne(database, channelId, rule, existing, counts));
     return counts;
   })();
 }
 
-/** 같은 정규형 critical은 유지하고, keyword_route는 번호를 보존해 바꾸며, 없으면 새로 넣는다. */
-function importOne(database: Database, channelId: string, rule: ImportRule, counts: ImportCounts): void {
+/** 기존 승격 대상 행을 한 번만 읽고 정규형으로 찾을 수 있게 만든다. 같은 정규형이 여럿이면 가장 이른 번호를 쓴다. */
+function readExistingRules(database: Database, channelId: string): ExistingRuleMaps {
   const rows = database.prepare("SELECT id, kind, pattern FROM rule_entry WHERE channel_id = ? AND kind IN ('keyword_route', 'critical') ORDER BY id").all(channelId) as
     Array<{ id: number; kind: "keyword_route" | "critical"; pattern: string }>;
-  if (rows.some((row) => row.kind === "critical" && normalizeForMatching(row.pattern) === rule.normalizedPattern)) {
+  const existing: ExistingRuleMaps = { critical: new Map(), keywordRoute: new Map() };
+  rows.forEach((row) => {
+    const normalizedPattern = normalizeForMatching(row.pattern);
+    if (row.kind === "critical" && !existing.critical.has(normalizedPattern)) existing.critical.set(normalizedPattern, row.id);
+    else if (!existing.keywordRoute.has(normalizedPattern)) existing.keywordRoute.set(normalizedPattern, row.id);
+  });
+  return existing;
+}
+
+/** 같은 정규형 critical은 유지하고, keyword_route는 번호를 보존해 바꾸며, 없으면 새로 넣는다. */
+function importOne(database: Database, channelId: string, rule: ImportRule, existing: ExistingRuleMaps, counts: ImportCounts): void {
+  if (existing.critical.has(rule.normalizedPattern)) {
     counts.existing += 1;
     return;
   }
-  const keyword = rows.find((row) => row.kind === "keyword_route" && normalizeForMatching(row.pattern) === rule.normalizedPattern);
-  if (keyword) {
-    database.prepare("UPDATE rule_entry SET kind = 'critical', created_by = 'import' WHERE id = ?").run(keyword.id);
+  const keywordId = existing.keywordRoute.get(rule.normalizedPattern);
+  if (keywordId !== undefined) {
+    // created_by는 이 도구가 keyword_route를 critical로 승격했다는 이력을 남기기 위해 import로 바꾼다.
+    database.prepare("UPDATE rule_entry SET kind = 'critical', created_by = 'import' WHERE id = ?").run(keywordId);
+    existing.keywordRoute.delete(rule.normalizedPattern);
+    existing.critical.set(rule.normalizedPattern, keywordId);
     counts.converted += 1;
     return;
   }
-  database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES (?, 'critical', ?, 'import', ?)").run(channelId, rule.pattern, Date.now());
+  const inserted = database.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES (?, 'critical', ?, 'import', ?)").run(channelId, rule.pattern, Date.now());
+  existing.critical.set(rule.normalizedPattern, Number(inserted.lastInsertRowid));
   counts.inserted += 1;
 }
 

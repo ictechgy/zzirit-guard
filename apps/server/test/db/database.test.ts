@@ -1,29 +1,48 @@
 import BetterSqlite3 from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { RuleKind } from "@zzirit-guard/shared";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/database.js";
-import { DEFAULT_RULES_IN_SEED_ORDER } from "../../src/detection/defaultRules.js";
-import { createRuleRepository, type RuleSnapshot } from "../../src/detection/ruleRepository.js";
+import { createRuleRepository } from "../../src/detection/ruleRepository.js";
 import { MIGRATIONS, runMigrations } from "../../src/db/migrations.js";
 
-/** 스냅숏의 비교용 공개 필드만 추려 버전별 이전 결과를 확인한다. */
-function snapshotShape(snapshot: RuleSnapshot) {
-  const groups = {
-    strong: snapshot.strong,
-    weak: snapshot.weak,
-    exception: snapshot.exception,
-    threat: snapshot.threat,
-    keywordRoute: snapshot.keywordRoute,
-    spam: snapshot.spam,
-    critical: snapshot.critical,
-  };
-  return {
-    ...Object.fromEntries(Object.entries(groups).map(([kind, rules]) => [kind, rules.map(({ id, kind: ruleKind, pattern }) => ({ id, kind: ruleKind, pattern }))])),
-    allow: [...snapshot.allow].sort(),
-    allowDomains: [...snapshot.allowDomains],
-  };
+const RULE_KINDS: readonly RuleKind[] = ["strong", "weak", "exception", "allow", "allow_domain", "threat", "keyword_route", "spam", "critical"];
+
+/** 규칙 번호와 종류 간 삽입 위치는 빼고, 같은 종류 안의 상대 순서와 집합만 비교한다. */
+function rulesByKind(rules: ReadonlyArray<{ kind: RuleKind; pattern: string }>) {
+  return Object.fromEntries(RULE_KINDS.map((kind) => [kind, rules.filter((rule) => rule.kind === kind).map((rule) => [rule.kind, rule.pattern])]));
 }
+
+/** v4 출시 시점의 기본 규칙. 현재 DEFAULT_RULES와 독립적으로 이전 DB를 재현한다. */
+const V4_DEFAULT_RULES: ReadonlyArray<{ kind: RuleKind; pattern: string }> = [
+  ...["니애미", "느금마", "한남충", "김치녀", "틀딱", "짱깨"].map((pattern) => ({ kind: "strong" as const, pattern })),
+  ...["씨발", "시발", "ㅅㅂ", "병신", "ㅂㅅ", "개새끼", "홍어"].map((pattern) => ({ kind: "weak" as const, pattern })),
+  ...["시발점", "시발택시"].map((pattern) => ({ kind: "exception" as const, pattern })),
+  ...["찾아간다", "찾아갈게", "칼들고", "집주소", "신상털"].map((pattern) => ({ kind: "threat" as const, pattern })),
+  ...[
+    "꽁머니", "첫충", "매충", "먹튀없는", "먹튀검증", "메이저놀이터", "토토사이트", "카지노사이트", "바카라", "파워볼", "리딩방", "급등주",
+    "고수익", "부업하실", "부업정보", "부업문의", "재택알바", "고액알바", "당일지급", "무직자", "급전", "상위노출", "팔로워늘려", "시청자늘려",
+    "구독자늘려", "맞팔", "맞구독", "계정판매", "대리육성", "현금매입", "가입코드", "가입머니", "0픈톡", "오카방", "텔방", "텔ㄹ", "선입금",
+    "레플리카", "실시청자", "실계정", "팔로워패키지", "당일작업", "원금보장", "코인리딩", "저신용", "경험무관", "땡처리", "시세보다싸",
+    "픽공유", "대리구매", "무료충전", "당첨되셨", "아이디비번", "비번입력", "기프티콘무료",
+  ].map((pattern) => ({ kind: "spam" as const, pattern })),
+  { kind: "exception", pattern: "토토로" },
+  ...[
+    "자살", "자해", "죽고싶", "뒤지고싶", "살기싫", "사라지고싶", "끝내고싶", "극단적선택", "유서", "손목긋", "손목그어", "수면제", "번개탄",
+    "투신", "뛰어내리", "죽을생각", "죽는법", "죽어버릴까", "주글생각", "살이유", "그만살", "살생각없", "살자신", "세상그만", "인생그만",
+    "생마감", "인생로그아웃", "삶로그아웃", "나없어지면", "사라지는게맞", "약모아", "한강다리", "옥상난간", "다치게했어", "팔에상처",
+    "죽여버린", "죽일거", "가만안둬", "가만안둔", "각오해", "밤길조심", "뒤통수조심", "기다려라", "패버린", "때려죽", "묻어버", "테러",
+    "폭파", "불질러", "잡으러간", "뒤따라간", "덮친", "뒤조심", "무사하지못", "몸으로배", "사는지알", "혼자다니지마", "편히잘생각",
+    "집앞에찾아", "집앞까지", "집앞에서기다", "찾아가서기다", "따라갈거", "따라간다", "실명", "본명", "집주소", "사는곳", "다니는학교",
+    "학교어디", "회사어디", "전화번호", "신상공개", "신상뿌", "얼굴공개", "학번", "졸앨", "차번호", "번호판", "본계", "뒷계", "민증",
+    "주민번호", "생년월일", "폰번", "카톡아이디", "사원증", "집아는", "주소아는", "공일공", "가슴", "몸매", "엉덩이", "허벅지", "속옷", "팬티",
+    "섹시", "섹스", "야한", "야동", "옷벗", "벗어봐", "벗어줘", "벗으면", "모텔", "자고싶", "꼴리", "꼴려", "따먹", "몸보여", "몸보는", "몸전체",
+    "몸흔드", "몸한번", "핥", "야하", "뒤태", "안쪽보", "샤워방송", "씻는모습", "성인통화", "어디까지해", "첫날밤", "숙소잡", "단둘이", "만져보고",
+    "몸만져", "허리만져", "다리라인",
+  ].map((pattern) => ({ kind: "keyword_route" as const, pattern })),
+  { kind: "exception", pattern: "가슴이웅장" },
+];
 
 describe("openDatabase", () => {
   it("지운 행이 파일에 남지 않게 secure_delete를 켠다(F5)", () => {
@@ -166,7 +185,7 @@ describe("openDatabase", () => {
     const freshRepository = createRuleRepository(fresh, () => 0);
     migratedRepository.seedDefaults("c1");
     freshRepository.seedDefaults("c1");
-    expect(snapshotShape(migratedRepository.snapshot("c1"))).toEqual(snapshotShape(freshRepository.snapshot("c1")));
+    expect(rulesByKind(migratedRepository.list("c1"))).toEqual(rulesByKind(freshRepository.list("c1")));
     expect(migrated.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     expect(fresh.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
   });
@@ -199,7 +218,7 @@ describe("openDatabase", () => {
     migrated.pragma("user_version = 4");
     migrated.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES ('c1', '채널', 0)").run();
     const insert = migrated.prepare("INSERT INTO rule_entry (channel_id, kind, pattern, created_by, created_at) VALUES ('c1', ?, ?, 'default', 0)");
-    DEFAULT_RULES_IN_SEED_ORDER.forEach(({ kind, pattern }) => insert.run(kind === "critical" ? "keyword_route" : kind, pattern));
+    V4_DEFAULT_RULES.forEach(({ kind, pattern }) => insert.run(kind, pattern));
     runMigrations(migrated);
 
     const fresh = openDatabase(":memory:");
@@ -210,7 +229,7 @@ describe("openDatabase", () => {
     migratedRepository.seedDefaults("c1");
     freshRepository.seedDefaults("c1");
 
-    expect(snapshotShape(migratedRepository.snapshot("c1"))).toEqual(snapshotShape(freshRepository.snapshot("c1")));
+    expect(rulesByKind(migratedRepository.list("c1"))).toEqual(rulesByKind(freshRepository.list("c1")));
   });
 
   it("알 수 없는 규칙 종류를 거부한다", () => {

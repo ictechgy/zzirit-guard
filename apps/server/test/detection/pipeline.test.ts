@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "../../src/chat/chatEvent.js";
 import { openDatabase } from "../../src/db/database.js";
@@ -298,5 +300,3 @@ describe("기한이 지난 채팅 지우기(K16)", () => {
     spies.forEach((spy) => expect(spy).toHaveBeenCalledWith(123_456));
   });
 });
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";

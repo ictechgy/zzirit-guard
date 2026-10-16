@@ -1,7 +1,7 @@
 import type { AiCategory, Stage2Policy } from "@zzirit-guard/shared";
 
 /** M2 4차 T2에서 채택한 완화 범주. 운영 설정으로 넓히면 검증 없이 오후보 범위가 바뀌므로 코드에 고정한다. */
-const RELAXED_STAGE2_CATEGORIES: ReadonlySet<AiCategory> = new Set(["S3", "S4", "S5"]);
+export const RELAXED_STAGE2_CATEGORIES: ReadonlySet<AiCategory> = new Set(["S3", "S4", "S5"]);
 
 /**
  * 2차 정책 판정에 필요한 값. 채널 설정(정책·기준), 제출의 키워드 경로 여부, 2차 결과(확률·가장 높은 범주)를 함께 받는다.

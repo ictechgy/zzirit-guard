@@ -72,26 +72,3 @@ export const DEFAULT_RULES: ReadonlyArray<{ kind: RuleKind; pattern: string }> =
   // 키워드 경로 낱말을 품은 정상 표현(밈).
   { kind: "exception", pattern: "가슴이웅장" },
 ];
-
-/**
- * v4까지 한 키워드 경로 묶음이었던 협박·신상 55개의 삽입 순서.
- * 왜 남기나: 새 DB도 이 순서로 번호를 받아야 기존 DB에서 43개의 kind만 바꾼 결과와 규칙 스냅숏이 정확히 같다.
- */
-const LEGACY_R1_SEED_ORDER = [
-  "죽여버린", "죽일거", "가만안둬", "가만안둔", "각오해", "밤길조심", "뒤통수조심", "기다려라", "패버린", "때려죽", "묻어버", "테러",
-  "폭파", "불질러", "잡으러간", "뒤따라간", "덮친", "뒤조심", "무사하지못", "몸으로배", "사는지알", "혼자다니지마", "편히잘생각",
-  "집앞에찾아", "집앞까지", "집앞에서기다", "찾아가서기다", "따라갈거", "따라간다", "실명", "본명", "집주소", "사는곳", "다니는학교",
-  "학교어디", "회사어디", "전화번호", "신상공개", "신상뿌", "얼굴공개", "학번", "졸앨", "차번호", "번호판", "본계", "뒷계", "민증",
-  "주민번호", "생년월일", "폰번", "카톡아이디", "사원증", "집아는", "주소아는", "공일공",
-] as const;
-
-/** 기본 규칙의 의미상 묶음은 유지하되, 시드는 이전 버전의 번호 순서를 보존한다. */
-export const DEFAULT_RULES_IN_SEED_ORDER: typeof DEFAULT_RULES = [...DEFAULT_RULES].sort((left, right) => seedRank(left) - seedRank(right));
-
-function seedRank(rule: { kind: RuleKind; pattern: string }): number {
-  const currentIndex = DEFAULT_RULES.indexOf(rule);
-  const legacyIndex = LEGACY_R1_SEED_ORDER.indexOf(rule.pattern as typeof LEGACY_R1_SEED_ORDER[number]);
-  const anchor = DEFAULT_RULES.findIndex(({ pattern }) => pattern === "기다려라");
-  if (legacyIndex >= 0) return anchor + legacyIndex / 100;
-  return currentIndex < anchor ? currentIndex : currentIndex + LEGACY_R1_SEED_ORDER.length;
-}
