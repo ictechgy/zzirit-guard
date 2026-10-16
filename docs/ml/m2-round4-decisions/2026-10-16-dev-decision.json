@@ -1,0 +1,4801 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-16T01:50:53+00:00",
+  "inputs": {
+    "config": {
+      "name": "round4-config.json",
+      "sha256": "02124d6be5a4441403d55acd67cdaa8d559bab5b1ad8b00f478664cee0943db1"
+    },
+    "eval_file": {
+      "name": "chat-dev-v2.jsonl",
+      "sha256": "39e6acd2cdc14e048a7d23e45c3405e56122381fdebcfd3c44e4bb7987a045c4"
+    },
+    "stage2_scores": {
+      "name": "stage2-dev.json",
+      "sha256": "e2d185a752db8d03cc3506ca6f155efc21d5046706c3d9cb7357a00c42075d84"
+    },
+    "traffic_mix": {
+      "short_normal": 0.35,
+      "long_normal": 0.25,
+      "game_combat": 0.12,
+      "number_url_like": 0.05,
+      "quote_report": 0.03,
+      "friendly_profanity": 0.12,
+      "spam": 0.05,
+      "abuse": 0.02,
+      "sexual": 0.003,
+      "threat": 0.003,
+      "doxxing": 0.002,
+      "self_harm": 0.001,
+      "minors": 0.001
+    },
+    "seeds": [
+      20261011,
+      20261021,
+      20261031
+    ]
+  },
+  "units": [
+    {
+      "policy": "L0",
+      "seed": 20261011,
+      "threshold": 0.001571,
+      "model_weights_sha256": "78ddcfcc2e21b38052f8083e80e5a58060a8602ec25698f87c5f0e39bc6e852c",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.7727272727272727,
+          "minors": 0.4375,
+          "threat": 0.40625,
+          "doxxing": 0.3111111111111111,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.21666666666666667,
+          "game_combat": 0.22413793103448276,
+          "quote_report": 0.1694915254237288,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 51,
+            "total": 66
+          },
+          "minors": {
+            "count": 28,
+            "total": 64
+          },
+          "threat": {
+            "count": 26,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 14,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 13,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 13,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 10,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.3111111111111111,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07365818126718185,
+        "stage2_load": 0.30179659853684415,
+        "needs_care_count": 38,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0-s20261011.json",
+        "sha256": "f4198a1e60d65d2457f567ea9cf4a99a063d08bf5661e79bb6d8705dd3cbb0f7"
+      }
+    },
+    {
+      "policy": "L0",
+      "seed": 20261021,
+      "threshold": 0.010232,
+      "model_weights_sha256": "50a3261b1a33bd86e817ac6c028665c9e88cfaca57dc10d38665ca1c0e17dae1",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9076923076923077,
+          "sexual": 0.7727272727272727,
+          "minors": 0.4375,
+          "threat": 0.40625,
+          "doxxing": 0.3111111111111111,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.2,
+          "game_combat": 0.1724137931034483,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 59,
+            "total": 65
+          },
+          "sexual": {
+            "count": 51,
+            "total": 66
+          },
+          "minors": {
+            "count": 28,
+            "total": 64
+          },
+          "threat": {
+            "count": 26,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 14,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 12,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 10,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.3111111111111111,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.0659597592917289,
+        "stage2_load": 0.3039408191046516,
+        "needs_care_count": 39,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0-s20261021.json",
+        "sha256": "189c07673b967eee52b3028f631254b249b4a598b601003fc73799cc9bd7dab8"
+      }
+    },
+    {
+      "policy": "L0",
+      "seed": 20261031,
+      "threshold": 0.003778,
+      "model_weights_sha256": "40cc9bddf49df8ce4b4c946102fa16a474dd703eeff6069f64046b107c6abac8",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.7727272727272727,
+          "minors": 0.421875,
+          "threat": 0.359375,
+          "doxxing": 0.3111111111111111,
+          "self_harm": 0.7959183673469388,
+          "spam": 0.9,
+          "friendly_profanity": 0.26666666666666666,
+          "game_combat": 0.1896551724137931,
+          "quote_report": 0.1694915254237288,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 51,
+            "total": 66
+          },
+          "minors": {
+            "count": 27,
+            "total": 64
+          },
+          "threat": {
+            "count": 23,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 14,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 39,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 16,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 11,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 10,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.3111111111111111,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.0755202502326991,
+        "stage2_load": 0.30342059510646774,
+        "needs_care_count": 37,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0-s20261031.json",
+        "sha256": "2f1fef4b0bf5d329d6f51853e70d83d59b30399bdf0ae49cb4e496016d066269"
+      }
+    },
+    {
+      "policy": "L1",
+      "seed": 20261011,
+      "threshold": 0.001571,
+      "model_weights_sha256": "78ddcfcc2e21b38052f8083e80e5a58060a8602ec25698f87c5f0e39bc6e852c",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.7727272727272727,
+          "minors": 0.53125,
+          "threat": 0.59375,
+          "doxxing": 0.4888888888888889,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.21666666666666667,
+          "game_combat": 0.22413793103448276,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 51,
+            "total": 66
+          },
+          "minors": {
+            "count": 34,
+            "total": 64
+          },
+          "threat": {
+            "count": 38,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 22,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 13,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 13,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4888888888888889,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07416665584345304,
+        "stage2_load": 0.299217496606524,
+        "needs_care_count": 38,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1-s20261011.json",
+        "sha256": "29e2cd7ba709f8e54717a6fa1a9638ab9d0260479b8cab6a41f81aabd8e0f648"
+      }
+    },
+    {
+      "policy": "L1",
+      "seed": 20261021,
+      "threshold": 0.010232,
+      "model_weights_sha256": "50a3261b1a33bd86e817ac6c028665c9e88cfaca57dc10d38665ca1c0e17dae1",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9076923076923077,
+          "sexual": 0.7727272727272727,
+          "minors": 0.53125,
+          "threat": 0.59375,
+          "doxxing": 0.4888888888888889,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.2,
+          "game_combat": 0.1724137931034483,
+          "quote_report": 0.2033898305084746,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 59,
+            "total": 65
+          },
+          "sexual": {
+            "count": 51,
+            "total": 66
+          },
+          "minors": {
+            "count": 34,
+            "total": 64
+          },
+          "threat": {
+            "count": 38,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 22,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 12,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 10,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 12,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4888888888888889,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.06646823386800009,
+        "stage2_load": 0.30136171717433147,
+        "needs_care_count": 39,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1-s20261021.json",
+        "sha256": "aa5436090c23eba6de4bdef5dbb861b3cf740f1f9a51e3c6ec525eaeb269ea64"
+      }
+    },
+    {
+      "policy": "L1",
+      "seed": 20261031,
+      "threshold": 0.003778,
+      "model_weights_sha256": "40cc9bddf49df8ce4b4c946102fa16a474dd703eeff6069f64046b107c6abac8",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.7727272727272727,
+          "minors": 0.515625,
+          "threat": 0.546875,
+          "doxxing": 0.4888888888888889,
+          "self_harm": 0.7959183673469388,
+          "spam": 0.9,
+          "friendly_profanity": 0.26666666666666666,
+          "game_combat": 0.1896551724137931,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 51,
+            "total": 66
+          },
+          "minors": {
+            "count": 33,
+            "total": 64
+          },
+          "threat": {
+            "count": 35,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 22,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 39,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 16,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 11,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4888888888888889,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07602872480897027,
+        "stage2_load": 0.30085711817614763,
+        "needs_care_count": 37,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1-s20261031.json",
+        "sha256": "332d77f70c1e09489326738f47f485becfddb7994cabe17fdd354e32e6b0021f"
+      }
+    },
+    {
+      "policy": "L0+T1",
+      "seed": 20261011,
+      "threshold": 0.001571,
+      "model_weights_sha256": "78ddcfcc2e21b38052f8083e80e5a58060a8602ec25698f87c5f0e39bc6e852c",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "keyword_route",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8484848484848485,
+          "minors": 0.4375,
+          "threat": 0.453125,
+          "doxxing": 0.4,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.21666666666666667,
+          "game_combat": 0.22413793103448276,
+          "quote_report": 0.1694915254237288,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 56,
+            "total": 66
+          },
+          "minors": {
+            "count": 28,
+            "total": 64
+          },
+          "threat": {
+            "count": 29,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 18,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 13,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 13,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 10,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07365818126718185,
+        "stage2_load": 0.30179659853684415,
+        "needs_care_count": 38,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0+T1-s20261011.json",
+        "sha256": "b157f69af73e2d5022c9f84d3a2887b3570e739c02c71b03d8dd0b841bc14bf8"
+      }
+    },
+    {
+      "policy": "L0+T1",
+      "seed": 20261021,
+      "threshold": 0.010232,
+      "model_weights_sha256": "50a3261b1a33bd86e817ac6c028665c9e88cfaca57dc10d38665ca1c0e17dae1",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "keyword_route",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9076923076923077,
+          "sexual": 0.8484848484848485,
+          "minors": 0.4375,
+          "threat": 0.453125,
+          "doxxing": 0.4,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.2,
+          "game_combat": 0.1724137931034483,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 59,
+            "total": 65
+          },
+          "sexual": {
+            "count": 56,
+            "total": 66
+          },
+          "minors": {
+            "count": 28,
+            "total": 64
+          },
+          "threat": {
+            "count": 29,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 18,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 12,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 10,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.0659597592917289,
+        "stage2_load": 0.3039408191046516,
+        "needs_care_count": 39,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0+T1-s20261021.json",
+        "sha256": "801c8d2f22d6ccde06bef64cf606de443adf88565cbfe0fedd852ec72023e0ed"
+      }
+    },
+    {
+      "policy": "L0+T1",
+      "seed": 20261031,
+      "threshold": 0.003778,
+      "model_weights_sha256": "40cc9bddf49df8ce4b4c946102fa16a474dd703eeff6069f64046b107c6abac8",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "keyword_route",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8484848484848485,
+          "minors": 0.421875,
+          "threat": 0.40625,
+          "doxxing": 0.4,
+          "self_harm": 0.7959183673469388,
+          "spam": 0.9,
+          "friendly_profanity": 0.26666666666666666,
+          "game_combat": 0.1896551724137931,
+          "quote_report": 0.1694915254237288,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 56,
+            "total": 66
+          },
+          "minors": {
+            "count": 27,
+            "total": 64
+          },
+          "threat": {
+            "count": 26,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 18,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 39,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 16,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 11,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 10,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.0755202502326991,
+        "stage2_load": 0.30342059510646774,
+        "needs_care_count": 37,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0+T1-s20261031.json",
+        "sha256": "9962fd2ffeb77e76a7ec55eee50fe60c25fbe7d40bd6ce4d4f2c538486dd31a2"
+      }
+    },
+    {
+      "policy": "L0+T2",
+      "seed": 20261011,
+      "threshold": 0.001571,
+      "model_weights_sha256": "78ddcfcc2e21b38052f8083e80e5a58060a8602ec25698f87c5f0e39bc6e852c",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "category",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8333333333333334,
+          "minors": 0.5625,
+          "threat": 0.4375,
+          "doxxing": 0.4444444444444444,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.21666666666666667,
+          "game_combat": 0.22413793103448276,
+          "quote_report": 0.1694915254237288,
+          "number_url_like": 0.034482758620689655,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 55,
+            "total": 66
+          },
+          "minors": {
+            "count": 36,
+            "total": 64
+          },
+          "threat": {
+            "count": 28,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 20,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 13,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 13,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 10,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 2,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4375,
+        "critical_minimum_category": "threat",
+        "weighted_allow_false_positive_rate": 0.07452025023269909,
+        "stage2_load": 0.30179659853684415,
+        "needs_care_count": 38,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0+T2-s20261011.json",
+        "sha256": "d69d5f7e990bf94fe5577ae4b9d1111f84d3f62756906f13f06f8b5a0e5833a5"
+      }
+    },
+    {
+      "policy": "L0+T2",
+      "seed": 20261021,
+      "threshold": 0.010232,
+      "model_weights_sha256": "50a3261b1a33bd86e817ac6c028665c9e88cfaca57dc10d38665ca1c0e17dae1",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "category",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9076923076923077,
+          "sexual": 0.8333333333333334,
+          "minors": 0.5625,
+          "threat": 0.4375,
+          "doxxing": 0.4666666666666667,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.2,
+          "game_combat": 0.1724137931034483,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.034482758620689655,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 59,
+            "total": 65
+          },
+          "sexual": {
+            "count": 55,
+            "total": 66
+          },
+          "minors": {
+            "count": 36,
+            "total": 64
+          },
+          "threat": {
+            "count": 28,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 21,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 12,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 10,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 2,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.4375,
+        "critical_minimum_category": "threat",
+        "weighted_allow_false_positive_rate": 0.06682182825724614,
+        "stage2_load": 0.3039408191046516,
+        "needs_care_count": 39,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0+T2-s20261021.json",
+        "sha256": "13c2f201ba95daddd6fb825f69ab713c08faecc9ac955d3370cfce25b9e5333a"
+      }
+    },
+    {
+      "policy": "L0+T2",
+      "seed": 20261031,
+      "threshold": 0.003778,
+      "model_weights_sha256": "40cc9bddf49df8ce4b4c946102fa16a474dd703eeff6069f64046b107c6abac8",
+      "rule_policy_sha256": "3865fd6dac339a50d1ccf97eda32c58f50ce9239db50b0b084e0807f1b18efd8",
+      "stage2_policy": {
+        "policy": "category",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8333333333333334,
+          "minors": 0.53125,
+          "threat": 0.390625,
+          "doxxing": 0.4444444444444444,
+          "self_harm": 0.7959183673469388,
+          "spam": 0.9,
+          "friendly_profanity": 0.26666666666666666,
+          "game_combat": 0.1896551724137931,
+          "quote_report": 0.1694915254237288,
+          "number_url_like": 0.034482758620689655,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 55,
+            "total": 66
+          },
+          "minors": {
+            "count": 34,
+            "total": 64
+          },
+          "threat": {
+            "count": 25,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 20,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 39,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 16,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 11,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 10,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 2,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.390625,
+        "critical_minimum_category": "threat",
+        "weighted_allow_false_positive_rate": 0.07638231919821634,
+        "stage2_load": 0.30342059510646774,
+        "needs_care_count": 37,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L0+T2-s20261031.json",
+        "sha256": "dc59c47c0fbbd248e510b0077ac5e2cc9e16d3406037a4f14f70fc4286fcc763"
+      }
+    },
+    {
+      "policy": "L1+T1",
+      "seed": 20261011,
+      "threshold": 0.001571,
+      "model_weights_sha256": "78ddcfcc2e21b38052f8083e80e5a58060a8602ec25698f87c5f0e39bc6e852c",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "keyword_route",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8484848484848485,
+          "minors": 0.53125,
+          "threat": 0.59375,
+          "doxxing": 0.5111111111111111,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.21666666666666667,
+          "game_combat": 0.22413793103448276,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 56,
+            "total": 66
+          },
+          "minors": {
+            "count": 34,
+            "total": 64
+          },
+          "threat": {
+            "count": 38,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 23,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 13,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 13,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.5111111111111111,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07416665584345304,
+        "stage2_load": 0.299217496606524,
+        "needs_care_count": 38,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1+T1-s20261011.json",
+        "sha256": "6164fde5f3279bc78f98bcb9e1d3ba992692f069be1d0f3a547972a5c2f6fbb5"
+      }
+    },
+    {
+      "policy": "L1+T1",
+      "seed": 20261021,
+      "threshold": 0.010232,
+      "model_weights_sha256": "50a3261b1a33bd86e817ac6c028665c9e88cfaca57dc10d38665ca1c0e17dae1",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "keyword_route",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9076923076923077,
+          "sexual": 0.8484848484848485,
+          "minors": 0.53125,
+          "threat": 0.59375,
+          "doxxing": 0.5111111111111111,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.2,
+          "game_combat": 0.1724137931034483,
+          "quote_report": 0.2033898305084746,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 59,
+            "total": 65
+          },
+          "sexual": {
+            "count": 56,
+            "total": 66
+          },
+          "minors": {
+            "count": 34,
+            "total": 64
+          },
+          "threat": {
+            "count": 38,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 23,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 12,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 10,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 12,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.5111111111111111,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.06646823386800009,
+        "stage2_load": 0.30136171717433147,
+        "needs_care_count": 39,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1+T1-s20261021.json",
+        "sha256": "4a34c9a2d350943bab6e8a8808b3bc650118520c98f0b7f1e5a70553a45a34a6"
+      }
+    },
+    {
+      "policy": "L1+T1",
+      "seed": 20261031,
+      "threshold": 0.003778,
+      "model_weights_sha256": "40cc9bddf49df8ce4b4c946102fa16a474dd703eeff6069f64046b107c6abac8",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "keyword_route",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8484848484848485,
+          "minors": 0.515625,
+          "threat": 0.546875,
+          "doxxing": 0.5111111111111111,
+          "self_harm": 0.7959183673469388,
+          "spam": 0.9,
+          "friendly_profanity": 0.26666666666666666,
+          "game_combat": 0.1896551724137931,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.017241379310344827,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 56,
+            "total": 66
+          },
+          "minors": {
+            "count": 33,
+            "total": 64
+          },
+          "threat": {
+            "count": 35,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 23,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 39,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 16,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 11,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 1,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.5111111111111111,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07602872480897027,
+        "stage2_load": 0.30085711817614763,
+        "needs_care_count": 37,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1+T1-s20261031.json",
+        "sha256": "a2b0a223c68a2cf469fcca1032bda052de2fe57eada019f1ec2a3dbf01ae022a"
+      }
+    },
+    {
+      "policy": "L1+T2",
+      "seed": 20261011,
+      "threshold": 0.001571,
+      "model_weights_sha256": "78ddcfcc2e21b38052f8083e80e5a58060a8602ec25698f87c5f0e39bc6e852c",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "category",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8333333333333334,
+          "minors": 0.640625,
+          "threat": 0.609375,
+          "doxxing": 0.5555555555555556,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.21666666666666667,
+          "game_combat": 0.22413793103448276,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.034482758620689655,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 55,
+            "total": 66
+          },
+          "minors": {
+            "count": 41,
+            "total": 64
+          },
+          "threat": {
+            "count": 39,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 25,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 13,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 13,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 2,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.5555555555555556,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07502872480897027,
+        "stage2_load": 0.299217496606524,
+        "needs_care_count": 38,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1+T2-s20261011.json",
+        "sha256": "e7d12df9fa0f5b6ab426c8fdcc520c4619e812171d9c15d4915b9c763b9f721a"
+      }
+    },
+    {
+      "policy": "L1+T2",
+      "seed": 20261021,
+      "threshold": 0.010232,
+      "model_weights_sha256": "50a3261b1a33bd86e817ac6c028665c9e88cfaca57dc10d38665ca1c0e17dae1",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "category",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9076923076923077,
+          "sexual": 0.8333333333333334,
+          "minors": 0.640625,
+          "threat": 0.609375,
+          "doxxing": 0.5777777777777777,
+          "self_harm": 0.8367346938775511,
+          "spam": 0.9,
+          "friendly_profanity": 0.2,
+          "game_combat": 0.1724137931034483,
+          "quote_report": 0.2033898305084746,
+          "number_url_like": 0.034482758620689655,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 59,
+            "total": 65
+          },
+          "sexual": {
+            "count": 55,
+            "total": 66
+          },
+          "minors": {
+            "count": 41,
+            "total": 64
+          },
+          "threat": {
+            "count": 39,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 26,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 41,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 12,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 10,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 12,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 2,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.5777777777777777,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.06733030283351733,
+        "stage2_load": 0.30136171717433147,
+        "needs_care_count": 39,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1+T2-s20261021.json",
+        "sha256": "feee29ca4ddad718789418fc66f3c4b3705cfb9763afaf97aac9b84d114c42af"
+      }
+    },
+    {
+      "policy": "L1+T2",
+      "seed": 20261031,
+      "threshold": 0.003778,
+      "model_weights_sha256": "40cc9bddf49df8ce4b4c946102fa16a474dd703eeff6069f64046b107c6abac8",
+      "rule_policy_sha256": "04f520f085759b4a4346f7bb80fcd05628694a2ea64cb8a6f7bc2ac9f3ec9268",
+      "stage2_policy": {
+        "policy": "category",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": [
+          "S3",
+          "S4",
+          "S5"
+        ]
+      },
+      "metrics": {
+        "endpoint_rate_by_category": {
+          "abuse": 0.9230769230769231,
+          "sexual": 0.8333333333333334,
+          "minors": 0.609375,
+          "threat": 0.5625,
+          "doxxing": 0.5555555555555556,
+          "self_harm": 0.7959183673469388,
+          "spam": 0.9,
+          "friendly_profanity": 0.26666666666666666,
+          "game_combat": 0.1896551724137931,
+          "quote_report": 0.1864406779661017,
+          "number_url_like": 0.034482758620689655,
+          "short_normal": 0.018518518518518517,
+          "long_normal": 0.03333333333333333
+        },
+        "endpoint_count_by_category": {
+          "abuse": {
+            "count": 60,
+            "total": 65
+          },
+          "sexual": {
+            "count": 55,
+            "total": 66
+          },
+          "minors": {
+            "count": 39,
+            "total": 64
+          },
+          "threat": {
+            "count": 36,
+            "total": 64
+          },
+          "doxxing": {
+            "count": 25,
+            "total": 45
+          },
+          "self_harm": {
+            "count": 39,
+            "total": 49
+          },
+          "spam": {
+            "count": 45,
+            "total": 50
+          },
+          "friendly_profanity": {
+            "count": 16,
+            "total": 60
+          },
+          "game_combat": {
+            "count": 11,
+            "total": 58
+          },
+          "quote_report": {
+            "count": 11,
+            "total": 59
+          },
+          "number_url_like": {
+            "count": 2,
+            "total": 58
+          },
+          "short_normal": {
+            "count": 1,
+            "total": 54
+          },
+          "long_normal": {
+            "count": 2,
+            "total": 60
+          }
+        },
+        "critical_minimum": 0.5555555555555556,
+        "critical_minimum_category": "doxxing",
+        "weighted_allow_false_positive_rate": 0.07689079377448751,
+        "stage2_load": 0.30085711817614763,
+        "needs_care_count": 37,
+        "needs_care_loss": 0
+      },
+      "source": {
+        "name": "L1+T2-s20261031.json",
+        "sha256": "b61529cb36ff69ccb9cd0f0dc07c94c00c3e415d8979f298cea60eec3e1dbbde"
+      }
+    }
+  ],
+  "decision": {
+    "step1": {
+      "comparison": "L1 - L0",
+      "adopted": true,
+      "qualified": true,
+      "improvement": 0.17777777777777776,
+      "required_improvement": 0.1,
+      "allow_failures": [],
+      "weighted_allow_failures": [],
+      "needs_care_loss_failures": [],
+      "reasons": [
+        "핵심 최소 평균 개선 0.177778 (기준 0.10)",
+        "허용 유형별 증가 상한 통과",
+        "허용 가중 증가 상한 통과",
+        "도움 필요 손실 0"
+      ]
+    },
+    "step2": {
+      "baseline": "L1",
+      "T1": {
+        "qualified": false,
+        "improvement": 0.0222222222222222,
+        "required_improvement": 0.05,
+        "allow_failures": [],
+        "weighted_allow_failures": [],
+        "needs_care_loss_failures": [],
+        "reasons": [
+          "핵심 최소 평균 개선 0.022222 (기준 0.05)",
+          "허용 유형별 증가 상한 통과",
+          "허용 가중 증가 상한 통과",
+          "도움 필요 손실 0"
+        ]
+      },
+      "T2": {
+        "qualified": true,
+        "improvement": 0.07407407407407413,
+        "required_improvement": 0.05,
+        "allow_failures": [],
+        "weighted_allow_failures": [],
+        "needs_care_loss_failures": [],
+        "reasons": [
+          "핵심 최소 평균 개선 0.074074 (기준 0.05)",
+          "허용 유형별 증가 상한 통과",
+          "허용 가중 증가 상한 통과",
+          "도움 필요 손실 0"
+        ]
+      },
+      "selected": "L1+T2"
+    },
+    "final_policy": "L1+T2"
+  },
+  "diagnostics": {
+    "stage2_standalone": {
+      "L0": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7727272727272727,
+            "minors": 0.4375,
+            "threat": 0.40625,
+            "doxxing": 0.3111111111111111,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2542372881355932,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 51,
+              "total": 66
+            },
+            "minors": {
+              "count": 28,
+              "total": 64
+            },
+            "threat": {
+              "count": 26,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 14,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 15,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.3111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13223503690715846,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7727272727272727,
+            "minors": 0.4375,
+            "threat": 0.40625,
+            "doxxing": 0.3111111111111111,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2542372881355932,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 51,
+              "total": 66
+            },
+            "minors": {
+              "count": 28,
+              "total": 64
+            },
+            "threat": {
+              "count": 26,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 14,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 15,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.3111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13223503690715846,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7727272727272727,
+            "minors": 0.4375,
+            "threat": 0.40625,
+            "doxxing": 0.3111111111111111,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2542372881355932,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 51,
+              "total": 66
+            },
+            "minors": {
+              "count": 28,
+              "total": 64
+            },
+            "threat": {
+              "count": 26,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 14,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 15,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.3111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13223503690715846,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        }
+      ],
+      "L1": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7727272727272727,
+            "minors": 0.53125,
+            "threat": 0.59375,
+            "doxxing": 0.4888888888888889,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 51,
+              "total": 66
+            },
+            "minors": {
+              "count": 34,
+              "total": 64
+            },
+            "threat": {
+              "count": 38,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 22,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4888888888888889,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13274351148342967,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7727272727272727,
+            "minors": 0.53125,
+            "threat": 0.59375,
+            "doxxing": 0.4888888888888889,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 51,
+              "total": 66
+            },
+            "minors": {
+              "count": 34,
+              "total": 64
+            },
+            "threat": {
+              "count": 38,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 22,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4888888888888889,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13274351148342967,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7727272727272727,
+            "minors": 0.53125,
+            "threat": 0.59375,
+            "doxxing": 0.4888888888888889,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 51,
+              "total": 66
+            },
+            "minors": {
+              "count": 34,
+              "total": 64
+            },
+            "threat": {
+              "count": 38,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 22,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4888888888888889,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13274351148342967,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        }
+      ],
+      "L0+T1": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8484848484848485,
+            "minors": 0.4375,
+            "threat": 0.453125,
+            "doxxing": 0.4,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2542372881355932,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 56,
+              "total": 66
+            },
+            "minors": {
+              "count": 28,
+              "total": 64
+            },
+            "threat": {
+              "count": 29,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 18,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 15,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13223503690715846,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8484848484848485,
+            "minors": 0.4375,
+            "threat": 0.453125,
+            "doxxing": 0.4,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2542372881355932,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 56,
+              "total": 66
+            },
+            "minors": {
+              "count": 28,
+              "total": 64
+            },
+            "threat": {
+              "count": 29,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 18,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 15,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13223503690715846,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8484848484848485,
+            "minors": 0.4375,
+            "threat": 0.453125,
+            "doxxing": 0.4,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2542372881355932,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 56,
+              "total": 66
+            },
+            "minors": {
+              "count": 28,
+              "total": 64
+            },
+            "threat": {
+              "count": 29,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 18,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 15,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13223503690715846,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        }
+      ],
+      "L0+T2": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8333333333333334,
+            "minors": 0.5625,
+            "threat": 0.4375,
+            "doxxing": 0.4666666666666667,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5344827586206896,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.05172413793103448,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 36,
+              "total": 64
+            },
+            "threat": {
+              "count": 28,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 21,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 31,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 3,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4375,
+          "critical_minimum_category": "threat",
+          "weighted_allow_false_positive_rate": 0.13567454596618828,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8333333333333334,
+            "minors": 0.5625,
+            "threat": 0.4375,
+            "doxxing": 0.4666666666666667,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5344827586206896,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.05172413793103448,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 36,
+              "total": 64
+            },
+            "threat": {
+              "count": 28,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 21,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 31,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 3,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4375,
+          "critical_minimum_category": "threat",
+          "weighted_allow_false_positive_rate": 0.13567454596618828,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8333333333333334,
+            "minors": 0.5625,
+            "threat": 0.4375,
+            "doxxing": 0.4666666666666667,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5344827586206896,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.05172413793103448,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 36,
+              "total": 64
+            },
+            "threat": {
+              "count": 28,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 21,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 31,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 3,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4375,
+          "critical_minimum_category": "threat",
+          "weighted_allow_false_positive_rate": 0.13567454596618828,
+          "stage2_load": 0.8950305943994449,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        }
+      ],
+      "L1+T1": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8484848484848485,
+            "minors": 0.53125,
+            "threat": 0.59375,
+            "doxxing": 0.5111111111111111,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 56,
+              "total": 66
+            },
+            "minors": {
+              "count": 34,
+              "total": 64
+            },
+            "threat": {
+              "count": 38,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 23,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13274351148342967,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8484848484848485,
+            "minors": 0.53125,
+            "threat": 0.59375,
+            "doxxing": 0.5111111111111111,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 56,
+              "total": 66
+            },
+            "minors": {
+              "count": 34,
+              "total": 64
+            },
+            "threat": {
+              "count": 38,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 23,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13274351148342967,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8484848484848485,
+            "minors": 0.53125,
+            "threat": 0.59375,
+            "doxxing": 0.5111111111111111,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5172413793103449,
+            "quote_report": 0.2711864406779661,
+            "number_url_like": 0.034482758620689655,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 56,
+              "total": 66
+            },
+            "minors": {
+              "count": 34,
+              "total": 64
+            },
+            "threat": {
+              "count": 38,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 23,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 30,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 16,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 2,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13274351148342967,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        }
+      ],
+      "L1+T2": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8333333333333334,
+            "minors": 0.640625,
+            "threat": 0.609375,
+            "doxxing": 0.5777777777777777,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5344827586206896,
+            "quote_report": 0.288135593220339,
+            "number_url_like": 0.05172413793103448,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 41,
+              "total": 64
+            },
+            "threat": {
+              "count": 39,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 26,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 31,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 17,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 3,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5777777777777777,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13618302054245945,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8333333333333334,
+            "minors": 0.640625,
+            "threat": 0.609375,
+            "doxxing": 0.5777777777777777,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5344827586206896,
+            "quote_report": 0.288135593220339,
+            "number_url_like": 0.05172413793103448,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 41,
+              "total": 64
+            },
+            "threat": {
+              "count": 39,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 26,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 31,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 17,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 3,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5777777777777777,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13618302054245945,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.8333333333333334,
+            "minors": 0.640625,
+            "threat": 0.609375,
+            "doxxing": 0.5777777777777777,
+            "self_harm": 0.8775510204081632,
+            "spam": 0.9,
+            "friendly_profanity": 0.38333333333333336,
+            "game_combat": 0.5344827586206896,
+            "quote_report": 0.288135593220339,
+            "number_url_like": 0.05172413793103448,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 41,
+              "total": 64
+            },
+            "threat": {
+              "count": 39,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 26,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 43,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 23,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 31,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 17,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 3,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5777777777777777,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.13618302054245945,
+          "stage2_load": 0.8919430178928535,
+          "needs_care_count": 41,
+          "needs_care_loss": 0
+        }
+      ]
+    },
+    "stage1_high_score": {
+      "L0": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9538461538461539,
+            "sexual": 0.8333333333333334,
+            "minors": 0.765625,
+            "threat": 0.6875,
+            "doxxing": 0.5111111111111111,
+            "self_harm": 0.8367346938775511,
+            "spam": 0.9,
+            "friendly_profanity": 0.21666666666666667,
+            "game_combat": 0.2413793103448276,
+            "quote_report": 0.1864406779661017,
+            "number_url_like": 0.017241379310344827,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.05
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 62,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 49,
+              "total": 64
+            },
+            "threat": {
+              "count": 44,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 23,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 41,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 13,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 14,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 11,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 1,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 3,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5111111111111111,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.08040228802736109,
+          "stage2_load": 0.2926834139794621,
+          "needs_care_count": 38,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7878787878787878,
+            "minors": 0.625,
+            "threat": 0.546875,
+            "doxxing": 0.4,
+            "self_harm": 0.8367346938775511,
+            "spam": 0.9,
+            "friendly_profanity": 0.23333333333333334,
+            "game_combat": 0.1724137931034483,
+            "quote_report": 0.2033898305084746,
+            "number_url_like": 0.017241379310344827,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 52,
+              "total": 66
+            },
+            "minors": {
+              "count": 40,
+              "total": 64
+            },
+            "threat": {
+              "count": 35,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 18,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 41,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 14,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 10,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 12,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 1,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.07046823386800008,
+          "stage2_load": 0.29829204489745575,
+          "needs_care_count": 39,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9692307692307692,
+            "sexual": 0.7878787878787878,
+            "minors": 0.484375,
+            "threat": 0.515625,
+            "doxxing": 0.4444444444444444,
+            "self_harm": 0.7959183673469388,
+            "spam": 0.9,
+            "friendly_profanity": 0.2833333333333333,
+            "game_combat": 0.1896551724137931,
+            "quote_report": 0.1864406779661017,
+            "number_url_like": 0.017241379310344827,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 63,
+              "total": 65
+            },
+            "sexual": {
+              "count": 52,
+              "total": 66
+            },
+            "minors": {
+              "count": 31,
+              "total": 64
+            },
+            "threat": {
+              "count": 33,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 20,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 39,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 17,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 11,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 11,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 1,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.4444444444444444,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.07802872480897027,
+          "stage2_load": 0.29914567239499845,
+          "needs_care_count": 37,
+          "needs_care_loss": 0
+        }
+      ],
+      "L1": [
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9538461538461539,
+            "sexual": 0.8333333333333334,
+            "minors": 0.78125,
+            "threat": 0.796875,
+            "doxxing": 0.6666666666666666,
+            "self_harm": 0.8367346938775511,
+            "spam": 0.9,
+            "friendly_profanity": 0.21666666666666667,
+            "game_combat": 0.2413793103448276,
+            "quote_report": 0.2033898305084746,
+            "number_url_like": 0.017241379310344827,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.05
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 62,
+              "total": 65
+            },
+            "sexual": {
+              "count": 55,
+              "total": 66
+            },
+            "minors": {
+              "count": 50,
+              "total": 64
+            },
+            "threat": {
+              "count": 51,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 30,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 41,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 13,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 14,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 12,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 1,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 3,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.6666666666666666,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.08091076260363227,
+          "stage2_load": 0.29046125649358645,
+          "needs_care_count": 38,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9230769230769231,
+            "sexual": 0.7878787878787878,
+            "minors": 0.671875,
+            "threat": 0.71875,
+            "doxxing": 0.5777777777777777,
+            "self_harm": 0.8367346938775511,
+            "spam": 0.9,
+            "friendly_profanity": 0.23333333333333334,
+            "game_combat": 0.1724137931034483,
+            "quote_report": 0.22033898305084745,
+            "number_url_like": 0.017241379310344827,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 60,
+              "total": 65
+            },
+            "sexual": {
+              "count": 52,
+              "total": 66
+            },
+            "minors": {
+              "count": 43,
+              "total": 64
+            },
+            "threat": {
+              "count": 46,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 26,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 41,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 14,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 10,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 13,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 1,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.5777777777777777,
+          "critical_minimum_category": "doxxing",
+          "weighted_allow_false_positive_rate": 0.07097670844427127,
+          "stage2_load": 0.29580669296713563,
+          "needs_care_count": 39,
+          "needs_care_loss": 0
+        },
+        {
+          "endpoint_rate_by_category": {
+            "abuse": 0.9692307692307692,
+            "sexual": 0.7878787878787878,
+            "minors": 0.578125,
+            "threat": 0.65625,
+            "doxxing": 0.6,
+            "self_harm": 0.7959183673469388,
+            "spam": 0.9,
+            "friendly_profanity": 0.2833333333333333,
+            "game_combat": 0.1896551724137931,
+            "quote_report": 0.2033898305084746,
+            "number_url_like": 0.017241379310344827,
+            "short_normal": 0.018518518518518517,
+            "long_normal": 0.03333333333333333
+          },
+          "endpoint_count_by_category": {
+            "abuse": {
+              "count": 63,
+              "total": 65
+            },
+            "sexual": {
+              "count": 52,
+              "total": 66
+            },
+            "minors": {
+              "count": 37,
+              "total": 64
+            },
+            "threat": {
+              "count": 42,
+              "total": 64
+            },
+            "doxxing": {
+              "count": 27,
+              "total": 45
+            },
+            "self_harm": {
+              "count": 39,
+              "total": 49
+            },
+            "spam": {
+              "count": 45,
+              "total": 50
+            },
+            "friendly_profanity": {
+              "count": 17,
+              "total": 60
+            },
+            "game_combat": {
+              "count": 11,
+              "total": 58
+            },
+            "quote_report": {
+              "count": 12,
+              "total": 59
+            },
+            "number_url_like": {
+              "count": 1,
+              "total": 58
+            },
+            "short_normal": {
+              "count": 1,
+              "total": 54
+            },
+            "long_normal": {
+              "count": 2,
+              "total": 60
+            }
+          },
+          "critical_minimum": 0.578125,
+          "critical_minimum_category": "minors",
+          "weighted_allow_false_positive_rate": 0.07853719938524145,
+          "stage2_load": 0.29676726490912275,
+          "needs_care_count": 37,
+          "needs_care_loss": 0
+        }
+      ]
+    },
+    "report_slots": {
+      "R1-public-only": [
+        {
+          "seed": 20261011,
+          "threshold": 0.001571,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.4375,
+              "threat": 0.59375,
+              "doxxing": 0.4888888888888889,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.21666666666666667,
+              "game_combat": 0.22413793103448276,
+              "quote_report": 0.1694915254237288,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 28,
+                "total": 64
+              },
+              "threat": {
+                "count": 38,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 22,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 13,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 13,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 10,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.4375,
+            "critical_minimum_category": "minors",
+            "weighted_allow_false_positive_rate": 0.07365818126718185,
+            "stage2_load": 0.29935812160652403,
+            "needs_care_count": 38,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-R1pub-s20261011.json",
+            "sha256": "aabebf3d7ab2cba7e1e806bfbbdb8239dfe2b9f38fdc1b35e170831d5a4080fe"
+          }
+        },
+        {
+          "seed": 20261021,
+          "threshold": 0.010232,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9076923076923077,
+              "sexual": 0.7727272727272727,
+              "minors": 0.4375,
+              "threat": 0.59375,
+              "doxxing": 0.4888888888888889,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1724137931034483,
+              "quote_report": 0.1864406779661017,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 59,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 28,
+                "total": 64
+              },
+              "threat": {
+                "count": 38,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 22,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 12,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 10,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 11,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.4375,
+            "critical_minimum_category": "minors",
+            "weighted_allow_false_positive_rate": 0.0659597592917289,
+            "stage2_load": 0.3015023421743315,
+            "needs_care_count": 39,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-R1pub-s20261021.json",
+            "sha256": "b0cfbf180efd578a9dbcc49924b4ddf3036d2ad252ceaf4ff78d05d3d4a6f246"
+          }
+        },
+        {
+          "seed": 20261031,
+          "threshold": 0.003778,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.421875,
+              "threat": 0.546875,
+              "doxxing": 0.4888888888888889,
+              "self_harm": 0.7959183673469388,
+              "spam": 0.9,
+              "friendly_profanity": 0.26666666666666666,
+              "game_combat": 0.1896551724137931,
+              "quote_report": 0.1694915254237288,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 27,
+                "total": 64
+              },
+              "threat": {
+                "count": 35,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 22,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 39,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 16,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 11,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 10,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.421875,
+            "critical_minimum_category": "minors",
+            "weighted_allow_false_positive_rate": 0.0755202502326991,
+            "stage2_load": 0.3009821181761476,
+            "needs_care_count": 37,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-R1pub-s20261031.json",
+            "sha256": "699e5f5e3390e0cb189f3099dd9064a7f7b794a1759a203795e504d8cd2b469f"
+          }
+        }
+      ],
+      "R1-private-only": [
+        {
+          "seed": 20261011,
+          "threshold": 0.001571,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.53125,
+              "threat": 0.40625,
+              "doxxing": 0.3333333333333333,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.21666666666666667,
+              "game_combat": 0.22413793103448276,
+              "quote_report": 0.1864406779661017,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 34,
+                "total": 64
+              },
+              "threat": {
+                "count": 26,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 15,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 13,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 13,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 11,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.3333333333333333,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.07416665584345304,
+            "stage2_load": 0.30161152909239974,
+            "needs_care_count": 38,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-R1priv-s20261011.json",
+            "sha256": "76abda8ca05fa6cab6c11fbe7bcc1c8f55eaad914e87ecfd1dbf784b6449542a"
+          }
+        },
+        {
+          "seed": 20261021,
+          "threshold": 0.010232,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9076923076923077,
+              "sexual": 0.7727272727272727,
+              "minors": 0.53125,
+              "threat": 0.40625,
+              "doxxing": 0.3333333333333333,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1724137931034483,
+              "quote_report": 0.2033898305084746,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 59,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 34,
+                "total": 64
+              },
+              "threat": {
+                "count": 26,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 15,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 12,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 10,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 12,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.3333333333333333,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.06646823386800009,
+            "stage2_load": 0.30375574966020713,
+            "needs_care_count": 39,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-R1priv-s20261021.json",
+            "sha256": "d6a41a8a8a4dc987e9db3e2c72634bd5831c7660b101bfe7c72cbbef26c33718"
+          }
+        },
+        {
+          "seed": 20261031,
+          "threshold": 0.003778,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.515625,
+              "threat": 0.359375,
+              "doxxing": 0.3333333333333333,
+              "self_harm": 0.7959183673469388,
+              "spam": 0.9,
+              "friendly_profanity": 0.26666666666666666,
+              "game_combat": 0.1896551724137931,
+              "quote_report": 0.1864406779661017,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 33,
+                "total": 64
+              },
+              "threat": {
+                "count": 23,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 15,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 39,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 16,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 11,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 11,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.3333333333333333,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.07602872480897027,
+            "stage2_load": 0.3032511506620233,
+            "needs_care_count": 37,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-R1priv-s20261031.json",
+            "sha256": "fb78e3f2f31ecb3d927d54bc31dd8c21b8b1ed029c3ddf87cc1e982bd4bbcef6"
+          }
+        }
+      ],
+      "L0-budget-reselected": [
+        {
+          "seed": 20261011,
+          "threshold": 0.001571,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.4375,
+              "threat": 0.40625,
+              "doxxing": 0.3111111111111111,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.21666666666666667,
+              "game_combat": 0.22413793103448276,
+              "quote_report": 0.1694915254237288,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 28,
+                "total": 64
+              },
+              "threat": {
+                "count": 26,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 14,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 13,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 13,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 10,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.3111111111111111,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.07365818126718185,
+            "stage2_load": 0.30179659853684415,
+            "needs_care_count": 38,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-L0-budget-s20261011.json",
+            "sha256": "816e1276b7236ef54840e411bfa2381ae645368f8377ba3a37e22f0df0600c7f"
+          }
+        },
+        {
+          "seed": 20261021,
+          "threshold": 0.010232,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9076923076923077,
+              "sexual": 0.7727272727272727,
+              "minors": 0.4375,
+              "threat": 0.40625,
+              "doxxing": 0.3111111111111111,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1724137931034483,
+              "quote_report": 0.1864406779661017,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 59,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 28,
+                "total": 64
+              },
+              "threat": {
+                "count": 26,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 14,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 12,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 10,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 11,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.3111111111111111,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.0659597592917289,
+            "stage2_load": 0.3039408191046516,
+            "needs_care_count": 39,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-L0-budget-s20261021.json",
+            "sha256": "890e295c1502dcc2e56681f8b03fdffb595c52da33f9cbe98a081a4977d79bd2"
+          }
+        },
+        {
+          "seed": 20261031,
+          "threshold": 0.003778,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.421875,
+              "threat": 0.359375,
+              "doxxing": 0.3111111111111111,
+              "self_harm": 0.7959183673469388,
+              "spam": 0.9,
+              "friendly_profanity": 0.26666666666666666,
+              "game_combat": 0.1896551724137931,
+              "quote_report": 0.1694915254237288,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 27,
+                "total": 64
+              },
+              "threat": {
+                "count": 23,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 14,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 39,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 16,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 11,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 10,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.3111111111111111,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.0755202502326991,
+            "stage2_load": 0.30342059510646774,
+            "needs_care_count": 37,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-L0-budget-s20261031.json",
+            "sha256": "8b1d906faff67070d6ba607b7a9f1e0cdebd256f6f7421d3048a962cd6107f73"
+          }
+        }
+      ],
+      "L1-budget-reselected": [
+        {
+          "seed": 20261011,
+          "threshold": 0.001546,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.53125,
+              "threat": 0.59375,
+              "doxxing": 0.4888888888888889,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.21666666666666667,
+              "game_combat": 0.22413793103448276,
+              "quote_report": 0.1864406779661017,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 34,
+                "total": 64
+              },
+              "threat": {
+                "count": 38,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 22,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 13,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 13,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 11,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.4888888888888889,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.07416665584345304,
+            "stage2_load": 0.3033841632731907,
+            "needs_care_count": 38,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-L1-budget-s20261011.json",
+            "sha256": "ca85d9d8d5b439d474df2254f62918bac106da00c4f6e3d6577992bc3e0557a9"
+          }
+        },
+        {
+          "seed": 20261021,
+          "threshold": 0.010061,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9076923076923077,
+              "sexual": 0.7727272727272727,
+              "minors": 0.53125,
+              "threat": 0.59375,
+              "doxxing": 0.4888888888888889,
+              "self_harm": 0.8367346938775511,
+              "spam": 0.9,
+              "friendly_profanity": 0.2,
+              "game_combat": 0.1896551724137931,
+              "quote_report": 0.2033898305084746,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 59,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 34,
+                "total": 64
+              },
+              "threat": {
+                "count": 38,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 22,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 41,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 12,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 11,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 12,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.4888888888888889,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.06853719938524146,
+            "stage2_load": 0.30393915726784404,
+            "needs_care_count": 39,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-L1-budget-s20261021.json",
+            "sha256": "f35d7fc4c027f078b351668383b46ac4bcf6361786f88efb1c4a102c2b9420e0"
+          }
+        },
+        {
+          "seed": 20261031,
+          "threshold": 0.00369,
+          "metrics": {
+            "endpoint_rate_by_category": {
+              "abuse": 0.9230769230769231,
+              "sexual": 0.7727272727272727,
+              "minors": 0.515625,
+              "threat": 0.546875,
+              "doxxing": 0.4888888888888889,
+              "self_harm": 0.7959183673469388,
+              "spam": 0.9,
+              "friendly_profanity": 0.26666666666666666,
+              "game_combat": 0.20689655172413793,
+              "quote_report": 0.1864406779661017,
+              "number_url_like": 0.017241379310344827,
+              "short_normal": 0.018518518518518517,
+              "long_normal": 0.03333333333333333
+            },
+            "endpoint_count_by_category": {
+              "abuse": {
+                "count": 60,
+                "total": 65
+              },
+              "sexual": {
+                "count": 51,
+                "total": 66
+              },
+              "minors": {
+                "count": 33,
+                "total": 64
+              },
+              "threat": {
+                "count": 35,
+                "total": 64
+              },
+              "doxxing": {
+                "count": 22,
+                "total": 45
+              },
+              "self_harm": {
+                "count": 39,
+                "total": 49
+              },
+              "spam": {
+                "count": 45,
+                "total": 50
+              },
+              "friendly_profanity": {
+                "count": 16,
+                "total": 60
+              },
+              "game_combat": {
+                "count": 12,
+                "total": 58
+              },
+              "quote_report": {
+                "count": 11,
+                "total": 59
+              },
+              "number_url_like": {
+                "count": 1,
+                "total": 58
+              },
+              "short_normal": {
+                "count": 1,
+                "total": 54
+              },
+              "long_normal": {
+                "count": 2,
+                "total": 60
+              }
+            },
+            "critical_minimum": 0.4888888888888889,
+            "critical_minimum_category": "doxxing",
+            "weighted_allow_false_positive_rate": 0.07809769032621165,
+            "stage2_load": 0.303972958693389,
+            "needs_care_count": 37,
+            "needs_care_loss": 0
+          },
+          "source": {
+            "name": "diag-L1-budget-s20261031.json",
+            "sha256": "337a1c988f441f7b194ed1f28a123c300198edb08daec55d6db9a8ee90fedd13"
+          }
+        }
+      ]
+    },
+    "route_sources": {
+      "L0": {
+        "name": "routes-R0.jsonl",
+        "sha256": "fece36fe5eb3c82add6804b8dc1c793bea285bbd48b34a503cef3ecc4cefe7d7"
+      },
+      "L1": {
+        "name": "routes-R1.jsonl",
+        "sha256": "157784c6ca303c6926687d11cfaae51cfc5712f9c174de1ff7ca0f0204c2bed0"
+      }
+    },
+    "stage2_misses": {
+      "20261011": {
+        "self_harm": 0,
+        "sexual": 1,
+        "minors": 11,
+        "threat": 14,
+        "doxxing": 6
+      },
+      "20261021": {
+        "self_harm": 0,
+        "sexual": 0,
+        "minors": 7,
+        "threat": 7,
+        "doxxing": 3
+      },
+      "20261031": {
+        "self_harm": 0,
+        "sexual": 0,
+        "minors": 1,
+        "threat": 8,
+        "doxxing": 4
+      }
+    }
+  },
+  "bootstrap": {
+    "seed": 20261016,
+    "rounds": 2000,
+    "observed_difference": 0.2518518518518519,
+    "interval": [
+      0.13773148148148145,
+      0.34004629629629624
+    ],
+    "interval_indices": [
+      50,
+      1949
+    ]
+  }
+}
