@@ -43,6 +43,27 @@ describe("RulesSection", () => {
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/rules")).toHaveLength(3);
   });
 
+  it("바로 후보 규칙을 설명과 함께 묶어 보여 주고 추가한다", async () => {
+    const rules: RuleEntryDto[] = [];
+    const fetchMock = stubFetch({
+      "GET /api/rules": () => json(200, rules),
+      "POST /api/rules": (init) => {
+        const body = JSON.parse(String(init?.body)) as { kind: RuleEntryDto["kind"]; pattern: string };
+        const added = { id: 1, kind: body.kind, pattern: body.pattern, createdBy: "m1", createdAt: 1 };
+        rules.push(added);
+        return json(200, added);
+      },
+    });
+    render(<RulesSection me={channelManager} />);
+    expect(await screen.findByRole("heading", { name: "바로 후보" })).toBeTruthy();
+    expect(screen.getByText("2차 AI를 거치지 않고 바로 후보로 올리는 핵심 범주 낱말(협박·신상·미성년 대상). 자동 숨김은 하지 않는다")).toBeTruthy();
+    await userEvent.selectOptions(screen.getByLabelText("종류"), "critical");
+    await userEvent.type(screen.getByLabelText("내용"), "새핵심범주");
+    await userEvent.click(screen.getByRole("button", { name: "추가" }));
+    expect(await screen.findByText("새핵심범주")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/rules" && init?.body === JSON.stringify({ kind: "critical", pattern: "새핵심범주" }))).toBe(true);
+  });
+
   it("규칙 수정 권한이 없으면 목록만 보인다", async () => {
     stubFetch({ "GET /api/rules": () => json(200, []) });
     render(<RulesSection me={chatManager} />);

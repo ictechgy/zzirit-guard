@@ -2,7 +2,7 @@
 // 문장마다 규칙 판정·이유와 키워드 경로 일치 여부를 JSONL로 쓴다. 원문은 쓰지 않는다(id만).
 // 왜: 1차 분류기 평가(zg_stage1.evaluate_chat)는 1차 점수만 본다. 실제 경로는 "규칙 → 키워드 경로 → 1차"라서,
 // 규칙이 먼저 잡는 문장(전화번호·주소·링크·금칙어)과 키워드 경로가 2차로 보내는 문장을 합쳐야 핵심 범주를 얼마나 지키는지 알 수 있다.
-// 사용법: npm run build -w @zzirit-guard/server && node apps/server/dist/tools/evaluateRules.js --eval-file <평가셋> --output <결과> [--keywords <목록>]
+// 사용법: npm run build -w @zzirit-guard/server && node apps/server/dist/tools/evaluateRules.js --eval-file <평가셋> --output <결과> [--keywords <목록>] [--rules <TSV>]
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -10,18 +10,20 @@ import { parseArgs } from "node:util";
 import type { ChatEvent } from "../chat/chatEvent.js";
 import { openDatabase } from "../db/database.js";
 import { createGroupFloodDetector, createPersonalFloodDetector } from "../detection/floodDetectors.js";
+import { DEFAULT_RULES } from "../detection/defaultRules.js";
 import { createDuplicateTracker } from "../detection/messageTraits.js";
 import { normalizeForMatching } from "../detection/normalize.js";
 import { createDetectionPipeline, type DetectionPipeline } from "../detection/pipeline.js";
-import { createRuleRepository, type RuleRepository } from "../detection/ruleRepository.js";
+import { createRuleRepository, MAX_RULE_PATTERN_LENGTH, type RuleRepository } from "../detection/ruleRepository.js";
 import { findFirstMatch, locateExceptions } from "../detection/wordMatch.js";
 import { createAuditLog } from "../records/auditLog.js";
+import type { RuleKind } from "@zzirit-guard/shared";
 
 /**
  * 평가 도구 버전. 규칙 목록 지문에 함께 넣는다. 판정 순서나 정규화처럼 같은 목록이라도 결과가 바뀌는 변경을 하면 올린다.
  * 왜: 개발셋과 보류셋의 규칙 결과가 같은 목록이어도 서로 다른 판정 방식으로 만들어졌다면 섞으면 안 되기 때문이다.
  */
-const EVALUATOR_VERSION = "evaluate-rules@1";
+const EVALUATOR_VERSION = "evaluate-rules@2";
 
 /** 평가용 채널 식별자. 메모리 DB에만 있다. */
 const EVALUATION_CHANNEL_ID = "evaluation";
@@ -52,6 +54,25 @@ export interface RuleRoute {
   skipAi: boolean;
   evalSha256: string;
   policySha256: string;
+  rulesFileSha256: string | null;
+  rulesCanonicalSha256: string | null;
+}
+
+/** 평가에 더할 수 있는 공개 규칙 종류. 기본 규칙과 같은 종류만 중복을 검사한다. */
+export type EvaluationRuleKind = "critical" | "keyword_route";
+
+/** TSV 한 줄에서 읽은 추가 규칙. 정규화·입력 줄은 오류와 해시를 설명할 때만 쓴다. */
+export interface EvaluationRule {
+  kind: EvaluationRuleKind;
+  pattern: string;
+  normalizedPattern?: string;
+  inputLine?: number;
+}
+
+/** 규칙 TSV와 그 규칙에 대한 정규형 지문. 원문 파일 지문은 호출자가 바이트로 계산한다. */
+export interface ParsedRulePatterns {
+  rules: EvaluationRule[];
+  canonical: string;
 }
 
 /** 도구 인자가 잘못됐을 때 던진다. 원인을 그대로 사용자에게 보여 준다. */
@@ -63,7 +84,7 @@ export class EvaluateRulesArgumentError extends Error {
  * 메모리 DB 위에 기본 규칙과 추가 키워드 경로 패턴을 넣은 판정 파이프라인을 만든다. 치지직·실행기는 쓰지 않는다.
  * @param keywordPatterns 키워드 경로로 넣을 패턴 목록(기본 규칙에 더한다)
  */
-function buildEvaluationPipeline(keywordPatterns: readonly string[]): { pipeline: DetectionPipeline; rules: RuleRepository } {
+function buildEvaluationPipeline(keywordPatterns: readonly string[], additionalRules: readonly EvaluationRule[]): { pipeline: DetectionPipeline; rules: RuleRepository } {
   const database = openDatabase(":memory:");
   database.prepare("INSERT INTO channel (channel_id, channel_name, connected_at) VALUES (?, '평가', 0)").run(EVALUATION_CHANNEL_ID);
   database.prepare("INSERT INTO setting (channel_id) VALUES (?)").run(EVALUATION_CHANNEL_ID);
@@ -71,6 +92,7 @@ function buildEvaluationPipeline(keywordPatterns: readonly string[]): { pipeline
   const rules = createRuleRepository(database, clock);
   rules.seedDefaults(EVALUATION_CHANNEL_ID);
   keywordPatterns.forEach((pattern) => rules.add(EVALUATION_CHANNEL_ID, "keyword_route", pattern, "evaluation"));
+  additionalRules.forEach((rule) => rules.add(EVALUATION_CHANNEL_ID, rule.kind as RuleKind, rule.pattern, "evaluation"));
   const auditLog = createAuditLog(database, clock);
   const pipeline = createDetectionPipeline({ rules, auditLog, groupFlood: createGroupFloodDetector(), personalFlood: createPersonalFloodDetector(), duplicates: createDuplicateTracker() });
   return { pipeline, rules };
@@ -116,13 +138,23 @@ function computePolicySha256(rules: RuleRepository): string {
  * @param keywordPatterns 키워드 경로 패턴 목록(기본 규칙에 더한다)
  * @param evalSha256 평가셋 파일의 sha256(결과에 그대로 적는다)
  */
-export function evaluateRuleRoutes(items: readonly EvaluationItem[], keywordPatterns: readonly string[] = [], evalSha256 = ""): RuleRoute[] {
-  const { pipeline, rules } = buildEvaluationPipeline(keywordPatterns);
+export function evaluateRuleRoutes(
+  items: readonly EvaluationItem[],
+  keywordPatterns: readonly string[] = [],
+  evalSha256 = "",
+  additionalRules: readonly EvaluationRule[] = [],
+  rulesFileSha256: string | null = null,
+  rulesCanonicalSha256: string | null = null,
+): RuleRoute[] {
+  const { pipeline, rules } = buildEvaluationPipeline(keywordPatterns, additionalRules);
   const policySha256 = computePolicySha256(rules);
   return items.map((item, index) => {
     const result = pipeline.evaluate(toEvaluationEvent(item, index));
     const keyword = findKeywordRoute(rules, item.text);
-    return { id: item.id, decision: result.decision, reason: result.reason, keyword, skipAi: result.trivial, evalSha256, policySha256 };
+    return {
+      id: item.id, decision: result.decision, reason: result.reason, keyword, skipAi: result.trivial, evalSha256, policySha256,
+      rulesFileSha256, rulesCanonicalSha256,
+    };
   });
 }
 
@@ -147,11 +179,64 @@ export function parseKeywordPatterns(content: string): string[] {
   return content.split("\n").map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
 }
 
+/** 규칙 TSV 오류를 줄 번호와 수정 방향만으로 설명한다. 문구 원문은 비공개 후보일 수 있어 넣지 않는다. */
+function ruleFileError(line: number, guidance: string): EvaluateRulesArgumentError {
+  return new EvaluateRulesArgumentError(`규칙 파일 ${line}번째 줄이 잘못되었습니다: ${guidance}. 종류<TAB>패턴 형식으로 고치세요`);
+}
+
+/** 규칙 종류와 정규화된 문구로 기본·입력 중복 키를 만든다. */
+function ruleKey(kind: EvaluationRuleKind | string, normalizedPattern: string): string {
+  return `${kind}\u0000${normalizedPattern}`;
+}
+
+/** 규칙 목록을 정규형(종류·정규화 문구 정렬, 줄 끝 개행)으로 만든다. */
+export function canonicalizeRulePatterns(rules: readonly EvaluationRule[]): string {
+  return rules
+    .map((rule) => `${rule.kind}\t${rule.normalizedPattern ?? normalizeForMatching(rule.pattern)}`)
+    .sort()
+    .join("\n") + (rules.length > 0 ? "\n" : "");
+}
+
+/** 규칙 TSV를 읽고 저장소와 같은 길이·정규화 중복 규칙을 검사한다. */
+export function parseRulePatterns(content: string): ParsedRulePatterns {
+  const rules: EvaluationRule[] = [];
+  const seen = new Set<string>();
+  const defaultKeys = new Set(
+    DEFAULT_RULES.map((rule) => ruleKey(rule.kind, normalizeForMatching(rule.pattern))),
+  );
+  content.split("\n").forEach((rawLine, index) => {
+    const lineNumber = index + 1;
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.trim() === "" || line.trimStart().startsWith("#")) return;
+    if ((line.match(/\t/g) ?? []).length !== 1) throw ruleFileError(lineNumber, "탭은 종류와 패턴을 나누는 하나만 사용하세요");
+    const [kind, rawPattern] = line.split("\t") as [string, string];
+    // 저장소 add가 앞뒤 공백을 제거한 뒤 길이·빈 값·중복을 검사하므로 평가도 같은 값을 쓴다.
+    const pattern = rawPattern.trim();
+    if (kind !== "critical" && kind !== "keyword_route") throw ruleFileError(lineNumber, "종류는 critical 또는 keyword_route만 사용할 수 있습니다");
+    if (pattern.length > MAX_RULE_PATTERN_LENGTH) throw ruleFileError(lineNumber, `패턴은 ${MAX_RULE_PATTERN_LENGTH}자 이하로 줄이세요`);
+    const normalizedPattern = normalizeForMatching(pattern);
+    if (normalizedPattern === "") throw ruleFileError(lineNumber, "빈 패턴이 되지 않도록 문자를 입력하세요");
+    const key = ruleKey(kind, normalizedPattern);
+    if (seen.has(key)) throw ruleFileError(lineNumber, "파일 안에서 같은 종류의 정규화 중복을 제거하세요");
+    if (defaultKeys.has(key)) throw ruleFileError(lineNumber, "기본 규칙과 같은 종류의 정규화 중복을 제거하세요");
+    seen.add(key);
+    rules.push({ kind, pattern, normalizedPattern, inputLine: lineNumber });
+  });
+  return { rules, canonical: canonicalizeRulePatterns(rules) };
+}
+
+/** --keywords와 같은 keyword_route를 --rules에서 다시 넣지 않게 막는다. critical 승격은 허용한다. */
+export function ensureRulesDoNotDuplicateKeywords(rules: readonly EvaluationRule[], keywords: readonly string[]): void {
+  const keywordKeys = new Set(keywords.map((pattern) => normalizeForMatching(pattern)));
+  const duplicate = rules.find((rule) => rule.kind === "keyword_route" && keywordKeys.has(rule.normalizedPattern ?? normalizeForMatching(rule.pattern)));
+  if (duplicate) throw ruleFileError(duplicate.inputLine ?? 0, "--keywords와 겹치는 keyword_route를 제거하세요");
+}
+
 /** 명령행 인자를 읽는다. 평가셋과 결과 경로는 꼭 있어야 한다. */
-function readArguments(): { evalFile: string; output: string; keywords: string | undefined } {
-  const { values } = parseArgs({ options: { "eval-file": { type: "string" }, output: { type: "string" }, keywords: { type: "string" } } });
+function readArguments(argv: readonly string[] = process.argv.slice(2)): { evalFile: string; output: string; keywords: string | undefined; rules: string | undefined } {
+  const { values } = parseArgs({ args: [...argv], options: { "eval-file": { type: "string" }, output: { type: "string" }, keywords: { type: "string" }, rules: { type: "string" } } });
   if (!values["eval-file"] || !values.output) throw new EvaluateRulesArgumentError("--eval-file과 --output을 주세요");
-  return { evalFile: values["eval-file"], output: values.output, keywords: values.keywords };
+  return { evalFile: values["eval-file"], output: values.output, keywords: values.keywords, rules: values.rules };
 }
 
 /**
@@ -160,24 +245,40 @@ function readArguments(): { evalFile: string; output: string; keywords: string |
  * @param items 평가 문장 목록
  * @param keywords 추가 키워드 패턴
  */
-export function ensureHoldoutUsesDefaults(items: readonly EvaluationItem[], keywords: readonly string[]): void {
-  if (keywords.length > 0 && items.some((item) => item.split === "holdout")) {
-    throw new EvaluateRulesArgumentError("보류셋에는 --keywords를 쓸 수 없습니다. 목록은 개발셋으로 다듬고 기본 목록에 넣은 뒤 보류셋을 보세요");
+export function ensureHoldoutUsesDefaults(
+  items: readonly EvaluationItem[],
+  keywords: readonly string[],
+  additionalRules: readonly EvaluationRule[] = [],
+  rulesOptionProvided = additionalRules.length > 0,
+): void {
+  if ((keywords.length > 0 || rulesOptionProvided) && items.some((item) => item.split === "holdout")) {
+    throw new EvaluateRulesArgumentError("보류셋에는 --keywords와 --rules를 쓸 수 없습니다. 목록은 개발셋으로 다듬고 기본 목록에 넣은 뒤 보류셋을 보세요");
   }
 }
 
 /** 명령행 실행: 평가셋을 판정해 결과 JSONL을 쓰고, 판정별 건수만 출력한다. */
-function runFromCommandLine(): void {
-  const options = readArguments();
+export function runEvaluateRulesCommand(argv: readonly string[] = process.argv.slice(2)): void {
+  const options = readArguments(argv);
   const content = readFileSync(options.evalFile);
   const items = parseEvaluationItems(content.toString("utf8"));
   const keywords = options.keywords ? parseKeywordPatterns(readFileSync(options.keywords, "utf8")) : [];
-  ensureHoldoutUsesDefaults(items, keywords);
-  const routes = evaluateRuleRoutes(items, keywords, createHash("sha256").update(content).digest("hex"));
+  const rulesContent = options.rules ? readFileSync(options.rules) : null;
+  const parsedRules = rulesContent ? parseRulePatterns(rulesContent.toString("utf8")) : { rules: [], canonical: "" };
+  ensureRulesDoNotDuplicateKeywords(parsedRules.rules, keywords);
+  ensureHoldoutUsesDefaults(items, keywords, parsedRules.rules, options.rules !== undefined);
+  const rulesFileSha256 = rulesContent ? createHash("sha256").update(rulesContent).digest("hex") : null;
+  const rulesCanonicalSha256 = rulesContent ? createHash("sha256").update(parsedRules.canonical).digest("hex") : null;
+  const routes = evaluateRuleRoutes(
+    items, keywords, createHash("sha256").update(content).digest("hex"), parsedRules.rules, rulesFileSha256, rulesCanonicalSha256,
+  );
   writeFileSync(options.output, routes.map((route) => JSON.stringify(route)).join("\n") + "\n");
   const counts: Record<string, number> = {};
   routes.forEach((route) => { counts[route.decision] = (counts[route.decision] ?? 0) + 1; });
   console.log(JSON.stringify({ items: routes.length, keywordPatterns: keywords.length, keywordMatches: routes.filter((route) => route.keyword !== null).length, decisions: counts }));
+}
+
+function runFromCommandLine(): void {
+  runEvaluateRulesCommand();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

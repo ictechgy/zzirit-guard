@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { apiSend, describeApiError } from "../api/client";
 import { useApiResource } from "../api/useApiResource";
 import { useBusyTask } from "../api/useBusyTask";
-import { EDITABLE_KINDS, KIND_LABELS } from "../domain/ruleKinds";
+import { EDITABLE_KINDS, KIND_DESCRIPTIONS, KIND_LABELS } from "../domain/ruleKinds";
 
 /**
  * 규칙 입력 최대 길이. 서버 MAX_PATTERN_LENGTH(apps/server/src/detection/ruleRepository.ts)와 같아야 한다.
@@ -105,20 +105,23 @@ interface RuleGroupProps {
   onRemove(rule: RuleEntryDto): void;
 }
 
-/** 종류 하나의 규칙 목록. 비어 있으면 그리지 않는다. */
+/** 종류 하나의 규칙 목록. 설명이 있는 종류는 비어 있어도 운영 의미와 빈 상태를 보여 준다. */
 function RuleGroup({ kind, rules, canEdit, isBusy, onRemove }: RuleGroupProps) {
-  if (rules.length === 0) return null;
+  const description = KIND_DESCRIPTIONS[kind];
+  // 바로 후보는 기본 규칙이 없으므로 빈 상태에서도 의미를 설명해야 매니저가 안전하게 추가할 수 있다.
+  if (rules.length === 0 && !description) return null;
   return (
     <div className="rule-group">
       <h3>{KIND_LABELS[kind]}</h3>
-      <ul>
+      {description && <p className="hint">{description}</p>}
+      {rules.length === 0 ? <p className="empty">등록된 규칙이 없습니다.</p> : <ul>
         {rules.map((rule) => (
           <li key={rule.id}>
             <span>{rule.pattern}</span>
             {canEdit && <button type="button" disabled={isBusy} onClick={() => onRemove(rule)} aria-label={`${rule.pattern} 삭제`}>삭제</button>}
           </li>
         ))}
-      </ul>
+      </ul>}
     </div>
   );
 }

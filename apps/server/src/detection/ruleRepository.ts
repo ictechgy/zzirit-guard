@@ -26,6 +26,8 @@ export interface RuleSnapshot {
   keywordRoute: readonly RuleEntry[];
   /** 광고 낱말. 걸리면 매니저 후보다(rule:spam). 2차 AI가 광고를 잘 못 잡아 규칙이 맡는다(docs/ml/2026-10-14-chat-eval-baseline.md). */
   spam: readonly RuleEntry[];
+  /** 핵심 낱말. 걸리면 2차 AI를 거치지 않고 후보로 올린다(rule:critical). */
+  critical: readonly RuleEntry[];
   allow: ReadonlySet<string>;
   allowDomains: readonly string[];
 }
@@ -40,7 +42,7 @@ export interface RuleRepository {
 }
 
 /** 패턴 최대 길이. 지나치게 긴 패턴은 실수일 가능성이 높다. */
-const MAX_PATTERN_LENGTH = 50;
+export const MAX_RULE_PATTERN_LENGTH = 50;
 /**
  * 허용 도메인의 모양(K14): 영문 소문자·숫자·한글·하이픈 라벨을 점으로 이은 것, 라벨 둘 이상.
  * 왜: 허용 도메인은 그 하위 도메인까지 모두 허용한다. "com"처럼 점이 없는 한 단어를 받으면 ".com"으로 끝나는 모든 광고 링크가 통과한다.
@@ -120,7 +122,7 @@ function insertRule(database: Database, channelId: string, kind: RuleKind, patte
 
 /** 길이와 비교용 결과가 비지 않는지 확인한다. 허용 도메인은 모양도 본다(K14). */
 function validatePattern(kind: RuleKind, pattern: string): void {
-  if (pattern.length > MAX_PATTERN_LENGTH) throw new RuleValidationError(`규칙은 ${MAX_PATTERN_LENGTH}자 이하로 입력하세요.`);
+  if (pattern.length > MAX_RULE_PATTERN_LENGTH) throw new RuleValidationError(`규칙은 ${MAX_RULE_PATTERN_LENGTH}자 이하로 입력하세요.`);
   if (!normalizePattern(kind, pattern)) {
     throw new RuleValidationError("규칙이 비었습니다. 특수문자·공백만으로는 규칙을 만들 수 없습니다.");
   }
@@ -179,6 +181,7 @@ function buildSnapshot(rows: readonly RuleRow[]): RuleSnapshot {
     threat: ofKind("threat"),
     keywordRoute: ofKind("keyword_route"),
     spam: ofKind("spam"),
+    critical: ofKind("critical"),
     allow: new Set(ofKind("allow").map((entry) => entry.normalizedPattern)),
     allowDomains: ofKind("allow_domain").map((entry) => entry.normalizedPattern),
   };
