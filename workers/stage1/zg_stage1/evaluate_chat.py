@@ -4,7 +4,8 @@
 - 범주별 전달률: 유해 범주에서는 재현율(2차로 넘긴 비율), 허용 유형에서는 잘못 넘긴 비율이다.
 - 가중 전달률: 가정한 실제 트래픽 구성(DEFAULT_TRAFFIC_MIX)으로 범주별 전달률을 가중 평균한 값이다. 평가셋은 유해가
   절반쯤이라 그대로 평균하면 실제 2차 부하를 크게 부풀린다. 그래서 구성비로 다시 가중한다.
-- 개발셋: F_max(zg_stage1.capacity) 예산을 지키는 가장 작은 임계값을 고르고, 임계값 표와 문장별 점수를 남긴다.
+- 개발셋: 기본은 F_max(zg_stage1.capacity) 예산을 지키는 가장 작은 임계값을 고른다. --fixed-threshold면 주어진 값을 그대로 쓴다.
+  어느 쪽이든 임계값 표와 문장별 점수를 남긴다.
 - 보류셋: 개발셋 결과 파일(--dev-report)의 임계값만 쓴다. 모델 가중치가 같은지 확인하고, 그 임계값 하나의 집계만 남긴다.
   임계값 표나 문장별 점수를 남기면 보류셋을 보고 임계값을 다시 고를 수 있기 때문이다.
 - 규칙 경로(--rule-routes, 선택): 서버의 규칙 평가 도구(apps/server/src/tools/evaluateRules.ts)가 낸 문장별 규칙 판정과
@@ -28,7 +29,7 @@ import json
 import math
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from zg_stage1 import modeling
 from zg_stage1.arguments import positive_integer, probability_argument
@@ -75,6 +76,68 @@ RULE_DECISIONS: frozenset[str] = frozenset({"auto_hide", "candidate", "pass"})
 # 2차 워커가 후보로 올리는 고정 확률. 점수 파일도 이 기준으로 만들었는지 확인한다.
 STAGE2_CANDIDATE_THRESHOLD = 0.5
 
+# 완화 정책은 계획에서 한 번만 고른 값과 범주를 기본으로 쓴다. 서버도 contract 벡터로 같은 정의를 확인한다.
+DEFAULT_RELAXED_STAGE2_THRESHOLD = 0.2
+DEFAULT_RELAXED_STAGE2_CATEGORIES: frozenset[str] = frozenset({"S3", "S4", "S5"})
+STAGE2_POLICIES: tuple[str, ...] = ("fixed", "keyword_route", "category")
+STAGE2_CATEGORIES: frozenset[str] = frozenset(f"S{index}" for index in range(1, 8))
+EndpointDecision = Literal["candidate", "needs_care", "pass"]
+
+
+class Stage2Score(NamedTuple):
+    """문장 하나의 2차 유해 확률과 가장 높은 안전 범주."""
+
+    probability: float
+    category: str
+
+
+class Stage2Policy(NamedTuple):
+    """경로 끝 후보를 정하는 2차 기준. 범주는 정렬해 보고서와 실행마다 같은 모양으로 남긴다."""
+
+    policy: str = "fixed"
+    base: float = STAGE2_CANDIDATE_THRESHOLD
+    relaxed: float = DEFAULT_RELAXED_STAGE2_THRESHOLD
+    categories: frozenset[str] = DEFAULT_RELAXED_STAGE2_CATEGORIES
+
+    def to_dict(self) -> dict[str, object]:
+        """서버 설정과 비교하기 쉬운 보고서 모양."""
+        return {"policy": self.policy, "base": self.base, "relaxed": self.relaxed, "categories": sorted(self.categories)}
+
+
+DEFAULT_STAGE2_POLICY = Stage2Policy()
+
+
+def applied_stage2_threshold(
+    policy: str,
+    base_threshold: float,
+    relaxed_threshold: float,
+    relaxed_categories: frozenset[str],
+    keyword_route: bool,
+    category: str,
+) -> float:
+    """S6 우선 뒤 정책이 실제로 쓰는 기준. 완화값이 기본값보다 높아도 문턱을 올리지 않는다."""
+    if category == "S6":
+        return base_threshold
+    relaxes_keyword = policy == "keyword_route" and keyword_route
+    relaxes_category = policy == "category" and category in relaxed_categories
+    return min(base_threshold, relaxed_threshold) if relaxes_keyword or relaxes_category else base_threshold
+
+
+def stage2_endpoint_decision(
+    policy: str,
+    base_threshold: float,
+    relaxed_threshold: float,
+    relaxed_categories: frozenset[str],
+    keyword_route: bool,
+    probability: float,
+    category: str,
+) -> EndpointDecision:
+    """2차 결과 하나를 후보·도움 필요·통과로 나누는 서버 공유 순수 정책."""
+    threshold = applied_stage2_threshold(policy, base_threshold, relaxed_threshold, relaxed_categories, keyword_route, category)
+    if probability < threshold:
+        return "pass"
+    return "needs_care" if category == "S6" else "candidate"
+
 
 class RuleRoute(NamedTuple):
     """문장 하나의 규칙 경로 결과: 규칙이 잡았는지(pass가 아님), 키워드 경로에 걸렸는지, AI 단계를 건너뛰는 가벼운 반응인지."""
@@ -120,7 +183,7 @@ class ScoredItem(NamedTuple):
     score: float
     route: RuleRoute = RuleRoute(rule_flagged=False, keyword=False)
     threshold_multiplier: float = 1.0
-    stage2_score: float | None = None
+    stage2_score: Stage2Score | None = None
 
     def is_routed(self, threshold: float) -> bool:
         """매니저나 2차 중 어디로든 올라가는지: 규칙이 잡거나, 2차로 가거나(goes_to_stage2).
@@ -137,11 +200,27 @@ class ScoredItem(NamedTuple):
             return self.route.keyword or self.score >= threshold
         return self.route.keyword or self.score >= threshold * self.threshold_multiplier - SCALED_THRESHOLD_TOLERANCE
 
-    def is_endpoint_candidate(self, threshold: float) -> bool:
-        """경로 끝 후보: 규칙 판정 또는 실제 2차 경로에서 kanana 확률이 0.5 이상인 문장."""
+    def endpoint_decision(self, threshold: float, policy: Stage2Policy = DEFAULT_STAGE2_POLICY) -> EndpointDecision:
+        """규칙을 우선하고 실제 2차 경로의 결과만 후보·도움 필요로 쓴다."""
         if self.stage2_score is None:
             raise MetricError("경로 끝 후보율을 계산하려면 모든 문장의 2차 점수가 필요합니다. --stage2-scores를 확인하세요.")
-        return self.route.rule_flagged or (self.goes_to_stage2(threshold) and self.stage2_score >= STAGE2_CANDIDATE_THRESHOLD)
+        if self.route.rule_flagged:
+            return "candidate"
+        if not self.goes_to_stage2(threshold):
+            return "pass"
+        return stage2_endpoint_decision(
+            policy.policy,
+            policy.base,
+            policy.relaxed,
+            policy.categories,
+            self.route.keyword,
+            self.stage2_score.probability,
+            self.stage2_score.category,
+        )
+
+    def is_endpoint_candidate(self, threshold: float, policy: Stage2Policy = DEFAULT_STAGE2_POLICY) -> bool:
+        """경로 끝 후보 또는 도움 필요인지. 기존 endpoint 불리언은 두 상태를 함께 뜻한다."""
+        return self.endpoint_decision(threshold, policy) != "pass"
 
 
 def validate_traffic_mix(mix: Mapping[str, float]) -> None:
@@ -160,7 +239,7 @@ def scored_pairs(
     scores: Sequence[float],
     routes: Mapping[str, RuleRoute] | None = None,
     short_rule: ShortRule | None = None,
-    stage2_scores: Mapping[str, float] | None = None,
+    stage2_scores: Mapping[str, Stage2Score] | None = None,
 ) -> list[ScoredItem]:
     """지표에 들어가는(ambiguous가 아닌) 문장과 점수·규칙 경로·임계값 배수의 묶음. routes가 없으면 규칙·키워드 없음으로 본다."""
     if len(items) != len(scores):
@@ -207,9 +286,9 @@ def stage2_rates_by_category(pairs: Sequence[ScoredItem], threshold: float) -> d
     return rates_by_category(pairs, lambda pair: pair.goes_to_stage2(threshold))
 
 
-def endpoint_candidate_rates_by_category(pairs: Sequence[ScoredItem], threshold: float) -> dict[str, float]:
+def endpoint_candidate_rates_by_category(pairs: Sequence[ScoredItem], threshold: float, policy: Stage2Policy = DEFAULT_STAGE2_POLICY) -> dict[str, float]:
     """범주별 경로 끝 후보율. 2차에 가지 않은 문장의 kanana 점수는 쓰지 않는다."""
-    return rates_by_category(pairs, lambda pair: pair.is_endpoint_candidate(threshold))
+    return rates_by_category(pairs, lambda pair: pair.is_endpoint_candidate(threshold, policy))
 
 
 def weighted_forward_rate(rates: Mapping[str, float], mix: Mapping[str, float]) -> float:
@@ -228,7 +307,9 @@ def rates_for(rates: Mapping[str, float], categories: Sequence[str] | frozenset[
     return [rates[category] for category in sorted(categories)]
 
 
-def summarize_at_chat_threshold(pairs: Sequence[ScoredItem], threshold: float, mix: Mapping[str, float]) -> dict:
+def summarize_at_chat_threshold(
+    pairs: Sequence[ScoredItem], threshold: float, mix: Mapping[str, float], stage2_policy: Stage2Policy = DEFAULT_STAGE2_POLICY
+) -> dict:
     """한 임계값에서의 요약: 2차 부하(가중 전달률), 핵심 범주 재현율(최소·평균), 허용 유형 최대 전달률, 범주별 전달률."""
     rates = forward_rates_by_category(pairs, threshold)
     critical = rates_for(rates, CRITICAL_CATEGORIES)
@@ -242,7 +323,7 @@ def summarize_at_chat_threshold(pairs: Sequence[ScoredItem], threshold: float, m
         "by_category": {category: round(rate, METRIC_DECIMALS) for category, rate in rates.items()},
     }
     if pairs and all(pair.stage2_score is not None for pair in pairs):
-        endpoint = endpoint_candidate_rates_by_category(pairs, threshold)
+        endpoint = endpoint_candidate_rates_by_category(pairs, threshold, stage2_policy)
         summary["endpoint_candidate_by_category"] = {category: round(rate, METRIC_DECIMALS) for category, rate in endpoint.items()}
     return summary
 
@@ -260,16 +341,20 @@ def add_exact_budget_result(
     summary["within_budget"] = exact <= budget
 
 
-def item_flags_at_threshold(pairs: Sequence[ScoredItem], threshold: float) -> dict[str, dict[str, bool]]:
+def item_flags_at_threshold(
+    pairs: Sequence[ScoredItem], threshold: float, stage2_policy: Stage2Policy = DEFAULT_STAGE2_POLICY
+) -> dict[str, dict[str, bool | str]]:
     """dev 결정점의 문장별 경로 결과. pairs에서 빠진 ambiguous는 자연스럽게 제외된다."""
-    return {
-        pair.item.item_id: {
+    flags: dict[str, dict[str, bool | str]] = {}
+    for pair in pairs:
+        decision = pair.endpoint_decision(threshold, stage2_policy)
+        flags[pair.item.item_id] = {
             "routed": pair.is_routed(threshold),
             "goes_to_stage2": pair.goes_to_stage2(threshold),
-            "endpoint": pair.is_endpoint_candidate(threshold),
+            "endpoint": decision != "pass",
+            "endpoint_decision": decision,
         }
-        for pair in pairs
-    }
+    return flags
 
 
 def candidate_thresholds(pairs: Sequence[ScoredItem]) -> list[float]:
@@ -319,29 +404,45 @@ def build_dev_report(
     items: Sequence[ChatEvalItem],
     scores: Sequence[float],
     mix: Mapping[str, float],
-    budget: float,
+    budget: float | None,
     routes: Mapping[str, RuleRoute] | None = None,
     short_rule: ShortRule | None = None,
-    stage2_scores: Mapping[str, float] | None = None,
+    stage2_scores: Mapping[str, Stage2Score] | None = None,
+    fixed_threshold: float | None = None,
+    stage2_policy: Stage2Policy = DEFAULT_STAGE2_POLICY,
 ) -> dict:
     """개발셋 결과: 임계값 표, 예산 임계값과 그 요약, 문장별 점수(id만), 짧은 문장 규칙. 원문은 넣지 않는다."""
+    if (budget is None) == (fixed_threshold is None):
+        raise DatasetFormatError("개발셋에는 --forward-budget 또는 --fixed-threshold 중 하나만 주세요.")
+    if fixed_threshold is not None and not (math.isfinite(fixed_threshold) and 0 <= fixed_threshold <= 1):
+        raise DatasetFormatError("--fixed-threshold는 유한한 0~1 값이어야 합니다.")
     pairs = scored_pairs(items, scores, routes, short_rule, stage2_scores)
-    threshold = select_budget_threshold(pairs, mix, budget)
-    at_threshold = None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix)
-    if threshold is not None and at_threshold is not None and stage2_scores is not None:
+    threshold: float | None
+    if fixed_threshold is not None:
+        threshold = fixed_threshold
+    else:
+        if budget is None:
+            raise DatasetFormatError("개발셋 예산 임계값을 고르려면 --forward-budget 값이 필요합니다.")
+        threshold = select_budget_threshold(pairs, mix, budget)
+    at_threshold = None if threshold is None else summarize_at_chat_threshold(pairs, threshold, mix, stage2_policy)
+    if threshold is not None and at_threshold is not None and stage2_scores is not None and budget is not None:
         add_exact_budget_result(at_threshold, pairs, threshold, mix, budget)
+    decision = {"mode": "fixed", "threshold": threshold, "at_threshold": at_threshold}
+    if fixed_threshold is None:
+        decision |= {"mode": "budget", "budget": budget}
     report = {
         "split": "dev",
         "counts": describe_counts(items, pairs),
         "auc": compute_chat_auc(pairs),
         "traffic_mix": dict(mix),
-        "threshold_table": [summarize_at_chat_threshold(pairs, value, mix) for value in CHAT_REPORT_THRESHOLDS],
-        "decision": {"mode": "budget", "budget": budget, "threshold": threshold, "at_threshold": at_threshold},
+        "threshold_table": [summarize_at_chat_threshold(pairs, value, mix, stage2_policy) for value in CHAT_REPORT_THRESHOLDS],
+        "decision": decision,
         "short_rule": None if short_rule is None else short_rule.to_dict(),
+        "stage2_policy": stage2_policy.to_dict(),
         "scores": {item.item_id: round(score, METRIC_DECIMALS) for item, score in zip(items, scores, strict=True)},
     }
     if threshold is not None and stage2_scores is not None:
-        report["item_flags"] = item_flags_at_threshold(pairs, threshold)
+        report["item_flags"] = item_flags_at_threshold(pairs, threshold, stage2_policy)
     return report
 
 
@@ -352,12 +453,13 @@ def build_holdout_report(
     threshold: float,
     routes: Mapping[str, RuleRoute] | None = None,
     short_rule: ShortRule | None = None,
-    stage2_scores: Mapping[str, float] | None = None,
+    stage2_scores: Mapping[str, Stage2Score] | None = None,
     budget: float | None = None,
+    stage2_policy: Stage2Policy = DEFAULT_STAGE2_POLICY,
 ) -> dict:
     """보류셋 결과: 개발셋에서 고른 임계값 하나의 집계와 AUC만. 임계값 표·문장별 점수는 넣지 않는다(보류셋 튜닝 방지)."""
     pairs = scored_pairs(items, scores, routes, short_rule, stage2_scores)
-    summary = summarize_at_chat_threshold(pairs, threshold, mix)
+    summary = summarize_at_chat_threshold(pairs, threshold, mix, stage2_policy)
     if stage2_scores is not None and budget is not None:
         add_exact_budget_result(summary, pairs, threshold, mix, budget)
     return {
@@ -367,20 +469,32 @@ def build_holdout_report(
         "traffic_mix": dict(mix),
         "decision": {"mode": "fixed", "threshold": threshold, "at_threshold": summary},
         "short_rule": None if short_rule is None else short_rule.to_dict(),
+        "stage2_policy": stage2_policy.to_dict(),
     }
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    """CLI 인자. 개발셋에는 --forward-budget, 보류셋에는 --dev-report를 준다."""
+    """CLI 인자. 개발셋에는 예산/고정 임계값, 보류셋에는 --dev-report를 준다."""
     parser = argparse.ArgumentParser(prog="python -m zg_stage1.evaluate_chat", description="채팅 평가셋으로 1차 분류기 평가(기본 CPU)")
     parser.add_argument("--model-dir", type=Path, action="append", required=True, help="train이 만든 출력 디렉터리(앙상블은 순서대로 여러 번 지정)")
     parser.add_argument("--eval-file", type=Path, required=True, help="채팅 평가셋 JSONL(개발셋 또는 보류셋)")
     decision = parser.add_mutually_exclusive_group(required=True)
     decision.add_argument("--forward-budget", type=probability_argument, help="F_max(개발셋에서 임계값을 고를 때)")
+    decision.add_argument("--fixed-threshold", type=closed_probability_argument, help="개발셋에서도 예산으로 고르지 않고 쓸 고정 1차 임계값")
     decision.add_argument("--dev-report", type=Path, help="같은 모델의 개발셋 결과 JSON(보류셋을 볼 때)")
     parser.add_argument("--mix-file", type=Path, help="트래픽 구성비 JSON(범주→비율, 합 1). 없으면 기본 가정")
     parser.add_argument("--rule-routes", type=Path, help="서버 규칙 평가 도구가 낸 문장별 규칙·키워드 결과 JSONL(없으면 1차만 평가)")
     parser.add_argument("--stage2-scores", type=Path, help="zg_stage2.score_eval_set이 만든 같은 평가셋의 id별 2차 점수 JSON")
+    parser.add_argument("--stage2-policy", choices=STAGE2_POLICIES, default="fixed", help="2차 후보 기준 정책(기본 fixed)")
+    parser.add_argument(
+        "--relaxed-stage2-threshold", type=closed_probability_argument, default=DEFAULT_RELAXED_STAGE2_THRESHOLD, help="완화된 2차 후보 기준(기본 0.2)"
+    )
+    parser.add_argument(
+        "--relaxed-stage2-categories",
+        type=relaxed_stage2_categories_argument,
+        default=DEFAULT_RELAXED_STAGE2_CATEGORIES,
+        help="category 정책에서 완화할 S1~S7 CSV(기본 S3,S4,S5)",
+    )
     parser.add_argument(
         "--short-rule", type=short_rule_argument, help="짧은 문장 임계값 N:k(공백 뺀 N자 이하 문장은 임계값의 k배, k>1). 보류셋은 개발셋과 같아야 한다"
     )
@@ -431,6 +545,13 @@ def require_valid_threshold(value: object, file_name: str) -> float:
     return float(value)
 
 
+def require_valid_fixed_threshold(value: object, file_name: str) -> float:
+    """고정 임계값은 0도 허용하되 불리언·NaN·범위 밖 값은 거부한다."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not (math.isfinite(value) and 0 <= value <= MAX_THRESHOLD):
+        raise DatasetFormatError(f"{file_name}의 고정 임계값({value!r})이 유한한 0~1 값이 아닙니다. 개발셋 결과를 다시 만드세요.")
+    return float(value)
+
+
 def short_rule_argument(value: str) -> ShortRule:
     """--short-rule 값 N:k를 읽는다. N은 1 이상 정수, k는 1보다 큰 유한한 수다."""
     length_text, _, multiplier_text = value.partition(":")
@@ -441,6 +562,28 @@ def short_rule_argument(value: str) -> ShortRule:
     if max_length < 1 or not (math.isfinite(multiplier) and multiplier > 1):
         raise argparse.ArgumentTypeError(f"짧은 문장 규칙의 N은 1 이상, k는 1보다 커야 합니다(받은 값: {value!r}).")
     return ShortRule(max_length, multiplier)
+
+
+def closed_probability_argument(value: str) -> float:
+    """고정·완화 기준은 0도 의미가 있으므로 유한한 [0, 1] 값만 받는다."""
+    try:
+        probability = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"{value!r}는 확률이 아닙니다.") from error
+    if not (math.isfinite(probability) and 0 <= probability <= 1):
+        raise argparse.ArgumentTypeError(f"{value!r}는 유한한 0~1 값이어야 합니다.")
+    return probability
+
+
+def relaxed_stage2_categories_argument(value: str) -> frozenset[str]:
+    """쉼표 목록을 검증한다. 빈 값·중복은 설정 오타라 조용히 고치지 않는다."""
+    categories = value.split(",")
+    if any(not category for category in categories) or len(categories) != len(set(categories)):
+        raise argparse.ArgumentTypeError("--relaxed-stage2-categories는 겹치지 않는 S1~S7 CSV여야 합니다.")
+    unknown = sorted(set(categories) - STAGE2_CATEGORIES)
+    if unknown:
+        raise argparse.ArgumentTypeError(f"모르는 2차 범주가 있습니다: {', '.join(unknown)}. S1~S7만 쓰세요.")
+    return frozenset(categories)
 
 
 def require_same_short_rule(report: Mapping, short_rule: ShortRule | None, file_name: str) -> None:
@@ -461,6 +604,15 @@ def require_same_traffic_mix(report: Mapping, traffic_mix: Mapping[str, float] |
         raise DatasetFormatError(f"{file_name}과 트래픽 구성비가 다릅니다. 개발셋을 평가할 때 쓴 --mix-file을 그대로 주세요.")
 
 
+def require_same_stage2_policy(report: Mapping, stage2_policy: Stage2Policy | None, file_name: str) -> None:
+    """보류셋은 개발셋 정책을 따르며, 필드가 없는 3차 보고서는 기본 fixed로 해석한다."""
+    if stage2_policy is None:
+        return
+    actual = DEFAULT_STAGE2_POLICY.to_dict() if "stage2_policy" not in report else report.get("stage2_policy")
+    if actual != stage2_policy.to_dict():
+        raise DatasetFormatError(f"{file_name}과 2차 후보 기준 정책이 다릅니다. 개발셋의 --stage2-policy와 완화 기준·범주를 그대로 주세요.")
+
+
 def read_dev_threshold(
     dev_report_path: Path,
     model_weights_sha256: str | Sequence[str],
@@ -468,6 +620,7 @@ def read_dev_threshold(
     short_rule: ShortRule | None = None,
     traffic_mix: Mapping[str, float] | None = None,
     stage2_model_identifier: str | None = None,
+    stage2_policy: Stage2Policy | None = None,
 ) -> float:
     """개발셋 결과에서 임계값을 읽는다. 개발셋 결과가 아니거나, 다른 모델의 결과거나, 임계값이 잘못됐으면 오류다.
 
@@ -475,8 +628,8 @@ def read_dev_threshold(
     1차만으로 고른 임계값을 규칙과 합친 경로에 쓰거나, 다른 키워드 목록으로 만든 규칙 결과와 섞으면 2차 부하가 예산과 맞지 않기 때문이다.
     """
     report = json.loads(dev_report_path.read_text(encoding="utf-8"))
-    if report.get("split") != "dev" or report.get("decision", {}).get("mode") != "budget":
-        raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 예산 결과가 아닙니다. --forward-budget으로 만든 개발셋 결과를 주세요.")
+    if report.get("split") != "dev" or report.get("decision", {}).get("mode") not in {"budget", "fixed"}:
+        raise DatasetFormatError(f"{dev_report_path.name}은 개발셋 결과가 아닙니다. --forward-budget 또는 --fixed-threshold로 만든 개발셋 결과를 주세요.")
     if report.get("model_weights_sha256") != model_weights_sha256:
         raise DatasetFormatError(f"{dev_report_path.name}은 다른 모델의 결과입니다. 같은 --model-dir로 개발셋을 먼저 평가하세요.")
     dev_routes = report.get("rule_routes")
@@ -488,17 +641,23 @@ def read_dev_threshold(
         raise DatasetFormatError(message)
     require_same_short_rule(report, short_rule, dev_report_path.name)
     require_same_traffic_mix(report, traffic_mix, dev_report_path.name)
+    require_same_stage2_policy(report, stage2_policy, dev_report_path.name)
     if stage2_model_identifier is not None:
         stage2 = report.get("stage2_scores")
         if not isinstance(stage2, dict) or stage2.get("model_identifier") != stage2_model_identifier:
             raise DatasetFormatError(f"{dev_report_path.name}과 2차 모델 식별자가 다릅니다. 개발셋과 같은 --stage2-scores 모델을 쓰세요.")
-    return require_valid_threshold(report["decision"].get("threshold"), dev_report_path.name)
+    decision = report["decision"]
+    if decision.get("mode") == "fixed":
+        return require_valid_fixed_threshold(decision.get("threshold"), dev_report_path.name)
+    return require_valid_threshold(decision.get("threshold"), dev_report_path.name)
 
 
-def read_dev_budget(dev_report_path: Path) -> float:
+def read_dev_budget(dev_report_path: Path) -> float | None:
     """보류셋 정확 예산 판정에 쓸 dev 보고서의 예산을 읽는다."""
     report = json.loads(dev_report_path.read_text(encoding="utf-8"))
     decision = report.get("decision")
+    if isinstance(decision, dict) and decision.get("mode") == "fixed":
+        return None
     value = decision.get("budget") if isinstance(decision, dict) else None
     if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(float(value)) or not 0 <= float(value) <= 1:
         raise DatasetFormatError(f"{dev_report_path.name}의 가중 전달 예산이 유한한 0~1 값이 아닙니다. 개발셋을 다시 평가하세요.")
@@ -549,8 +708,8 @@ def load_rule_routes(path: Path, items: Sequence[ChatEvalItem], eval_path: Path)
     return routes, ensure_routes_match_eval_file(records, eval_path, path.name)
 
 
-def load_stage2_scores(path: Path, items: Sequence[ChatEvalItem], eval_path: Path | None = None) -> tuple[dict[str, float], dict[str, str]]:
-    """2차 점수 파일의 기준·모델·확률과 평가셋 id 집합을 검증한다."""
+def load_stage2_scores(path: Path, items: Sequence[ChatEvalItem], eval_path: Path | None = None) -> tuple[dict[str, Stage2Score], dict[str, str]]:
+    """2차 점수 파일의 기준·모델·확률·범주와 평가셋 id 집합을 검증한다."""
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
@@ -569,7 +728,7 @@ def load_stage2_scores(path: Path, items: Sequence[ChatEvalItem], eval_path: Pat
         expected_hash = compute_file_sha256(eval_path)
         if not isinstance(provenance, dict) or provenance.get("sha256") != expected_hash:
             raise DatasetFormatError(f"{path.name}은 이 평가셋 파일의 점수가 아닙니다. 같은 --eval-file로 score_eval_set을 다시 실행하세요.")
-    scores: dict[str, float] = {}
+    scores: dict[str, Stage2Score] = {}
     for identifier_key, value in raw_scores.items():
         probability = value.get("unsafe_probability") if isinstance(value, dict) else None
         category = value.get("category") if isinstance(value, dict) else None
@@ -578,19 +737,28 @@ def load_stage2_scores(path: Path, items: Sequence[ChatEvalItem], eval_path: Pat
         numeric_probability = float(probability)
         if not math.isfinite(numeric_probability) or not 0 <= numeric_probability <= 1:
             raise DatasetFormatError(f"{path.name}: id {identifier_key!r}의 2차 확률이 유한한 0~1 값이 아닙니다. score_eval_set을 다시 실행하세요.")
-        if category not in {f"S{index}" for index in range(1, 8)}:
+        if category not in STAGE2_CATEGORIES:
             raise DatasetFormatError(f"{path.name}: id {identifier_key!r}의 2차 범주가 S1~S7이 아닙니다. score_eval_set을 다시 실행하세요.")
-        scores[str(identifier_key)] = numeric_probability
+        scores[str(identifier_key)] = Stage2Score(numeric_probability, category)
     metadata = {"name": path.name, "sha256": compute_file_sha256(path), "model_identifier": identifier}
     return scores, metadata
 
 
 def require_matching_decision(arguments: argparse.Namespace, split: str) -> None:
-    """개발셋에는 예산, 보류셋에는 개발셋 결과를 요구한다. 보류셋으로 임계값을 고르지 못하게 하기 위해서다."""
-    if split == "holdout" and arguments.dev_report is None:
+    """개발셋에는 예산/고정값 하나, 보류셋에는 개발셋 결과만 요구한다."""
+    budget = getattr(arguments, "forward_budget", None)
+    fixed = getattr(arguments, "fixed_threshold", None)
+    dev_report = getattr(arguments, "dev_report", None)
+    if budget is not None and fixed is not None:
+        raise DatasetFormatError("--forward-budget과 --fixed-threshold는 함께 쓸 수 없습니다. 하나만 고르세요.")
+    if split == "holdout" and dev_report is None:
         raise DatasetFormatError("보류셋으로 임계값을 고르지 않습니다. 같은 모델의 개발셋 결과를 --dev-report로 주세요.")
-    if split == "dev" and arguments.forward_budget is None:
-        raise DatasetFormatError("개발셋에는 --forward-budget(F_max)을 주세요.")
+    if split == "holdout" and (budget is not None or fixed is not None):
+        raise DatasetFormatError("보류셋에는 --forward-budget이나 --fixed-threshold 대신 개발셋의 --dev-report를 주세요.")
+    if split == "dev" and (budget is None) == (fixed is None):
+        raise DatasetFormatError("개발셋에는 --forward-budget(F_max) 또는 --fixed-threshold 중 하나만 주세요.")
+    if split == "dev" and dev_report is not None:
+        raise DatasetFormatError("개발셋에는 --dev-report를 쓰지 않습니다. 예산이나 고정 임계값을 주세요.")
 
 
 def load_traffic_mix(path: Path | None) -> dict[str, float]:
@@ -598,6 +766,16 @@ def load_traffic_mix(path: Path | None) -> dict[str, float]:
     mix = DEFAULT_TRAFFIC_MIX if path is None else json.loads(path.read_text(encoding="utf-8"))
     validate_traffic_mix(mix)
     return dict(mix)
+
+
+def stage2_policy_from_arguments(arguments: argparse.Namespace) -> Stage2Policy:
+    """CLI 기본값과 직접 만든 테스트 Namespace를 한 정책 값으로 모은다."""
+    return Stage2Policy(
+        getattr(arguments, "stage2_policy", "fixed"),
+        STAGE2_CANDIDATE_THRESHOLD,
+        getattr(arguments, "relaxed_stage2_threshold", DEFAULT_RELAXED_STAGE2_THRESHOLD),
+        getattr(arguments, "relaxed_stage2_categories", DEFAULT_RELAXED_STAGE2_CATEGORIES),
+    )
 
 
 def resolve_output_path(arguments: argparse.Namespace, split: str) -> Path:
@@ -724,13 +902,27 @@ def build_report_for_split(arguments: argparse.Namespace, items: Sequence[ChatEv
     stage2_scores, stage2_provenance = (None, None) if stage2_path is None else load_stage2_scores(stage2_path, items, arguments.eval_file)
     if stage2_provenance is not None:
         provenance["stage2_scores"] = stage2_provenance
+    stage2_policy = stage2_policy_from_arguments(arguments)
     if items[0].split == "holdout":
         stage2_identifier = None if stage2_provenance is None else stage2_provenance["model_identifier"]
-        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule, mix, stage2_identifier)
+        threshold = read_dev_threshold(arguments.dev_report, model_sha, policy, arguments.short_rule, mix, stage2_identifier, stage2_policy)
         budget = read_dev_budget(arguments.dev_report) if stage2_scores is not None else None
-        report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes, arguments.short_rule, stage2_scores, budget)
+        report = build_holdout_report(items, score_items(arguments, items), mix, threshold, routes, arguments.short_rule, stage2_scores, budget, stage2_policy)
         return report | provenance | {"dev_report": describe_file_provenance(arguments.dev_report)}
-    return build_dev_report(items, score_items(arguments, items), mix, arguments.forward_budget, routes, arguments.short_rule, stage2_scores) | provenance
+    return (
+        build_dev_report(
+            items,
+            score_items(arguments, items),
+            mix,
+            arguments.forward_budget,
+            routes,
+            arguments.short_rule,
+            stage2_scores,
+            arguments.fixed_threshold,
+            stage2_policy,
+        )
+        | provenance
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -738,6 +930,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     arguments = build_argument_parser().parse_args(argv)
     items = load_validated_eval_set(arguments.eval_file)
     require_matching_decision(arguments, items[0].split)
+    if arguments.stage2_policy != "fixed" and arguments.stage2_scores is None:
+        raise DatasetFormatError("완화된 --stage2-policy를 평가하려면 문장별 --stage2-scores를 함께 주세요.")
     if arguments.raw_scores_dir is not None and items[0].split != "holdout":
         raise DatasetFormatError("--raw-scores-dir은 봉인 보류셋 판정 스크립에서만 쓸 수 있습니다.")
     if arguments.raw_scores_dir is not None and arguments.raw_scores_dir.exists():

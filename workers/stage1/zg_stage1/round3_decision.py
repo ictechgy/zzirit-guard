@@ -19,9 +19,11 @@ from zg_stage1.chat_eval_data import CRITICAL_CATEGORIES, ChatEvalItem, load_cha
 from zg_stage1.data import compute_file_sha256
 from zg_stage1.errors import DatasetFormatError, OutputExistsError, run_command_line
 from zg_stage1.evaluate_chat import (
+    DEFAULT_STAGE2_POLICY,
     STAGE2_CANDIDATE_THRESHOLD,
     RuleRoute,
     ShortRule,
+    Stage2Score,
     load_rule_routes,
     load_stage2_scores,
     weighted_forward_rate,
@@ -400,8 +402,13 @@ def load_report_item_flags(report: Mapping[str, Any], items: Sequence[ChatEvalIt
     result: dict[str, dict[str, bool]] = {}
     required = {"routed", "goes_to_stage2", "endpoint"}
     for identifier, value in raw.items():
-        if not isinstance(value, dict) or set(value) != required or any(not isinstance(value[key], bool) for key in required):
+        if not isinstance(value, dict) or not required <= set(value) or any(not isinstance(value[key], bool) for key in required):
             raise DatasetFormatError(f"{file_name}: id {identifier!r}의 item_flags가 routed·goes_to_stage2·endpoint 불리언이 아닙니다.")
+        endpoint_decision = value.get("endpoint_decision")
+        if endpoint_decision is not None and (
+            endpoint_decision not in {"candidate", "needs_care", "pass"} or value["endpoint"] != (endpoint_decision != "pass")
+        ):
+            raise DatasetFormatError(f"{file_name}: id {identifier!r}의 endpoint와 endpoint_decision 관계가 모순됩니다.")
         if (value["goes_to_stage2"] or value["endpoint"]) and not value["routed"]:
             raise DatasetFormatError(f"{file_name}: id {identifier!r}의 item_flags 경로 관계가 모순됩니다.")
         result[str(identifier)] = {key: value[key] for key in required}
@@ -463,6 +470,8 @@ def validate_dev_report(
     require_equal(decision.get("budget"), FORWARD_BUDGET, f"{file_name}의 가중 전달 예산")
     require_equal(dict(expected_short_rule), REQUIRED_SHORT_RULE, "판정 짧은 문장 규칙")
     require_equal(report.get("short_rule"), dict(expected_short_rule), f"{file_name}의 짧은 문장 규칙")
+    if "stage2_policy" in report:
+        require_equal(report.get("stage2_policy"), DEFAULT_STAGE2_POLICY.to_dict(), f"{file_name}의 2차 후보 기준 정책")
     routes = report.get("rule_routes")
     require_equal(routes.get("policy_sha256") if isinstance(routes, dict) else None, expected_policy, f"{file_name}의 규칙 지문")
     stage2 = report.get("stage2_scores")
@@ -815,11 +824,11 @@ def build_bootstrap_report(
     return {"winner_vs_other_qualified": comparisons, "friendly_profanity_mechanism": mechanism, "seed": BOOTSTRAP_SEED}
 
 
-def standalone_stage2_rates(items: Sequence[ChatEvalItem], scores: Mapping[str, float]) -> dict[str, float]:
+def standalone_stage2_rates(items: Sequence[ChatEvalItem], scores: Mapping[str, Stage2Score]) -> dict[str, float]:
     """1차를 거치지 않은 2차 단독 후보율을 범주별로 계산한다(진단 전용)."""
     grouped = items_by_category([item for item in items if item.is_scored])
     return {
-        category: round(sum(scores[item.item_id] >= STAGE2_CANDIDATE_THRESHOLD for item in members) / len(members), 4)
+        category: round(sum(scores[item.item_id].probability >= STAGE2_CANDIDATE_THRESHOLD for item in members) / len(members), 4)
         for category, members in sorted(grouped.items())
     }
 

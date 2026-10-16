@@ -1,5 +1,7 @@
 # 워커 계약 v1
 
+`stage2-policy-vectors.json`은 Python 평가와 서버가 경로 끝 판정을 같은 규칙 우선순위·2차 경계값·S6 우선순위로 구현했는지 함께 검사하는 벡터다. `rule_decision`이 `candidate`이면 `critical` 같은 규칙이 이미 잡은 문장이므로 2차 결과와 관계없이 후보이며 AI 단계로 가지 않는다. `null`이면 규칙 판정이 없다. `keyword-route-matched-below-relaxed`는 키워드 경로에서도 0.2 바로 아래가 통과인지 고정한다.
+
 서버가 1차(KcELECTRA)·2차(kanana) 워커를 부르는 약속이다. 두 워커와 서버 클라이언트가 이 문서와 `v1/`의 시험 사례를 함께 따른다. 모델을 바꿔도 이 계약이 같으면 서버는 그대로 둔다([설계 스펙 §5.3](../../docs/superpowers/specs/2026-10-11-zzirit-guard-design.md)).
 
 ## 연결

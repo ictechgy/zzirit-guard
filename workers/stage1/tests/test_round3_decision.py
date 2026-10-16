@@ -301,6 +301,24 @@ def test_dev_report_requires_fixed_budget_exact_load_and_flag_aggregates() -> No
         validate_fixture(mismatched_rates, items)
 
 
+def test_dev_report_accepts_only_default_fixed_stage2_policy_when_present() -> None:
+    """3차 개발 보고서의 선택 필드가 있으면 fixed 0.5/0.2/S3·S4·S5와 정확히 같아야 한다."""
+    items, report = dev_validation_fixture()
+    report["stage2_policy"] = {
+        "policy": "fixed",
+        "base": 0.5,
+        "relaxed": 0.2,
+        "categories": ["S3", "S4", "S5"],
+    }
+    validate_fixture(report, items)
+
+    for key, value in [("policy", "category"), ("base", 0.4), ("relaxed", 0.1), ("categories", ["S3", "S4"])]:
+        invalid = copy.deepcopy(report)
+        invalid["stage2_policy"][key] = value
+        with pytest.raises(DatasetFormatError, match="2차 후보 기준 정책"):
+            validate_fixture(invalid, items)
+
+
 def test_required_equal_rejects_two_missing_values_and_holdout_constants_are_fixed() -> None:
     """필수 키가 양쪽에 다 없어도 일치로 취급하지 않고, manifest 상수도 바꾸지 못한다."""
     with pytest.raises(DatasetFormatError):
