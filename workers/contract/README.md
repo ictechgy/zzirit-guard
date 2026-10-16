@@ -1,5 +1,7 @@
 # 워커 계약 v1
 
+`stage2-policy-vectors.json`은 Python 평가와 서버가 2차 후보 기준 정책을 같은 경계값·S6 우선순위로 구현했는지 함께 검사하는 벡터다.
+
 서버가 1차(KcELECTRA)·2차(kanana) 워커를 부르는 약속이다. 두 워커와 서버 클라이언트가 이 문서와 `v1/`의 시험 사례를 함께 따른다. 모델을 바꿔도 이 계약이 같으면 서버는 그대로 둔다([설계 스펙 §5.3](../../docs/superpowers/specs/2026-10-11-zzirit-guard-design.md)).
 
 ## 연결
