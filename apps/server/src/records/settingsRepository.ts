@@ -1,4 +1,4 @@
-import type { SettingsDto } from "@zzirit-guard/shared";
+import type { SettingsDto, Stage2Policy } from "@zzirit-guard/shared";
 import type { Database } from "../db/database.js";
 import { silentLogger, type Logger } from "../logger.js";
 
@@ -38,16 +38,26 @@ interface FractionSettingRule {
   defaultValue: number;
 }
 
+/** 문자열 열거 설정. DB CHECK와 API 검증이 같은 값만 받게 한다. */
+interface EnumSettingRule {
+  kind: "enum";
+  column: string;
+  values: readonly string[];
+  defaultValue: string;
+}
+
 /**
  * 설정별 규칙. 열 이름은 이 표에서만 가져와 SQL 문자열 조립을 안전하게 유지한다.
  * 1차 임계값은 모델마다 맞는 값이 달라 운영자가 정한다(재학습한 모델은 0.003~0.03 근처, docs/ml/2026-10-14-stage1-retrain-results.md).
  */
-const SETTING_RULES: Record<keyof SettingsDto, IntegerSettingRule | FractionSettingRule> = {
+const SETTING_RULES: Record<keyof SettingsDto, IntegerSettingRule | FractionSettingRule | EnumSettingRule> = {
   breakerPerMinute: { kind: "integer", column: "breaker_per_minute", min: 1, max: 1000 },
   retentionDaysContent: { kind: "integer", column: "retention_days_content", min: 1, max: 365 },
   retentionDaysAudit: { kind: "integer", column: "retention_days_audit", min: 1, max: 365 },
   stage1Threshold: { kind: "fraction", column: "stage1_threshold", includesOne: false, defaultValue: 0.05 },
   candidateThreshold: { kind: "fraction", column: "candidate_threshold", includesOne: false, defaultValue: 0.5 },
+  stage2Policy: { kind: "enum", column: "stage2_policy", values: ["fixed", "keyword_route", "category"], defaultValue: "category" },
+  relaxedCandidateThreshold: { kind: "fraction", column: "relaxed_candidate_threshold", includesOne: false, defaultValue: 0.2 },
   sureThreshold: { kind: "fraction", column: "sure_threshold", includesOne: true, defaultValue: 0.99 },
 };
 
@@ -59,6 +69,8 @@ interface SettingRow {
   retention_days_audit: number;
   stage1_threshold: unknown;
   candidate_threshold: unknown;
+  stage2_policy: unknown;
+  relaxed_candidate_threshold: unknown;
   sure_threshold: unknown;
 }
 
@@ -110,27 +122,42 @@ function readSettings(database: Database, channelId: string, logger: Logger): Ch
     breakerPerMinute: row.breaker_per_minute,
     retentionDaysContent: row.retention_days_content,
     retentionDaysAudit: row.retention_days_audit,
-    ...readThresholds(row, logger),
+    ...readAiSettings(row, logger),
   };
 }
 
-/** 임계값 세 개. */
-type Thresholds = Pick<SettingsDto, "stage1Threshold" | "candidateThreshold" | "sureThreshold">;
+/** 숫자 임계값 네 개. */
+type Thresholds = Pick<SettingsDto, "stage1Threshold" | "candidateThreshold" | "relaxedCandidateThreshold" | "sureThreshold">;
+type AiSettings = Thresholds & Pick<SettingsDto, "stage2Policy">;
 
 /**
  * DB의 임계값을 검사해 읽는다. 하나라도 깨졌거나 후보 > 확실이면 그 값(관계가 깨졌으면 두 값)을 기본값으로 바꾸고 경고한다.
  * @param row setting 행
  * @param logger 경고 기록기
  */
-function readThresholds(row: SettingRow, logger: Logger): Thresholds {
+function readAiSettings(row: SettingRow, logger: Logger): AiSettings {
   const stored: Thresholds = {
     stage1Threshold: storedFraction(row.stage1_threshold, "stage1Threshold", logger),
     candidateThreshold: storedFraction(row.candidate_threshold, "candidateThreshold", logger),
+    relaxedCandidateThreshold: storedFraction(row.relaxed_candidate_threshold, "relaxedCandidateThreshold", logger),
     sureThreshold: storedFraction(row.sure_threshold, "sureThreshold", logger),
   };
-  if (stored.candidateThreshold <= stored.sureThreshold) return stored;
+  const stage2Policy = storedStage2Policy(row.stage2_policy, logger);
+  if (stored.candidateThreshold <= stored.sureThreshold) return { ...stored, stage2Policy };
   logger.warn("저장된 후보 임계값이 확실 임계값보다 커서 둘 다 기본값으로 씁니다. 설정 화면에서 다시 저장하세요.");
-  return { ...stored, candidateThreshold: fractionRule("candidateThreshold").defaultValue, sureThreshold: fractionRule("sureThreshold").defaultValue };
+  return {
+    ...stored, stage2Policy,
+    candidateThreshold: fractionRule("candidateThreshold").defaultValue,
+    sureThreshold: fractionRule("sureThreshold").defaultValue,
+  };
+}
+
+/** 저장된 정책이 깨졌으면 채택된 범주 완화로 안전하게 읽고 경고한다. */
+function storedStage2Policy(value: unknown, logger: Logger): Stage2Policy {
+  const rule = SETTING_RULES.stage2Policy as EnumSettingRule;
+  if (typeof value === "string" && rule.values.includes(value)) return value as Stage2Policy;
+  logger.warn("저장된 2차 후보 정책이 올바르지 않아 기본값으로 씁니다. 설정 화면에서 다시 저장하세요.");
+  return rule.defaultValue as Stage2Policy;
 }
 
 /**
@@ -163,11 +190,14 @@ function isValidFraction(value: unknown, rule: FractionSettingRule): value is nu
  * @param channelId 채널 ID
  */
 function readStoredThresholds(database: Database, channelId: string): Thresholds {
-  const row = database.prepare("SELECT stage1_threshold, candidate_threshold, sure_threshold FROM setting WHERE channel_id = ?").get(channelId) as
-    | Pick<SettingRow, "stage1_threshold" | "candidate_threshold" | "sure_threshold">
+  const row = database.prepare("SELECT stage1_threshold, candidate_threshold, relaxed_candidate_threshold, sure_threshold FROM setting WHERE channel_id = ?").get(channelId) as
+    | Pick<SettingRow, "stage1_threshold" | "candidate_threshold" | "relaxed_candidate_threshold" | "sure_threshold">
     | undefined;
   if (!row) throw new SettingsValidationError("채널 설정이 없습니다. 스트리머가 먼저 채널을 연결하세요.");
-  return { stage1Threshold: Number(row.stage1_threshold), candidateThreshold: Number(row.candidate_threshold), sureThreshold: Number(row.sure_threshold) };
+  return {
+    stage1Threshold: Number(row.stage1_threshold), candidateThreshold: Number(row.candidate_threshold),
+    relaxedCandidateThreshold: Number(row.relaxed_candidate_threshold), sureThreshold: Number(row.sure_threshold),
+  };
 }
 
 /**
@@ -196,6 +226,9 @@ function writeSetting(database: Database, channelId: string, key: keyof Settings
   }
   if (rule.kind === "fraction" && !isValidFraction(value, rule)) {
     throw new SettingsValidationError(`${key}는 0보다 크고 1${rule.includesOne ? " 이하" : "보다 작은"} 수여야 합니다.`);
+  }
+  if (rule.kind === "enum" && (typeof value !== "string" || !rule.values.includes(value))) {
+    throw new SettingsValidationError(`${key}는 ${rule.values.join("·")} 중 하나여야 합니다.`);
   }
   database.prepare(`UPDATE setting SET ${rule.column} = ? WHERE channel_id = ?`).run(value, channelId);
 }

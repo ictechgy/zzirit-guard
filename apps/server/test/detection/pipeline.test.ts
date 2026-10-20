@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "../../src/chat/chatEvent.js";
 import { openDatabase } from "../../src/db/database.js";
@@ -115,6 +117,21 @@ describe("DetectionPipeline", () => {
     const added = rules.add("c1", "critical", "핵심낱말", "m");
     const result = pipeline.evaluate(chat("핵심낱말이 있는 문장"));
     expect(result).toMatchObject({ decision: "candidate", reason: `rule:critical:${added.id}`, aiEligible: false, keywordRouteId: null });
+  });
+
+  it("공유 정책 벡터의 규칙 판정은 AI 단계로 보내지 않는다", () => {
+    const path = fileURLToPath(new URL("../../../../workers/contract/stage2-policy-vectors.json", import.meta.url));
+    const vectors = (JSON.parse(readFileSync(path, "utf8")) as { vectors: Array<{ rule_decision: string | null; expected_goes_to_stage2?: boolean; expected: string }> }).vectors;
+    const ruleVectors = vectors.filter(({ rule_decision }) => rule_decision !== null);
+    expect(ruleVectors).toHaveLength(1);
+    const added = rules.add("c1", "critical", "계약핵심낱말", "m");
+    const result = pipeline.evaluate(chat("계약핵심낱말"));
+    expect(result).toMatchObject({
+      decision: ruleVectors[0]?.expected,
+      reason: `rule:critical:${added.id}`,
+      aiEligible: ruleVectors[0]?.expected_goes_to_stage2,
+      keywordRouteId: null,
+    });
   });
 
   it("핵심 규칙은 허용어에게 지고, 금칙어 약·광고·협박보다 느리게 적용된다", () => {
